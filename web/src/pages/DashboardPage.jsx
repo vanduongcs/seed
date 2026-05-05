@@ -1,95 +1,202 @@
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Box, Typography, Grid, Card, CardContent, Button,
-  Avatar, Chip, alpha,
+  Box, Typography, Grid, Card, CardContent, Button, Stack,
+  Divider, Chip, alpha,
 } from '@mui/material';
 import {
-  Chat as ChatIcon, TrendingUp, AutoAwesome, ArrowForward,
+  CameraAltOutlined, UploadFileOutlined, ImageSearchOutlined,
+  Straighten, GrainOutlined, CalendarMonthOutlined,
 } from '@mui/icons-material';
-import { useAuthStore } from '@/store/auth.store.js';
 
-const StatCard = ({ label, value, color }) => (
+const usageStats = [
+  { label: 'Lượt dùng tháng này', value: '128', note: 'Tháng hiện tại', icon: <CalendarMonthOutlined /> },
+  { label: 'Lượt dùng năm nay', value: '1.426', note: 'Tổng theo năm', icon: <CalendarMonthOutlined /> },
+  { label: 'Tổng lượt dùng', value: '3.918', note: 'Từ khi triển khai', icon: <ImageSearchOutlined /> },
+  { label: 'Hạt đã đo đạc', value: '18.240', note: 'Mẫu hợp lệ', icon: <GrainOutlined /> },
+  { label: 'Chiều dài TB', value: '7,42 mm', note: 'Theo dữ liệu gần nhất', icon: <Straighten /> },
+  { label: 'Chiều rộng TB', value: '3,18 mm', note: 'Theo dữ liệu gần nhất', icon: <Straighten /> },
+];
+
+const recentMetrics = [
+  { label: 'Số hạt nhận dạng', value: '124' },
+  { label: 'Tỉ lệ segment', value: '96,8%' },
+  { label: 'Dài nhỏ nhất', value: '5,12 mm' },
+  { label: 'Dài lớn nhất', value: '9,84 mm' },
+];
+
+const StatCard = ({ label, value, note, icon }) => (
   <Card sx={{ height: '100%' }}>
-    <CardContent sx={{ p: 3 }}>
-      <Typography variant="body2" color="text.secondary" mb={1}>{label}</Typography>
-      <Typography variant="h4" fontWeight={700} sx={{ color }}>{value}</Typography>
-    </CardContent>
-  </Card>
-);
-
-const FeatureCard = ({ icon, title, desc, action, onClick }) => (
-  <Card sx={{ height: '100%', cursor: 'pointer', transition: 'all 0.2s', '&:hover': { transform: 'translateY(-4px)', borderColor: (t) => alpha(t.palette.primary.main, 0.4) } }} onClick={onClick}>
-    <CardContent sx={{ p: 3 }}>
-      <Box sx={{ mb: 2 }}>{icon}</Box>
-      <Typography variant="h6" fontWeight={600} mb={1}>{title}</Typography>
-      <Typography variant="body2" color="text.secondary" mb={2}>{desc}</Typography>
-      <Button endIcon={<ArrowForward />} size="small" sx={{ px: 0 }}>{action}</Button>
+    <CardContent sx={{ p: 2.5 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mb: 1.5 }}>
+        <Typography variant="body2" color="text.secondary">{label}</Typography>
+        <Box sx={{
+          width: 32,
+          height: 32,
+          borderRadius: 1,
+          bgcolor: (t) => alpha(t.palette.primary.main, 0.09),
+          color: 'primary.main',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          {icon}
+        </Box>
+      </Box>
+      <Typography variant="h5" fontWeight={700}>{value}</Typography>
+      <Typography variant="caption" color="text.secondary">{note}</Typography>
     </CardContent>
   </Card>
 );
 
 export default function DashboardPage() {
-  const user = useAuthStore((s) => s.user);
-  const navigate = useNavigate();
+  const videoRef = useRef(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [cameraError, setCameraError] = useState('');
+
+  useEffect(() => () => {
+    if (videoRef.current?.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  const handleCamera = async () => {
+    setCameraError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setCameraActive(true);
+    } catch {
+      setCameraError('Không thể kết nối camera. Kiểm tra quyền truy cập hoặc thiết bị.');
+    }
+  };
+
+  const handleFile = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
+    setFileName(file.name);
+    setCameraActive(false);
+  };
 
   return (
-    <Box>
-      {/* Header */}
-      <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', gap: 2 }}>
-        <Avatar sx={{ width: 52, height: 52, bgcolor: 'primary.main', fontSize: 20, fontWeight: 700 }}>
-          {user?.name?.[0]?.toUpperCase() || 'U'}
-        </Avatar>
-        <Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="h5" fontWeight={700}>Xin chào, {user?.name}! 👋</Typography>
-            <Chip label={user?.role} size="small" color="primary" variant="outlined" sx={{ height: 22, fontSize: 11 }} />
-          </Box>
-          <Typography variant="body2" color="text.secondary">Hôm nay bạn muốn làm gì?</Typography>
-        </Box>
+    <Box sx={{ maxWidth: 1200 }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h5" fontWeight={700} mb={0.75}>Trang chủ</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Theo dõi lượt sử dụng, dữ liệu đo đạc và xử lý ảnh hạt giống.
+        </Typography>
       </Box>
 
-      {/* Stats */}
-      <Grid container spacing={2} mb={4}>
-        {[
-          { label: 'Cuộc trò chuyện', value: '—', color: '#A78BFA' },
-          { label: 'Tin nhắn hôm nay', value: '—', color: '#67E8F9' },
-          { label: 'AI Provider', value: 'OpenAI', color: '#4ADE80' },
-        ].map((s) => (
-          <Grid item xs={12} sm={4} key={s.label}>
-            <StatCard {...s} />
+      <Grid container spacing={2} mb={3}>
+        {usageStats.map((item) => (
+          <Grid item xs={12} sm={6} lg={4} key={item.label}>
+            <StatCard {...item} />
           </Grid>
         ))}
       </Grid>
 
-      {/* Feature Cards */}
-      <Typography variant="h6" fontWeight={600} mb={2}>Tính năng</Typography>
       <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={4}>
-          <FeatureCard
-            icon={<Box sx={{ width: 44, height: 44, borderRadius: 2, background: 'linear-gradient(135deg, #7C3AED, #A78BFA)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ChatIcon sx={{ color: '#fff' }} /></Box>}
-            title="AI Chat"
-            desc="Trò chuyện với AI thông minh, hỗ trợ OpenAI, Gemini và Ollama"
-            action="Bắt đầu chat"
-            onClick={() => navigate('/chat')}
-          />
+        <Grid item xs={12} lg={7}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
+                <Box>
+                  <Typography variant="h6" fontWeight={700}>Xử lý ảnh đo đạc</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Kết nối camera hoặc import ảnh để nhận dạng, segment và đo thông số hạt.
+                  </Typography>
+                </Box>
+                <Chip label="Sẵn sàng" color="success" variant="outlined" size="small" />
+              </Box>
+
+              <Box sx={{
+                minHeight: 320,
+                border: '1px dashed',
+                borderColor: 'divider',
+                borderRadius: 1.5,
+                bgcolor: '#FBFCFA',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                mb: 2,
+              }}>
+                {previewUrl ? (
+                  <Box component="img" src={previewUrl} alt={fileName} sx={{ width: '100%', height: 320, objectFit: 'contain' }} />
+                ) : (
+                  <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', maxHeight: 320, display: cameraActive ? 'block' : 'none' }} />
+                )}
+                {!previewUrl && !cameraActive && (
+                  <Stack alignItems="center" spacing={1.25} sx={{ color: 'text.secondary', textAlign: 'center', px: 2 }}>
+                    <ImageSearchOutlined sx={{ fontSize: 46, color: 'primary.main' }} />
+                    <Typography fontWeight={650} color="text.primary">Chưa có ảnh đầu vào</Typography>
+                    <Typography variant="body2">Chọn camera hoặc import file ảnh hạt giống để bắt đầu xử lý.</Typography>
+                  </Stack>
+                )}
+              </Box>
+
+              {cameraError && (
+                <Typography variant="body2" color="error.main" mb={1.5}>{cameraError}</Typography>
+              )}
+
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <Button variant="contained" startIcon={<CameraAltOutlined />} onClick={handleCamera}>
+                  Kết nối camera
+                </Button>
+                <Button variant="outlined" component="label" startIcon={<UploadFileOutlined />}>
+                  Import ảnh
+                  <input hidden type="file" accept="image/*" onChange={handleFile} />
+                </Button>
+                <Button variant="outlined" startIcon={<ImageSearchOutlined />} disabled={!previewUrl && !cameraActive}>
+                  Chạy nhận dạng
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <FeatureCard
-            icon={<Box sx={{ width: 44, height: 44, borderRadius: 2, background: 'linear-gradient(135deg, #06B6D4, #67E8F9)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><TrendingUp sx={{ color: '#fff' }} /></Box>}
-            title="Phân tích"
-            desc="Xem thống kê và lịch sử sử dụng của bạn"
-            action="Xem thống kê"
-            onClick={() => {}}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <FeatureCard
-            icon={<Box sx={{ width: 44, height: 44, borderRadius: 2, background: 'linear-gradient(135deg, #F59E0B, #FCD34D)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><AutoAwesome sx={{ color: '#fff' }} /></Box>}
-            title="Cài đặt AI"
-            desc="Tùy chỉnh provider, model và các tham số AI"
-            action="Cài đặt"
-            onClick={() => {}}
-          />
+
+        <Grid item xs={12} lg={5}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Typography variant="h6" fontWeight={700} mb={0.5}>Kết quả đo gần nhất</Typography>
+              <Typography variant="body2" color="text.secondary" mb={2}>
+                Thông số mẫu sau nhận dạng và segment.
+              </Typography>
+              <Stack spacing={1.5}>
+                {recentMetrics.map((item) => (
+                  <Box key={item.label} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                    <Typography variant="body2" color="text.secondary">{item.label}</Typography>
+                    <Typography variant="body2" fontWeight={650}>{item.value}</Typography>
+                  </Box>
+                ))}
+              </Stack>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="body2" color="text.secondary" mb={1}>Output số liệu</Typography>
+              <Box sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden',
+              }}>
+                {[
+                  ['Chiều dài TB', '7,42 mm'],
+                  ['Chiều rộng TB', '3,18 mm'],
+                  ['Độ lệch chuẩn dài', '0,84 mm'],
+                  ['Độ lệch chuẩn rộng', '0,31 mm'],
+                ].map(([label, value]) => (
+                  <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between', px: 1.5, py: 1, borderBottom: '1px solid', borderColor: 'divider', '&:last-child': { borderBottom: 0 } }}>
+                    <Typography variant="caption" color="text.secondary">{label}</Typography>
+                    <Typography variant="caption" fontWeight={650}>{value}</Typography>
+                  </Box>
+                ))}
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
     </Box>
