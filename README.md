@@ -53,6 +53,18 @@ ALLOWED_ORIGINS=http://localhost:5173
 
 ## Chạy project
 
+Trên Windows, có thể mở menu chạy nhanh bằng file:
+
+```powershell
+.\run.bat
+```
+
+Menu này có các lựa chọn:
+
+- Run web
+- Run mobile app
+- Run all
+
 Chạy backend và web cùng lúc:
 
 ```bash
