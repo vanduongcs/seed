@@ -2,8 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/auth/screens/register_screen.dart';
-import '../../features/dashboard/screens/dashboard_screen.dart';
-import '../../features/chat/screens/chat_screen.dart';
+import '../../features/main/screens/main_shell.dart';
 import '../../features/auth/providers/auth_provider.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -13,7 +12,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/login',
     redirect: (context, state) {
       final isAuthenticated = authState.value ?? false;
-      final isAuthRoute = state.matchedLocation == '/login' || state.matchedLocation == '/register';
+      final isAuthRoute = state.matchedLocation == '/login' ||
+          state.matchedLocation == '/register';
 
       if (!isAuthenticated && !isAuthRoute) return '/login';
       if (isAuthenticated && isAuthRoute) return '/dashboard';
@@ -22,9 +22,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
-      GoRoute(path: '/dashboard', builder: (_, __) => const DashboardScreen()),
-      GoRoute(path: '/chat', builder: (_, __) => const ChatScreen()),
-      GoRoute(path: '/chat/:id', builder: (_, state) => ChatScreen(conversationId: state.pathParameters['id'])),
+      GoRoute(
+          path: '/dashboard',
+          builder: (_, __) => const MainShell(initialIndex: 0)),
+      GoRoute(
+          path: '/storage',
+          builder: (_, __) => const MainShell(initialIndex: 1)),
+      GoRoute(
+          path: '/account',
+          builder: (_, __) => const MainShell(initialIndex: 2)),
+      GoRoute(path: '/chat', redirect: (_, __) => '/dashboard'),
+      GoRoute(path: '/chat/:id', redirect: (_, __) => '/dashboard'),
     ],
   );
 });

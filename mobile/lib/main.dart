@@ -21,7 +21,7 @@ class SeedApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Seed',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
+      theme: AppTheme.appTheme,
       routerConfig: router,
     );
   }
