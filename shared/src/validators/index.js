@@ -1,0 +1,27 @@
+import { z } from 'zod';
+
+export const registerSchema = z.object({
+  name: z.string().min(2, 'Tên ít nhất 2 ký tự').max(50),
+  email: z.string().email('Email không hợp lệ'),
+  password: z
+    .string()
+    .min(8, 'Mật khẩu ít nhất 8 ký tự')
+    .regex(/[A-Z]/, 'Phải có chữ hoa')
+    .regex(/[0-9]/, 'Phải có số'),
+});
+
+export const loginSchema = z.object({
+  email: z.string().email('Email không hợp lệ'),
+  password: z.string().min(1, 'Mật khẩu không được trống'),
+});
+
+export const chatSchema = z.object({
+  message: z.string().min(1, 'Tin nhắn không được trống').max(4000),
+  conversationId: z.string().optional(),
+  model: z.string().optional(),
+});
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(2).max(50).optional(),
+  avatar: z.string().url().optional(),
+});
