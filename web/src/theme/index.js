@@ -1,49 +1,61 @@
 import { createTheme, alpha } from '@mui/material/styles';
 
+const primary = '#2F6B4F';
+const primaryDark = '#244F3C';
+const secondary = '#657A3A';
+const line = '#DDE5DA';
+
 export const theme = createTheme({
   palette: {
-    mode: 'dark',
+    mode: 'light',
     primary: {
-      main: '#7C3AED',
-      light: '#A78BFA',
-      dark: '#5B21B6',
-      contrastText: '#fff',
+      main: primary,
+      light: '#4D8A6B',
+      dark: primaryDark,
+      contrastText: '#FFFFFF',
     },
     secondary: {
-      main: '#06B6D4',
-      light: '#67E8F9',
-      dark: '#0891B2',
-      contrastText: '#fff',
+      main: secondary,
+      light: '#879B5B',
+      dark: '#4C5E2C',
+      contrastText: '#FFFFFF',
     },
     background: {
-      default: '#0A0A0F',
-      paper: '#111118',
+      default: '#F6F8F4',
+      paper: '#FFFFFF',
     },
     text: {
-      primary: '#F1F5F9',
-      secondary: '#94A3B8',
+      primary: '#1F2933',
+      secondary: '#647067',
     },
-    divider: alpha('#7C3AED', 0.15),
-    error: { main: '#EF4444' },
-    success: { main: '#22C55E' },
-    warning: { main: '#F59E0B' },
+    divider: line,
+    error: { main: '#B42318' },
+    success: { main: '#2E7D32' },
+    warning: { main: '#A15C07' },
   },
   typography: {
     fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
-    h1: { fontWeight: 800, letterSpacing: '-0.03em' },
-    h2: { fontWeight: 700, letterSpacing: '-0.02em' },
-    h3: { fontWeight: 700 },
-    h4: { fontWeight: 600 },
-    button: { textTransform: 'none', fontWeight: 600 },
+    h1: { fontWeight: 700, letterSpacing: 0 },
+    h2: { fontWeight: 700, letterSpacing: 0 },
+    h3: { fontWeight: 700, letterSpacing: 0 },
+    h4: { fontWeight: 650, letterSpacing: 0 },
+    h5: { fontWeight: 650, letterSpacing: 0 },
+    h6: { fontWeight: 650, letterSpacing: 0 },
+    button: { textTransform: 'none', fontWeight: 600, letterSpacing: 0 },
   },
-  shape: { borderRadius: 12 },
+  shape: { borderRadius: 8 },
   components: {
     MuiButton: {
       styleOverrides: {
-        root: { borderRadius: 10, padding: '10px 24px', boxShadow: 'none' },
+        root: {
+          borderRadius: 8,
+          padding: '9px 18px',
+          boxShadow: 'none',
+          '&:hover': { boxShadow: 'none' },
+        },
         containedPrimary: {
-          background: 'linear-gradient(135deg, #7C3AED 0%, #5B21B6 100%)',
-          '&:hover': { background: 'linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)', boxShadow: 'none' },
+          backgroundColor: primary,
+          '&:hover': { backgroundColor: primaryDark },
         },
       },
     },
@@ -52,9 +64,9 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           '& .MuiOutlinedInput-root': {
-            borderRadius: 10,
-            backgroundColor: alpha('#7C3AED', 0.05),
-            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#7C3AED' },
+            borderRadius: 8,
+            backgroundColor: '#FFFFFF',
+            '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: primary },
           },
         },
       },
@@ -63,8 +75,8 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          border: `1px solid ${alpha('#7C3AED', 0.15)}`,
-          backdropFilter: 'blur(10px)',
+          border: `1px solid ${line}`,
+          boxShadow: 'none',
         },
       },
     },
@@ -72,15 +84,22 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          backdropFilter: 'blur(20px)',
-          backgroundColor: alpha('#0A0A0F', 0.85),
-          borderBottom: `1px solid ${alpha('#7C3AED', 0.15)}`,
+          backgroundColor: alpha('#FFFFFF', 0.96),
+          borderBottom: `1px solid ${line}`,
           boxShadow: 'none',
+          color: '#1F2933',
         },
       },
     },
     MuiPaper: {
-      styleOverrides: { root: { backgroundImage: 'none' } },
+      styleOverrides: {
+        root: { backgroundImage: 'none' },
+      },
+    },
+    MuiChip: {
+      styleOverrides: {
+        root: { borderRadius: 6 },
+      },
     },
   },
 });

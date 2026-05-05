@@ -4,7 +4,7 @@ import {
   Box, Button, TextField, Typography, Card, CardContent,
   InputAdornment, IconButton, Alert, CircularProgress, alpha,
 } from '@mui/material';
-import { Email, Lock, Person, Visibility, VisibilityOff, AutoAwesome } from '@mui/icons-material';
+import { Email, Lock, Person, Visibility, VisibilityOff, Agriculture } from '@mui/icons-material';
 import { useAuthStore } from '@/store/auth.store.js';
 import { api } from '@/api/axios.js';
 
@@ -36,27 +36,36 @@ export default function RegisterPage() {
 
   return (
     <Box sx={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      bgcolor: 'background.default', position: 'relative', overflow: 'hidden',
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      bgcolor: 'background.default',
+      px: 2,
     }}>
-      <Box sx={{ position: 'absolute', width: 500, height: 500, borderRadius: '50%', top: '10%', left: '50%', transform: 'translateX(-50%)', background: 'radial-gradient(circle, rgba(6,182,212,0.12) 0%, transparent 70%)', pointerEvents: 'none' }} />
-
-      <Card sx={{ width: '100%', maxWidth: 420, mx: 2, bgcolor: alpha('#111118', 0.95), backdropFilter: 'blur(20px)' }}>
+      <Card sx={{ width: '100%', maxWidth: 420 }}>
         <CardContent sx={{ p: 4 }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 4 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3.5 }}>
             <Box sx={{
-              width: 56, height: 56, borderRadius: 3, mb: 2,
-              background: 'linear-gradient(135deg, #06B6D4, #7C3AED)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 0 30px rgba(6,182,212,0.4)',
+              width: 52,
+              height: 52,
+              borderRadius: 1.5,
+              mb: 2,
+              bgcolor: (t) => alpha(t.palette.primary.main, 0.1),
+              border: '1px solid',
+              borderColor: (t) => alpha(t.palette.primary.main, 0.24),
+              color: 'primary.main',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}>
-              <AutoAwesome sx={{ color: '#fff', fontSize: 28 }} />
+              <Agriculture sx={{ fontSize: 28 }} />
             </Box>
             <Typography variant="h5" fontWeight={700}>Tạo tài khoản</Typography>
-            <Typography variant="body2" color="text.secondary" mt={0.5}>Bắt đầu hành trình với Seed AI</Typography>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>Dành cho người vận hành đo mẫu</Typography>
           </Box>
 
-          {error && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
           <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
@@ -86,14 +95,14 @@ export default function RegisterPage() {
               }}
             />
             <Button id="register-submit" type="submit" variant="contained" fullWidth size="large"
-              disabled={loading} sx={{ mt: 1, py: 1.4, background: 'linear-gradient(135deg, #06B6D4, #7C3AED)', '&:hover': { background: 'linear-gradient(135deg, #0891B2, #5B21B6)' } }}>
+              disabled={loading} sx={{ mt: 1, py: 1.3 }}>
               {loading ? <CircularProgress size={22} color="inherit" /> : 'Đăng ký'}
             </Button>
           </Box>
 
           <Typography variant="body2" align="center" mt={3} color="text.secondary">
             Đã có tài khoản?{' '}
-            <Link to="/login" style={{ color: '#A78BFA', textDecoration: 'none', fontWeight: 600 }}>Đăng nhập</Link>
+            <Link to="/login" style={{ color: '#2F6B4F', textDecoration: 'none', fontWeight: 600 }}>Đăng nhập</Link>
           </Typography>
         </CardContent>
       </Card>

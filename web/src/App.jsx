@@ -3,7 +3,8 @@ import { useAuthStore } from '@/store/auth.store.js';
 import LoginPage from '@/pages/LoginPage.jsx';
 import RegisterPage from '@/pages/RegisterPage.jsx';
 import DashboardPage from '@/pages/DashboardPage.jsx';
-import ChatPage from '@/pages/ChatPage.jsx';
+import StoragePage from '@/pages/StoragePage.jsx';
+import AccountPage from '@/pages/AccountPage.jsx';
 import Layout from '@/components/Layout.jsx';
 
 const PrivateRoute = ({ children }) => {
@@ -24,8 +25,10 @@ export default function App() {
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="chat" element={<ChatPage />} />
-        <Route path="chat/:id" element={<ChatPage />} />
+        <Route path="storage" element={<StoragePage />} />
+        <Route path="account" element={<AccountPage />} />
+        <Route path="chat" element={<Navigate to="/dashboard" replace />} />
+        <Route path="chat/:id" element={<Navigate to="/dashboard" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
