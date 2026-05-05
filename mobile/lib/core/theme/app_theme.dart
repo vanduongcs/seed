@@ -17,18 +17,16 @@ class AppTheme {
           primary: primary,
           secondary: secondary,
           surface: bgPaper,
-          background: bgDefault,
           onPrimary: Colors.white,
           onSecondary: Colors.white,
           onSurface: textPrimary,
-          onBackground: textPrimary,
         ),
         scaffoldBackgroundColor: bgDefault,
         textTheme: GoogleFonts.interTextTheme(
           ThemeData.dark().textTheme,
         ).apply(bodyColor: textPrimary, displayColor: textPrimary),
         appBarTheme: AppBarTheme(
-          backgroundColor: bgDefault.withOpacity(0.9),
+          backgroundColor: bgDefault.withValues(alpha: 0.9),
           elevation: 0,
           centerTitle: true,
           titleTextStyle: GoogleFonts.inter(
@@ -42,21 +40,23 @@ class AppTheme {
           style: ElevatedButton.styleFrom(
             backgroundColor: primary,
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-            textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15),
+            textStyle:
+                GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: primary.withOpacity(0.08),
+          fillColor: primary.withValues(alpha: 0.08),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: primary.withOpacity(0.2)),
+            borderSide: BorderSide(color: primary.withValues(alpha: 0.2)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: primary.withOpacity(0.2)),
+            borderSide: BorderSide(color: primary.withValues(alpha: 0.2)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
@@ -65,12 +65,12 @@ class AppTheme {
           labelStyle: const TextStyle(color: textSecondary),
           hintStyle: const TextStyle(color: textSecondary),
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: bgPaper,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: primary.withOpacity(0.15)),
+            side: BorderSide(color: primary.withValues(alpha: 0.15)),
           ),
         ),
       );
