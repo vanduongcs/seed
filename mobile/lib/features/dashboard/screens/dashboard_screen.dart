@@ -1,54 +1,71 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../auth/providers/auth_provider.dart';
 
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Seed'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await ref.read(authProvider.notifier).logout();
-              if (context.mounted) context.go('/login');
-            },
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: const [
+        Text(
+          'Tổng quan mẫu hạt',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+        ),
+        SizedBox(height: 6),
+        Text(
+          'Theo dõi lượt sử dụng và dữ liệu đo đạc chính.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+        ),
+        SizedBox(height: 22),
+        Row(
+          children: [
+            Expanded(child: _StatTile(label: 'Tháng này', value: '128')),
+            SizedBox(width: 12),
+            Expanded(child: _StatTile(label: 'Tổng lượt', value: '3.918')),
+          ],
+        ),
+        SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: _StatTile(label: 'Hạt đã đo', value: '18.240')),
+            SizedBox(width: 12),
+            Expanded(child: _StatTile(label: 'Dài TB', value: '7,42 mm')),
+          ],
+        ),
+        SizedBox(height: 18),
+        _ProcessCard(),
+      ],
+    );
+  }
+}
+
+class _StatTile extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _StatTile({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Xin chào! 👋',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            const Text('Hôm nay bạn muốn làm gì?',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 15)),
-            const SizedBox(height: 28),
-            _FeatureCard(
-              gradient: const LinearGradient(
-                  colors: [AppTheme.primary, Color(0xFF5B21B6)]),
-              icon: Icons.chat_bubble_outline,
-              title: 'AI Chat',
-              desc: 'Trò chuyện với AI thông minh',
-              onTap: () => context.push('/chat'),
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+              ),
             ),
-            const SizedBox(height: 16),
-            _FeatureCard(
-              gradient: const LinearGradient(
-                  colors: [AppTheme.secondary, Color(0xFF0891B2)]),
-              icon: Icons.trending_up,
-              title: 'Phân tích',
-              desc: 'Xem thống kê và lịch sử',
-              onTap: () {},
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
             ),
           ],
         ),
@@ -57,62 +74,45 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-class _FeatureCard extends StatelessWidget {
-  final LinearGradient gradient;
-  final IconData icon;
-  final String title;
-  final String desc;
-  final VoidCallback onTap;
-
-  const _FeatureCard(
-      {required this.gradient,
-      required this.icon,
-      required this.title,
-      required this.desc,
-      required this.onTap});
+class _ProcessCard extends StatelessWidget {
+  const _ProcessCard();
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: [
-              gradient.colors.first.withValues(alpha: 0.15),
-              gradient.colors.last.withValues(alpha: 0.08)
-            ],
-          ),
-          border:
-              Border.all(color: gradient.colors.first.withValues(alpha: 0.25)),
-        ),
-        child: Row(
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14), gradient: gradient),
-              child: Icon(icon, color: Colors.white, size: 26),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-                child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Row(
               children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Text(desc,
-                    style: const TextStyle(
-                        color: AppTheme.textSecondary, fontSize: 13)),
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.image_search_outlined,
+                    color: AppTheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Xử lý ảnh đo đạc',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
               ],
-            )),
-            Icon(Icons.arrow_forward_ios,
-                size: 16, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Website hỗ trợ kết nối camera hoặc import ảnh để nhận dạng, segment và xuất kết quả đo. Mobile hiển thị nhanh thống kê và lịch sử xử lý.',
+              style: TextStyle(color: AppTheme.textSecondary, height: 1.45),
+            ),
           ],
         ),
       ),

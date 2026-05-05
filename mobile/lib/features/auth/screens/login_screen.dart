@@ -31,8 +31,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (state.hasError && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Đăng nhập thất bại: ${state.error}'),
-            backgroundColor: Colors.red),
+          content: Text('Đăng nhập thất bại: ${state.error}'),
+          backgroundColor: Colors.red.shade700,
+        ),
       );
     } else if (!state.hasError && mounted) {
       context.go('/dashboard');
@@ -52,44 +53,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo
                 Container(
-                  width: 72,
-                  height: 72,
+                  width: 64,
+                  height: 64,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    gradient: const LinearGradient(
-                      colors: [AppTheme.primary, AppTheme.secondary],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.24),
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                          color: AppTheme.primary.withValues(alpha: 0.4),
-                          blurRadius: 20,
-                          spreadRadius: 2)
-                    ],
                   ),
-                  child: const Icon(Icons.auto_awesome,
-                      color: Colors.white, size: 36),
+                  child: const Icon(
+                    Icons.agriculture_outlined,
+                    color: AppTheme.primary,
+                    size: 34,
+                  ),
                 ),
-                const SizedBox(height: 24),
-                const Text('Chào mừng trở lại',
-                    style:
-                        TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                const Text('Đăng nhập vào tài khoản của bạn',
-                    style:
-                        TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
-                const SizedBox(height: 32),
-
-                // Form
+                const SizedBox(height: 22),
+                const Text(
+                  'Seed',
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Đăng nhập hệ thống đo mẫu',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                ),
+                const SizedBox(height: 30),
                 TextField(
                   controller: _emailCtrl,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined)),
+                    labelText: 'Email',
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -100,13 +97,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(
-                          _showPass ? Icons.visibility_off : Icons.visibility),
+                        _showPass ? Icons.visibility_off : Icons.visibility,
+                      ),
                       onPressed: () => setState(() => _showPass = !_showPass),
                     ),
                   ),
                 ),
                 const SizedBox(height: 24),
-
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -116,7 +113,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             width: 22,
                             height: 22,
                             child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2))
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
                         : const Text('Đăng nhập'),
                   ),
                 ),
@@ -124,16 +124,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 GestureDetector(
                   onTap: () => context.go('/register'),
                   child: const Text.rich(
-                    TextSpan(children: [
-                      TextSpan(
+                    TextSpan(
+                      children: [
+                        TextSpan(
                           text: 'Chưa có tài khoản? ',
-                          style: TextStyle(color: AppTheme.textSecondary)),
-                      TextSpan(
-                          text: 'Đăng ký ngay',
+                          style: TextStyle(color: AppTheme.textSecondary),
+                        ),
+                        TextSpan(
+                          text: 'Đăng ký',
                           style: TextStyle(
-                              color: AppTheme.primaryLight,
-                              fontWeight: FontWeight.w600)),
-                    ]),
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
