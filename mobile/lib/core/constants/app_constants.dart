@@ -1,10 +1,10 @@
 const String baseUrl = String.fromEnvironment(
   'BASE_URL',
-  defaultValue: 'http://10.0.2.2:5000/api', // Android emulator → localhost
+  defaultValue: 'http://10.0.2.2:3000/api', // Android emulator → localhost
 );
 
 // Đổi IP này khi test trên thiết bị thật:
-// const String baseUrl = 'http://192.168.1.x:5000/api';
+// const String baseUrl = 'http://192.168.1.x:3000/api';
 
 const Duration connectTimeout = Duration(seconds: 15);
 const Duration receiveTimeout = Duration(seconds: 60);

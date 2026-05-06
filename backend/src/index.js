@@ -56,6 +56,16 @@ app.use('/api/ai', aiRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
+httpServer.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Port ${env.PORT} is already in use. Stop the existing server or set PORT to a different value in .env.`);
+    process.exit(1);
+  }
+
+  console.error(error);
+  process.exit(1);
+});
+
 // ---- Start ----
 const start = async () => {
   await connectDB();

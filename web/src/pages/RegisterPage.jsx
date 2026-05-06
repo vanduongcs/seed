@@ -82,7 +82,7 @@ export default function RegisterPage() {
               id="register-password" name="password" label="Mật khẩu"
               type={showPass ? 'text' : 'password'}
               value={form.password} onChange={handleChange} required fullWidth
-              helperText="Ít nhất 8 ký tự, có chữ hoa và số"
+              helperText="Có thể dùng mật khẩu đơn giản"
               InputProps={{
                 startAdornment: <InputAdornment position="start"><Lock sx={{ color: 'text.secondary', fontSize: 18 }} /></InputAdornment>,
                 endAdornment: (

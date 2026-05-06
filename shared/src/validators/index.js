@@ -3,11 +3,7 @@ import { z } from 'zod';
 export const registerSchema = z.object({
   name: z.string().min(2, 'Tên ít nhất 2 ký tự').max(50),
   email: z.string().email('Email không hợp lệ'),
-  password: z
-    .string()
-    .min(8, 'Mật khẩu ít nhất 8 ký tự')
-    .regex(/[A-Z]/, 'Phải có chữ hoa')
-    .regex(/[0-9]/, 'Phải có số'),
+  password: z.string(),
 });
 
 export const loginSchema = z.object({

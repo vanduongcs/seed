@@ -21,7 +21,6 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, 'Mật khẩu là bắt buộc'],
-      minlength: 8,
       select: false,
     },
     role: {

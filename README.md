@@ -44,7 +44,7 @@ Copy-Item .env.example .env
 Cập nhật `.env` theo môi trường local của bạn. Các biến thường cần đổi:
 
 ```env
-PORT=5000
+PORT=3000
 MONGODB_URI=mongodb://localhost:27017/seed_db
 JWT_ACCESS_SECRET=your_access_secret_here
 JWT_REFRESH_SECRET=your_refresh_secret_here
@@ -80,8 +80,8 @@ npm run dev:web
 
 URL mặc định:
 
-- Backend: `http://localhost:5000`
-- Health check: `http://localhost:5000/health`
+- Backend: `http://localhost:3000`
+- Health check: `http://localhost:3000/health`
 - Web: `http://localhost:5173`
 
 ## Chạy mobile
@@ -95,13 +95,13 @@ flutter run
 Mặc định mobile dùng API:
 
 ```text
-http://10.0.2.2:5000/api
+http://10.0.2.2:3000/api
 ```
 
 Nếu chạy trên thiết bị thật, truyền IP máy đang chạy backend:
 
 ```bash
-flutter run --dart-define=BASE_URL=http://192.168.1.x:5000/api
+flutter run --dart-define=BASE_URL=http://192.168.1.x:3000/api
 ```
 
 ## Scripts
