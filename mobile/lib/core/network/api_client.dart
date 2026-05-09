@@ -45,7 +45,8 @@ class ApiClient {
   Future<bool> _refresh() async {
     final refreshToken = await _storage.read(key: refreshTokenKey);
     if (refreshToken == null) return false;
-    final response = await Dio().post('$baseUrl/auth/refresh', data: {'refreshToken': refreshToken});
+    final response = await Dio()
+        .post('$baseUrl/auth/refresh', data: {'refreshToken': refreshToken});
     final data = response.data['data'];
     await _storage.write(key: accessTokenKey, value: data['accessToken']);
     await _storage.write(key: refreshTokenKey, value: data['refreshToken']);

@@ -13,6 +13,7 @@ import {
   Logout as LogoutIcon,
   Agriculture as SeedIcon,
 } from '@mui/icons-material';
+import { api } from '@/api/axios.js';
 import { useAuthStore } from '@/store/auth.store.js';
 
 const DRAWER_WIDTH = 260;
@@ -29,7 +30,16 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleLogout = () => { logout(); navigate('/login'); };
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Local logout should still complete if the token is already expired.
+    } finally {
+      logout();
+      navigate('/login');
+    }
+  };
 
   const drawer = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>

@@ -32,6 +32,7 @@ Thumbs.db
 *.pid
 *.seed
 *.pid.lock
+backend/storage/
 
 # IDE
 .vscode/settings.json

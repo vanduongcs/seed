@@ -85,7 +85,7 @@ export const analyzeGrainImageBuffer = async ({ buffer, originalName, params }) 
 
   try {
     await fs.promises.writeFile(imagePath, buffer);
-    const payload = await runPythonWorker(imagePath, normalizeParams(params));
+    const payload = await runPythonWorker(imagePath, normalizeGrainParams(params));
     if (!payload.ok) {
       const error = new Error(payload.error || 'Phân tích ảnh thất bại');
       error.statusCode = 422;
@@ -167,7 +167,7 @@ const runPythonWorker = (imagePath, params) => new Promise((resolve, reject) => 
   });
 });
 
-const normalizeParams = (params = {}) => {
+export const normalizeGrainParams = (params = {}) => {
   const normalized = {};
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;

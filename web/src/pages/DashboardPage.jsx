@@ -191,8 +191,6 @@ export default function DashboardPage() {
         return;
       }
 
-      await api.get('/grain/health');
-
       const formData = new FormData();
       formData.append('image', file);
       Object.entries(controls).forEach(([key, value]) => formData.append(key, String(value)));
@@ -575,6 +573,7 @@ export default function DashboardPage() {
 
                 {result ? (
                   <Stack spacing={1.2}>
+                    <ResultRow label="Mã xử lý" value={result.run?.id ? result.run.id.slice(-8).toUpperCase() : '-'} />
                     <ResultRow label="Segments trước lọc" value={result.segmentation.segment_count_before_filter} />
                     <ResultRow label="Watershed markers" value={result.segmentation.marker_count} />
                     <ResultRow label="Mask pixels raw" value={result.segmentation.raw_mask_pixels ?? result.segmentation.mask_pixels} />

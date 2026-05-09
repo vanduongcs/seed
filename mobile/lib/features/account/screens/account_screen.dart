@@ -1,17 +1,85 @@
 import 'package:flutter/material.dart';
+
+import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 
-class AccountScreen extends StatelessWidget {
+class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
+
+  @override
+  State<AccountScreen> createState() => _AccountScreenState();
+}
+
+class _AccountScreenState extends State<AccountScreen> {
+  final _api = ApiClient();
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _roleCtrl = TextEditingController();
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _roleCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    setState(() => _loading = true);
+    try {
+      final response = await _api.get('/users/me');
+      final user = Map<String, dynamic>.from(response.data['data'] as Map);
+      _nameCtrl.text = user['name']?.toString() ?? '';
+      _emailCtrl.text = user['email']?.toString() ?? '';
+      _roleCtrl.text = user['role']?.toString() ?? 'user';
+    } catch (error) {
+      _showError('Không tải được tài khoản: $error');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    if (_nameCtrl.text.trim().length < 2) {
+      _showError('Họ và tên cần ít nhất 2 ký tự');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final response = await _api.patch('/users/me', data: {
+        'name': _nameCtrl.text.trim(),
+      });
+      final user = Map<String, dynamic>.from(response.data['data'] as Map);
+      _nameCtrl.text = user['name']?.toString() ?? _nameCtrl.text;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã cập nhật tài khoản')),
+        );
+      }
+    } catch (error) {
+      _showError('Cập nhật thất bại: $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   void _openSettings(BuildContext context) {
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Cài đặt'),
-        content: Column(
+        content: const Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text('Đơn vị đo mặc định'),
@@ -34,8 +102,22 @@ class AccountScreen extends StatelessWidget {
     );
   }
 
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red.shade700,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -45,25 +127,39 @@ class AccountScreen extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Cập nhật thông tin người dùng và cấu hình ứng dụng.',
+          'Thông tin được đọc và cập nhật qua cùng backend API với website.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         const SizedBox(height: 18),
-        const TextField(
-          decoration: InputDecoration(labelText: 'Họ và tên'),
+        TextField(
+          controller: _nameCtrl,
+          decoration: const InputDecoration(labelText: 'Họ và tên'),
         ),
         const SizedBox(height: 14),
-        const TextField(
-          decoration: InputDecoration(labelText: 'Email'),
+        TextField(
+          controller: _emailCtrl,
+          enabled: false,
+          decoration: const InputDecoration(labelText: 'Email'),
         ),
         const SizedBox(height: 14),
-        const TextField(
-          decoration: InputDecoration(labelText: 'Đơn vị/Phòng ban'),
+        TextField(
+          controller: _roleCtrl,
+          enabled: false,
+          decoration: const InputDecoration(labelText: 'Vai trò'),
         ),
         const SizedBox(height: 20),
         ElevatedButton(
-          onPressed: () {},
-          child: const Text('Lưu thay đổi'),
+          onPressed: _saving ? null : _saveProfile,
+          child: _saving
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
+              : const Text('Lưu thay đổi'),
         ),
         const SizedBox(height: 10),
         OutlinedButton(

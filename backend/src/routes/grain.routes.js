@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import multer from 'multer';
 
-import { analyzeGrainImage, getGrainHealth } from '../controllers/grain.controller.js';
+import {
+  analyzeGrainImage,
+  deleteGrainRun,
+  getGrainHealth,
+  getGrainRun,
+  listGrainRuns,
+} from '../controllers/grain.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
 const router = Router();
@@ -23,6 +29,9 @@ const upload = multer({
 });
 
 router.get('/health', getGrainHealth);
+router.get('/runs', authenticate, listGrainRuns);
+router.get('/runs/:id', authenticate, getGrainRun);
+router.delete('/runs/:id', authenticate, deleteGrainRun);
 router.post('/analyze', authenticate, upload.single('image'), analyzeGrainImage);
 
 export default router;

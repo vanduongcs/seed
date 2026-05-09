@@ -15,6 +15,12 @@ export const API_ROUTES = {
     CHAT: '/api/ai/chat',
     CONVERSATIONS: '/api/ai/conversations',
   },
+  GRAIN: {
+    HEALTH: '/api/grain/health',
+    ANALYZE: '/api/grain/analyze',
+    RUNS: '/api/grain/runs',
+    RUN: (id) => `/api/grain/runs/${id}`,
+  },
 };
 
 export const USER_ROLES = {

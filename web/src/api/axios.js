@@ -27,14 +27,19 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    const authUrl = original?.url || '';
+    const isAuthRequest = authUrl.includes('/auth/login') ||
+      authUrl.includes('/auth/register') ||
+      authUrl.includes('/auth/refresh');
+    const refreshToken = useAuthStore.getState().refreshToken;
+
+    if (original && error.response?.status === 401 && !original._retry && !isAuthRequest && refreshToken) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => failedQueue.push({ resolve, reject }))
           .then((token) => { original.headers.Authorization = `Bearer ${token}`; return api(original); });
       }
       original._retry = true;
       isRefreshing = true;
-      const refreshToken = useAuthStore.getState().refreshToken;
       try {
         const { data } = await axios.post('/api/auth/refresh', { refreshToken });
         const { accessToken, refreshToken: newRefresh } = data.data;
