@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 title Seed Launcher
@@ -70,10 +70,27 @@ endlocal
 exit /b
 
 :backend_worker
-netstat -ano -p tcp | findstr /R /C:":3000 .*LISTENING" >nul
-if not errorlevel 1 (
+set "BACKEND_PID="
+for /f "tokens=5" %%a in ('netstat -ano -p tcp ^| findstr /R /C:":3000 .*LISTENING"') do (
+  if not defined BACKEND_PID set "BACKEND_PID=%%a"
+)
+
+if defined BACKEND_PID (
   echo Backend API is already running on http://localhost:3000.
-  exit /b
+  echo PID: !BACKEND_PID!
+  echo.
+  set /p restart_backend=Restart backend in this window? This will stop the existing backend first. [y/N]:
+  echo.
+  if /i "!restart_backend!"=="y" (
+    taskkill /PID !BACKEND_PID! /T /F
+    if errorlevel 1 goto backend_failed
+    timeout /t 2 /nobreak >nul
+  ) else (
+    echo Leaving the existing backend running.
+    echo Press any key to close this backend window.
+    pause >nul
+    exit /b
+  )
 )
 
 if not exist backend\.venv\Scripts\python.exe (
