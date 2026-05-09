@@ -191,6 +191,8 @@ export default function DashboardPage() {
         return;
       }
 
+      await api.get('/grain/health');
+
       const formData = new FormData();
       formData.append('image', file);
       Object.entries(controls).forEach(([key, value]) => formData.append(key, String(value)));
@@ -208,7 +210,7 @@ export default function DashboardPage() {
         setSelectedClusters(data.data.kmeans.selected_clusters);
       }
     } catch (err) {
-      setProcessError(err.response?.data?.message || 'Xử lý ảnh thất bại. Kiểm tra backend và Python dependencies.');
+      setProcessError(resolveProcessError(err));
     } finally {
       setProcessing(false);
     }
@@ -622,6 +624,18 @@ const ResultRow = ({ label, value }) => (
 const safeStem = (name = 'seed-image') => (
   name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_') || 'seed-image'
 );
+
+const resolveProcessError = (err) => {
+  const message = err.response?.data?.message;
+  if (message) return message;
+  if (err.response?.status === 503 || (err.response?.status === 500 && typeof err.response?.data === 'string')) {
+    return 'Backend API chưa chạy hoặc Vite không proxy được tới http://localhost:3000. Hãy chạy backend rồi thử lại.';
+  }
+  if (err.code === 'ERR_NETWORK') {
+    return 'Không kết nối được backend. Kiểm tra server backend và kết nối mạng nội bộ.';
+  }
+  return 'Xử lý ảnh thất bại. Kiểm tra backend, MongoDB và Python dependencies.';
+};
 
 const downloadBlob = (fileName, content, mimeType) => {
   const blob = new Blob([content], { type: mimeType });
