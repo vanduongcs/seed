@@ -23,6 +23,13 @@ const processQueue = (error, token) => {
   failedQueue = [];
 };
 
+const clearSession = () => {
+  useAuthStore.getState().logout();
+  if (window.location.pathname !== '/login') {
+    window.location.assign('/login');
+  }
+};
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
@@ -36,7 +43,11 @@ api.interceptors.response.use(
     if (original && error.response?.status === 401 && !original._retry && !isAuthRequest && refreshToken) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => failedQueue.push({ resolve, reject }))
-          .then((token) => { original.headers.Authorization = `Bearer ${token}`; return api(original); });
+          .then((token) => {
+            original.headers = original.headers || {};
+            original.headers.Authorization = `Bearer ${token}`;
+            return api(original);
+          });
       }
       original._retry = true;
       isRefreshing = true;
@@ -45,16 +56,22 @@ api.interceptors.response.use(
         const { accessToken, refreshToken: newRefresh } = data.data;
         useAuthStore.getState().setTokens(accessToken, newRefresh);
         processQueue(null, accessToken);
+        original.headers = original.headers || {};
         original.headers.Authorization = `Bearer ${accessToken}`;
         return api(original);
       } catch (err) {
         processQueue(err, null);
-        useAuthStore.getState().logout();
+        clearSession();
         return Promise.reject(err);
       } finally {
         isRefreshing = false;
       }
     }
+
+    if (error.response?.status === 401 && !isAuthRequest) {
+      clearSession();
+    }
+
     return Promise.reject(error);
   }
 );

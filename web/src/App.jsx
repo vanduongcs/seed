@@ -9,12 +9,16 @@ import Layout from '@/components/Layout.jsx';
 
 const PrivateRoute = ({ children }) => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const refreshToken = useAuthStore((s) => s.refreshToken);
+  return isAuthenticated && (accessToken || refreshToken) ? children : <Navigate to="/login" replace />;
 };
 
 const PublicRoute = ({ children }) => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return !isAuthenticated ? children : <Navigate to="/dashboard" replace />;
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const refreshToken = useAuthStore((s) => s.refreshToken);
+  return !(isAuthenticated && (accessToken || refreshToken)) ? children : <Navigate to="/dashboard" replace />;
 };
 
 export default function App() {

@@ -625,6 +625,10 @@ const safeStem = (name = 'seed-image') => (
 );
 
 const resolveProcessError = (err) => {
+  if (err.response?.status === 401) {
+    return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại rồi chạy xử lý.';
+  }
+
   const message = err.response?.data?.message;
   if (message) return message;
   if (err.response?.status === 503 || (err.response?.status === 500 && typeof err.response?.data === 'string')) {
