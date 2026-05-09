@@ -927,6 +927,184 @@ def dense_seed_watershed(
     return labels.astype(np.int32), elevation.astype(np.float32), markers, marker_distance, threshold_abs
 
 
+def dense_pile_watershed(
+    mask: np.ndarray,
+    rgb: np.ndarray,
+    seedness: np.ndarray,
+    split_sensitivity: int,
+    marker_min_distance: int | None = None,
+    params: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, float]:
+    binary = mask.astype(bool)
+    if not binary.any():
+        empty_i = np.zeros(binary.shape, dtype=np.int32)
+        empty_f = np.zeros(binary.shape, dtype=np.float32)
+        return empty_i, empty_f, empty_i, 0, 0.0
+
+    params = params or {}
+    sensitivity_distance = int(np.clip(30 - (split_sensitivity * 1.35), 10, 24))
+    if marker_min_distance is None:
+        marker_distance = clamp_int(params.get("denseMarkerMinDistance"), 4, 60, sensitivity_distance)
+    else:
+        marker_distance = min(int(np.clip(marker_min_distance, 4, 60)), sensitivity_distance)
+
+    rgb_float = rgb.astype(np.float32) / 255.0
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+    gray_smooth = cv2.GaussianBlur(gray, (0, 0), 1.15)
+    seed_smooth = cv2.GaussianBlur(seedness.astype(np.float32), (0, 0), 1.0)
+
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab_yellow = normalize01(lab[..., 2])
+    saturation = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)[..., 1] / 255.0
+
+    grad_x = cv2.Sobel(gray_smooth, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray_smooth, cv2.CV_32F, 0, 1, ksize=3)
+    gradient = normalize01(np.sqrt((grad_x * grad_x) + (grad_y * grad_y)))
+
+    local_mean = cv2.GaussianBlur(gray_smooth, (0, 0), 7.0)
+    local_bright = normalize01(gray_smooth - local_mean)
+    center_response = normalize01(
+        (0.34 * gray_smooth)
+        + (0.24 * seed_smooth)
+        + (0.18 * lab_yellow)
+        + (0.14 * local_bright)
+        + (0.10 * normalize01(saturation))
+        - (0.18 * gradient)
+    )
+
+    inside = center_response[binary]
+    if inside.size:
+        percentile = clamp_float(params.get("densePeakPercentile"), 35.0, 90.0, 72.0 - (split_sensitivity * 1.25))
+        threshold_abs = max(0.08, float(np.percentile(inside, percentile)))
+    else:
+        threshold_abs = 0.12
+
+    coords = peak_local_max(
+        center_response,
+        labels=binary,
+        min_distance=max(1, marker_distance),
+        threshold_abs=threshold_abs,
+        exclude_border=False,
+    )
+
+    if len(coords) < 8 and inside.size:
+        coords = peak_local_max(
+            center_response,
+            labels=binary,
+            min_distance=max(4, int(marker_distance * 0.75)),
+            threshold_abs=max(0.05, float(np.percentile(inside, 42))),
+            exclude_border=False,
+        )
+
+    markers = np.zeros(binary.shape, dtype=np.int32)
+    if len(coords) == 0:
+        markers, _ = ndi.label(binary)
+    else:
+        for idx, (row, col) in enumerate(coords, start=1):
+            markers[row, col] = idx
+
+    dark_valley = normalize01(1.0 - gray_smooth)
+    color_edge = normalize01(np.std(rgb_float, axis=2))
+    elevation = normalize01(
+        (0.48 * gradient)
+        + (0.22 * dark_valley)
+        + (0.18 * (1.0 - center_response))
+        + (0.12 * color_edge)
+    )
+
+    labels = watershed(elevation, markers=markers, mask=binary)
+    labels, _, _ = relabel_sequential(labels.astype(np.int32))
+    return labels.astype(np.int32), elevation.astype(np.float32), markers, marker_distance, threshold_abs
+
+
+def should_use_dense_pile_mode(raw_mask: np.ndarray, mask: np.ndarray, mask_stats: dict, params: dict) -> bool:
+    mode = str(params.get("segmentationMode") or "auto").strip().lower()
+    if mode in {"densepile", "dense_pile", "pile", "fullframe", "full_frame"}:
+        return True
+    if mode in {"foreground", "background", "normal"}:
+        return False
+
+    total_pixels = max(1, int(raw_mask.size))
+    raw_ratio = int(raw_mask.sum()) / total_pixels
+    mask_ratio = int(mask.sum()) / total_pixels
+    components_after = int(mask_stats.get("component_count_after") or 0)
+    rejected_reasons = mask_stats.get("rejected_reasons") or {}
+    rejected_huge_border = int(rejected_reasons.get("huge_border_component") or 0) > 0
+
+    return (
+        (raw_ratio >= 0.45 and components_after <= 2)
+        or (raw_ratio >= 0.24 and mask_ratio <= 0.08)
+        or mask_ratio >= 0.62
+        or (rejected_huge_border and raw_ratio >= 0.28 and components_after == 0)
+    )
+
+
+def dense_pile_params(params: dict, pixel_count: int) -> dict:
+    effective = dict(params)
+    current_min = clamp_int(effective.get("minArea"), 0, 10_000_000, max(20, int(pixel_count * 0.00008)))
+    current_max = clamp_int(effective.get("maxArea"), 0, 10_000_000, max(current_min + 1, int(pixel_count * 0.014)))
+    effective["minArea"] = max(12, min(current_min, max(20, int(pixel_count * 0.00009))))
+    effective["maxArea"] = max(current_max, int(pixel_count * 0.014), effective["minArea"] + 1)
+    current_max_length = clamp_int(effective.get("maxLength"), 0, 100_000, int(math.sqrt(pixel_count) * 0.42))
+    effective["maxLength"] = max(current_max_length, int(math.sqrt(pixel_count) * 0.42), 1)
+    effective["minSegmentSolidity"] = min(
+        clamp_float(effective.get("minSegmentSolidity"), 0.0, 0.99, 0.35),
+        0.35,
+    )
+    effective["minSegmentExtent"] = min(
+        clamp_float(effective.get("minSegmentExtent"), 0.0, 0.99, 0.10),
+        0.10,
+    )
+    effective["maxSegmentAspectRatio"] = max(
+        clamp_float(effective.get("maxSegmentAspectRatio"), 1.2, 50.0, 14.0),
+        14.0,
+    )
+    effective["minSegmentSeednessMean"] = min(
+        clamp_float(effective.get("minSegmentSeednessMean"), 0.0, 1.0, 0.0),
+        0.08,
+    )
+    return effective
+
+
+def build_dense_pile_mask(rgb: np.ndarray, seedness: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+    gray_smooth = cv2.GaussianBlur(gray, (0, 0), 1.0)
+    seed_smooth = cv2.GaussianBlur(seedness.astype(np.float32), (0, 0), 1.0)
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab_yellow = normalize01(lab[..., 2])
+    saturation = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)[..., 1] / 255.0
+
+    grad_x = cv2.Sobel(gray_smooth, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray_smooth, cv2.CV_32F, 0, 1, ksize=3)
+    gradient = normalize01(np.sqrt((grad_x * grad_x) + (grad_y * grad_y)))
+    surface_score = normalize01(
+        (0.40 * seed_smooth)
+        + (0.34 * gray_smooth)
+        + (0.16 * lab_yellow)
+        + (0.10 * saturation)
+        - (0.22 * gradient)
+    )
+
+    percentile = clamp_float(params.get("denseMaskPercentile"), 5.0, 45.0, 28.0)
+    threshold = max(0.05, float(np.percentile(surface_score, percentile)))
+    mask = surface_score >= threshold
+
+    closing_radius = clamp_int(params.get("denseMaskClosingRadius"), 0, 5, 1)
+    min_area = clamp_int(params.get("denseMaskMinArea"), 1, 50_000, 12)
+    if closing_radius > 0:
+        mask = morphology.closing(mask, footprint=morphology.disk(closing_radius))
+    if min_area > 1:
+        mask = morphology.remove_small_objects(mask.astype(bool), max_size=min_area)
+
+    stats = {
+        "dense_mask_percentile": round(float(percentile), 3),
+        "dense_mask_threshold": round(float(threshold), 6),
+        "dense_mask_pixels": int(mask.sum()),
+        "dense_mask_ratio": round(float(mask.mean()), 6),
+    }
+    return mask.astype(bool), stats
+
+
 def refine_oversized_segments(
     labels: np.ndarray,
     max_area: int | None,
@@ -1143,7 +1321,14 @@ def color_for_id(grain_id: int) -> tuple[int, int, int]:
     return palette[(grain_id - 1) % len(palette)]
 
 
-def draw_overlay(rgb: np.ndarray, labels: np.ndarray, records: list[dict]) -> np.ndarray:
+def draw_overlay(
+    rgb: np.ndarray,
+    labels: np.ndarray,
+    records: list[dict],
+    show_labels: bool = True,
+    fill_alpha: float = 0.28,
+    line_width: int = 2,
+) -> np.ndarray:
     overlay = rgb.copy()
     fill = rgb.copy()
 
@@ -1153,7 +1338,8 @@ def draw_overlay(rgb: np.ndarray, labels: np.ndarray, records: list[dict]) -> np
         color = np.asarray(color_for_id(grain_id), dtype=np.uint8)
         fill[mask] = np.round((0.38 * fill[mask]) + (0.62 * color)).astype(np.uint8)
 
-    overlay = cv2.addWeighted(fill, 0.28, overlay, 0.72, 0)
+    fill_alpha = float(np.clip(fill_alpha, 0.0, 1.0))
+    overlay = cv2.addWeighted(fill, fill_alpha, overlay, 1.0 - fill_alpha, 0)
 
     for record in records:
         grain_id = int(record["id"])
@@ -1163,7 +1349,10 @@ def draw_overlay(rgb: np.ndarray, labels: np.ndarray, records: list[dict]) -> np
             continue
 
         color = color_for_id(grain_id)
-        cv2.drawContours(overlay, [contour], -1, color, 2, lineType=cv2.LINE_AA)
+        cv2.drawContours(overlay, [contour], -1, color, max(1, int(line_width)), lineType=cv2.LINE_AA)
+        if not show_labels:
+            continue
+
         cx = int(round(float(record["centroid_x"])))
         cy = int(round(float(record["centroid_y"])))
         cv2.putText(overlay, str(grain_id), (cx + 3, cy - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (20, 24, 28), 3, lineType=cv2.LINE_AA)
@@ -1276,20 +1465,68 @@ def analyze(image_path: Path, params: dict) -> dict:
     seed_mask, seedness = build_seed_color_mask(prepared.rgb, params)
     raw_mask = combine_masks(seed_mask, kmeans_mask, params)
     mask, mask_filter_stats = filter_foreground_mask(raw_mask, seedness, prepared.rgb, params)
-    threshold_stats = estimate_dynamic_thresholds(mask, params)
-    effective_params = apply_dynamic_thresholds(params, threshold_stats)
+    dense_pile_mode = should_use_dense_pile_mode(raw_mask, mask, mask_filter_stats, params)
+    if dense_pile_mode:
+        foreground_pixels_after_filter = int(mask_filter_stats.get("pixels_after") or int(mask.sum()))
+        foreground_components_after_filter = int(mask_filter_stats.get("component_count_after") or 0)
+        dense_mask, dense_mask_stats = build_dense_pile_mask(prepared.rgb, seedness, params)
+        if int(dense_mask.sum()) < max(100, int(pixel_count * 0.12)):
+            dense_mask = raw_mask.astype(bool) if raw_mask.any() else np.ones(mask.shape, dtype=bool)
+            dense_mask_stats["dense_mask_fallback"] = True
+            dense_mask_stats["dense_mask_pixels"] = int(dense_mask.sum())
+            dense_mask_stats["dense_mask_ratio"] = round(float(dense_mask.mean()), 6)
+        mask = dense_mask
+        mask_filter_stats = dict(mask_filter_stats)
+        mask_filter_stats.update({
+            "dense_pile_override": True,
+            "pixels_after_foreground_filter": foreground_pixels_after_filter,
+            "component_count_after_foreground_filter": foreground_components_after_filter,
+            "pixels_after": int(mask.sum()),
+            "component_count_after": int(measure.label(mask, connectivity=2).max()) if mask.any() else 0,
+        })
+        mask_filter_stats.update(dense_mask_stats)
+
+    if dense_pile_mode:
+        threshold_stats = {
+            "enabled": coerce_bool(params.get("dynamicThresholds"), False),
+            "component_count": int(measure.label(mask, connectivity=2).max()) if mask.any() else 0,
+            "candidate_count": 0,
+            "mean_area": 0.0,
+            "median_area": 0.0,
+            "suggested_min_area": None,
+            "suggested_max_area": None,
+            "suggested_min_length": None,
+            "suggested_max_length": None,
+            "suggested_marker_min_distance": None,
+            "dense_pile_override": True,
+        }
+        effective_params = dense_pile_params(params, pixel_count)
+    else:
+        threshold_stats = estimate_dynamic_thresholds(mask, params)
+        effective_params = apply_dynamic_thresholds(params, threshold_stats)
     dynamic_marker_distance = (
         threshold_stats.get("suggested_marker_min_distance")
         if coerce_bool(effective_params.get("dynamicMarkerSearch"), True)
         else None
     )
 
-    if watershed_mode == "distance":
+    if dense_pile_mode:
+        labels, distance, markers, marker_distance, peak_threshold = dense_pile_watershed(
+            mask,
+            prepared.rgb,
+            seedness,
+            split_sensitivity,
+            marker_min_distance=dynamic_marker_distance,
+            params=effective_params,
+        )
+        effective_watershed_mode = "dense_pile"
+    elif watershed_mode == "distance":
         labels, distance, markers, marker_distance, peak_threshold = watershed_split(
             mask,
             split_sensitivity,
             marker_min_distance=dynamic_marker_distance,
         )
+        effective_watershed_mode = "distance"
     else:
         labels, distance, markers, marker_distance, peak_threshold = dense_seed_watershed(
             mask,
@@ -1298,6 +1535,7 @@ def analyze(image_path: Path, params: dict) -> dict:
             split_sensitivity,
             marker_min_distance=dynamic_marker_distance,
         )
+        effective_watershed_mode = "dense"
     refined_labels = refine_oversized_segments(
         labels,
         max_area=clamp_int(effective_params.get("maxArea"), 0, 10_000_000, 0) or None,
@@ -1313,7 +1551,14 @@ def analyze(image_path: Path, params: dict) -> dict:
         image_scale=prepared.scale,
     )
 
-    overlay = draw_overlay(prepared.rgb, measured_labels, records)
+    overlay = draw_overlay(
+        prepared.rgb,
+        measured_labels,
+        records,
+        show_labels=not dense_pile_mode,
+        fill_alpha=0.16 if dense_pile_mode else 0.28,
+        line_width=1 if dense_pile_mode else 2,
+    )
     csv_text = records_to_csv(records)
 
     result = {
@@ -1349,7 +1594,9 @@ def analyze(image_path: Path, params: dict) -> dict:
             "marker_min_distance": int(marker_distance),
             "peak_threshold_rel": round(float(peak_threshold), 6),
             "split_sensitivity": split_sensitivity,
-            "watershed_mode": watershed_mode,
+            "segmentation_mode": "dense_pile" if dense_pile_mode else "foreground",
+            "watershed_mode": effective_watershed_mode,
+            "requested_watershed_mode": watershed_mode,
             "mask_source": str(params.get("maskSource") or "auto"),
             "mask_filter": mask_filter_stats,
             "dynamic_thresholds": threshold_stats,

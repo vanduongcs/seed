@@ -59,6 +59,11 @@ const numericFields = new Set([
   'backgroundGateStrength',
   'maxSeedMaskRatio',
   'markerShrinkFactor',
+  'denseMarkerMinDistance',
+  'densePeakPercentile',
+  'denseMaskPercentile',
+  'denseMaskClosingRadius',
+  'denseMaskMinArea',
 ]);
 
 const booleanFields = new Set([

@@ -35,21 +35,24 @@ const initialControls = {
   k: 5,
   rgbIndexWeight: 0.65,
   minArea: 60,
-  maxArea: 2500,
+  maxArea: 6000,
   minLength: 3,
-  maxLength: 160,
+  maxLength: 220,
   splitSensitivity: 8,
   openingRadius: 1,
   closingRadius: 1,
   noiseSize: 45,
   holeSize: 64,
-  seednessThreshold: 0.32,
-  maskMinArea: 50,
-  maxSegmentAspectRatio: 10.5,
-  minSegmentSolidity: 0.52,
-  minSegmentExtent: 0.18,
+  seednessThreshold: 0.24,
+  maskMinArea: 30,
+  maxSegmentAspectRatio: 14,
+  minSegmentSolidity: 0.35,
+  minSegmentExtent: 0.10,
   dynamicThresholds: true,
   markerShrinkFactor: 0.5,
+  denseMarkerMinDistance: 18,
+  densePeakPercentile: 62,
+  denseMaskPercentile: 28,
 };
 
 const clusterPalette = [
@@ -199,6 +202,7 @@ export default function DashboardPage() {
       formData.append('clusterSpace', 'pca3');
       formData.append('pcaMethod', 'correlation');
       formData.append('watershedMode', 'dense');
+      formData.append('segmentationMode', 'auto');
       formData.append('maskSource', selectedClusters.length ? 'hybrid' : 'auto');
       if (selectedClusters.length) formData.append('selectedClusters', selectedClusters.join(','));
 
