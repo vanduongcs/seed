@@ -46,7 +46,7 @@ call :start_mobile
 goto done
 
 :start_backend
-start "Seed Backend" /D "%~dp0" cmd /k "call ""%~f0"" backend"
+start "Seed Backend" /D "%~dp0" cmd /k call run.bat backend
 exit /b
 
 :start_web
