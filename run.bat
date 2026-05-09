@@ -44,7 +44,7 @@ call :start_mobile
 goto done
 
 :start_backend
-start "Seed Backend" /D "%~dp0" cmd /k "npm run dev:backend"
+start "Seed Backend" /D "%~dp0" cmd /k "if not exist backend\\.venv\\Scripts\\python.exe (python -m venv backend\\.venv && backend\\.venv\\Scripts\\python.exe -m pip install -r backend\\python\\requirements.txt) && npm run dev:backend"
 exit /b
 
 :start_web

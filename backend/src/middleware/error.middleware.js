@@ -1,7 +1,7 @@
 import { env } from '../config/env.js';
 
 export const errorHandler = (err, _req, res, _next) => {
-  const statusCode = err.statusCode || 500;
+  const statusCode = err.statusCode || (err.name === 'MulterError' ? 400 : 500);
   const message = err.message || 'Internal Server Error';
   if (env.isDev) console.error(`❌ [${statusCode}] ${message}`, err.stack);
   res.status(statusCode).json({

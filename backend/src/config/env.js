@@ -16,7 +16,10 @@ export const env = {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
     OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
   },
-  ALLOWED_ORIGINS: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(','),
+  ALLOWED_ORIGINS: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   RATE_LIMIT: {
     WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
     MAX: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),

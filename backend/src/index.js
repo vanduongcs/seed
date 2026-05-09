@@ -14,6 +14,7 @@ import { errorHandler, notFound } from './middleware/error.middleware.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import aiRoutes from './routes/ai.routes.js';
+import grainRoutes from './routes/grain.routes.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -51,6 +52,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/grain', grainRoutes);
 
 // ---- Error Handling ----
 app.use(notFound);
