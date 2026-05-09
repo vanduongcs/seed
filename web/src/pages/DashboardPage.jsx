@@ -27,7 +27,7 @@ import {
   UploadFileOutlined,
 } from '@mui/icons-material';
 
-import { api } from '@/api/axios.js';
+import { api, ensureFreshAccessToken } from '@/api/axios.js';
 
 const initialControls = {
   maxSide: 2000,
@@ -190,6 +190,8 @@ export default function DashboardPage() {
         setProcessError('Vui lòng import ảnh hoặc bật camera trước khi xử lý.');
         return;
       }
+
+      await ensureFreshAccessToken(true);
 
       const formData = new FormData();
       formData.append('image', file);
