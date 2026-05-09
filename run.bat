@@ -4,6 +4,8 @@ setlocal
 cd /d "%~dp0"
 title Seed Launcher
 
+if /i "%~1"=="backend" goto backend_worker
+
 :menu
 cls
 echo ==========================
@@ -44,7 +46,7 @@ call :start_mobile
 goto done
 
 :start_backend
-start "Seed Backend" /D "%~dp0" cmd /k "if not exist backend\\.venv\\Scripts\\python.exe (python -m venv backend\\.venv && backend\\.venv\\Scripts\\python.exe -m pip install -r backend\\python\\requirements.txt) && npm run dev:backend"
+start "Seed Backend" /D "%~dp0" cmd /k "call ""%~f0"" backend"
 exit /b
 
 :start_web
@@ -65,3 +67,28 @@ goto menu
 
 :end
 endlocal
+exit /b
+
+:backend_worker
+netstat -ano -p tcp | findstr /R /C:":3000 .*LISTENING" >nul
+if not errorlevel 1 (
+  echo Backend API is already running on http://localhost:3000.
+  exit /b
+)
+
+if not exist backend\.venv\Scripts\python.exe (
+  echo Creating Python virtual environment...
+  python -m venv backend\.venv
+  if errorlevel 1 goto backend_failed
+  backend\.venv\Scripts\python.exe -m pip install -r backend\python\requirements.txt
+  if errorlevel 1 goto backend_failed
+)
+
+echo Starting backend API on http://localhost:3000 ...
+npm run dev:backend
+exit /b
+
+:backend_failed
+echo.
+echo Backend setup failed. Check Python installation and backend\python\requirements.txt.
+exit /b 1
