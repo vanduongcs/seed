@@ -1,15 +1,56 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_client.dart';
+import '../../auth/providers/auth_provider.dart';
 
 final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
-  final response = await ApiClient().get('/grain/runs', params: {'limit': 100});
-  final data = response.data['data'] as Map<String, dynamic>? ?? {};
-  final items = data['items'] as List<dynamic>? ?? [];
-  return items
-      .map((item) => GrainRun.fromJson(Map<String, dynamic>.from(item as Map)))
-      .toList();
+  try {
+    final response =
+        await ApiClient().get('/grain/runs', params: {'limit': 100});
+    final data = response.data['data'] as Map<String, dynamic>? ?? {};
+    final items = data['items'] as List<dynamic>? ?? [];
+    return items
+        .map(
+            (item) => GrainRun.fromJson(Map<String, dynamic>.from(item as Map)))
+        .toList();
+  } on DioException catch (error) {
+    if (error.response?.statusCode == 401) {
+      const storage = FlutterSecureStorage();
+      await storage.delete(key: accessTokenKey);
+      await storage.delete(key: refreshTokenKey);
+      await storage.delete(key: userKey);
+      ref.invalidate(authStateProvider);
+      throw const GrainRunsException(
+        'Phien dang nhap da het han. Vui long dang nhap lai.',
+      );
+    }
+    throw GrainRunsException(_friendlyDioMessage(error));
+  }
 });
+
+String _friendlyDioMessage(DioException error) {
+  return switch (error.type) {
+    DioExceptionType.connectionTimeout ||
+    DioExceptionType.receiveTimeout ||
+    DioExceptionType.sendTimeout =>
+      'Khong ket noi duoc backend. Kiem tra server va BASE_URL.',
+    DioExceptionType.connectionError =>
+      'Khong ket noi duoc backend. Hay dam bao server dang chay.',
+    _ => 'Khong tai duoc thong ke tu backend.',
+  };
+}
+
+class GrainRunsException implements Exception {
+  final String message;
+
+  const GrainRunsException(this.message);
+
+  @override
+  String toString() => message;
+}
 
 class GrainRun {
   final String id;

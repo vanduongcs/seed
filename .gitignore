@@ -29,10 +29,12 @@ yarn-error.log*
 # Runtime
 .DS_Store
 Thumbs.db
+synthetic_seeds.png
 *.pid
 *.seed
 *.pid.lock
 backend/storage/
+backend/python/models/
 
 # IDE
 .vscode/settings.json

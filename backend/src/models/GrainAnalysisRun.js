@@ -32,6 +32,10 @@ const grainAnalysisRunSchema = new mongoose.Schema(
       type: mixed,
       default: {},
     },
+    calibration: {
+      type: mixed,
+      default: {},
+    },
     kmeans: {
       type: mixed,
       default: {},

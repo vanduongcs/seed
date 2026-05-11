@@ -147,8 +147,8 @@ export default function StoragePage() {
                         </TableCell>
                         <TableCell>{formatDate(run.createdAt)}</TableCell>
                         <TableCell align="right">{run.summary?.count ?? 0}</TableCell>
-                        <TableCell align="right">{formatNumber(run.summary?.mean_length_px)} px</TableCell>
-                        <TableCell align="right">{formatNumber(run.summary?.mean_width_px)} px</TableCell>
+                        <TableCell align="right">{formatMeasure(run.summary?.mean_length_mm, 'mm', run.summary?.mean_length_px, 'px')}</TableCell>
+                        <TableCell align="right">{formatMeasure(run.summary?.mean_width_mm, 'mm', run.summary?.mean_width_px, 'px')}</TableCell>
                         <TableCell>
                           <Chip label="Hoàn tất" size="small" color="success" variant="outlined" />
                         </TableCell>
@@ -243,8 +243,9 @@ export default function StoragePage() {
                   <ResultRow label="Ảnh" value={detailRun?.sourceFileName || '-'} />
                   <ResultRow label="Thời gian" value={formatDate(detailRun?.createdAt)} />
                   <ResultRow label="Số hạt" value={detailResult.summary?.count ?? 0} />
-                  <ResultRow label="Dài TB" value={`${formatNumber(detailResult.summary?.mean_length_px)} px`} />
-                  <ResultRow label="Rộng TB" value={`${formatNumber(detailResult.summary?.mean_width_px)} px`} />
+                  <ResultRow label="Dài TB" value={formatMeasure(detailResult.summary?.mean_length_mm, 'mm', detailResult.summary?.mean_length_px, 'px')} />
+                  <ResultRow label="Rộng TB" value={formatMeasure(detailResult.summary?.mean_width_mm, 'mm', detailResult.summary?.mean_width_px, 'px')} />
+                  <ResultRow label="Tỷ lệ mm" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'chưa có'} />
                   <ResultRow label="Markers" value={detailResult.segmentation?.marker_count ?? '-'} />
                   <ResultRow label="Segments trước lọc" value={detailResult.segmentation?.segment_count_before_filter ?? '-'} />
                   <Divider />
@@ -296,8 +297,14 @@ const formatDate = (value) => {
   }).format(new Date(value));
 };
 
-const formatNumber = (value) => (
-  Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '-'
+const formatNumber = (value, digits = 2) => (
+  Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-'
+);
+
+const formatMeasure = (primary, primaryUnit, fallback, fallbackUnit) => (
+  Number.isFinite(Number(primary))
+    ? `${formatNumber(primary, primaryUnit === 'mm²' ? 3 : 2)} ${primaryUnit}`
+    : `${formatNumber(fallback)} ${fallbackUnit}`
 );
 
 const safeStem = (name = 'seed-image') => (

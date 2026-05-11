@@ -67,6 +67,16 @@ Dashboard phân tích hạt hỗ trợ:
 
 Mobile app nằm trong `mobile/`, dùng Flutter. Ứng dụng hiện cung cấp shell giao diện, auth flow, dashboard, storage và account screen. Mobile dùng chung backend API với web.
 
+Mobile có thêm chế độ AI offline để đáp ứng yêu cầu xử lý local trên điện thoại. Model TFLite được nạp từ:
+
+```text
+mobile/assets/models/seed_segmentation.tflite
+```
+
+Luồng offline: chọn ảnh hoặc camera trong Dashboard mobile, app chạy model segmentation TFLite local, hậu xử lý mask thành connected components, đếm hạt, đo bbox/diện tích và hiển thị overlay. Ảnh không cần gửi lên backend.
+
+Khuyến nghị model mobile: MobileNetV3-DeepLab Lite, U-Net encoder MobileNet, hoặc YOLO-seg nano export TFLite. SAM/SAM2 nên dùng trên desktop để hỗ trợ tạo nhãn training, không nên nhúng trực tiếp vào mobile vì nặng.
+
 ### Shared
 
 Package `shared/` chứa constants và validators có thể tái sử dụng giữa các app.

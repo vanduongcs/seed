@@ -16,7 +16,7 @@ class MainShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final pages = const [
+    const pages = [
       DashboardScreen(),
       StorageScreen(),
       AccountScreen(),

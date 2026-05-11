@@ -28,6 +28,23 @@ export const USER_ROLES = {
   USER: 'user',
 };
 
+// Grain analysis mask source options
+export const GRAIN_MASK_SOURCES = {
+  AUTO: 'auto',
+  HYBRID: 'hybrid',
+  SAM: 'sam',
+  SAM_HYBRID: 'sam+hybrid',
+};
+
+// Grain analysis model types for SAM
+export const GRAIN_SAM_MODELS = {
+  MOBILE_SAM: 'mobile_sam',
+  SAM2_TINY: 'sam2_tiny',
+  SAM2_SMALL: 'sam2_small',
+  FAST_SAM: 'fast_sam',
+  AUTO: 'auto',
+};
+
 export const HTTP_STATUS = {
   OK: 200,
   CREATED: 201,

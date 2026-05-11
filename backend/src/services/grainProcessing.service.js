@@ -27,6 +27,12 @@ const numericFields = new Set([
   'holeSize',
   'referencePixels',
   'referenceMm',
+  'referenceX1',
+  'referenceY1',
+  'referenceX2',
+  'referenceY2',
+  'referenceExcludePadding',
+  'referenceExcludeOverlapRatio',
   'maskMinArea',
   'maxForegroundAreaRatio',
   'borderMargin',
@@ -64,6 +70,37 @@ const numericFields = new Set([
   'denseMaskPercentile',
   'denseMaskClosingRadius',
   'denseMaskMinArea',
+  'edgeSnapRadius',
+  'edgeSnapMarkerErode',
+  'edgeSnapSeednessScale',
+  'edgeSnapMaxExtraRatio',
+  'edgeSnapMinMarkerFraction',
+  'edgeSnapGradientWeight',
+  'edgeSnapValleyWeight',
+  'edgeSnapColorWeight',
+  'edgeSnapSeednessWeight',
+  'segmentHoleSize',
+  'segmentClosingRadius',
+  'contourFillMinArea',
+  'contourFillMaxArea',
+  'contourFillClosingRadius',
+  'samMinAreaRatio',
+  'samMaxAreaRatio',
+  'samMaxOverlapRatio',
+  'samMinNewAreaRatio',
+  'samConf',
+  'samIou',
+  'samMaxDet',
+  'samTileSize',
+  'samTileOverlap',
+  'seedColorModelSeednessFloor',
+  'maxSeedColorDistance',
+  'minNonSeedObjectSeedness',
+  'largeNonSeedAreaMultiplier',
+  'hardMaxObjectAreaRatio',
+  'riceMarkerMinDistance',
+  'riceMaskPercentile',
+  'ricePeakPercentile',
 ]);
 
 const booleanFields = new Set([
@@ -75,6 +112,25 @@ const booleanFields = new Set([
   'dynamicAreaThresholds',
   'dynamicDiagonalThresholds',
   'dynamicMarkerSearch',
+  'edgeSnap',
+  'fillSegmentHoles',
+  'fillContourMasks',
+  'useSamInstances',
+  'showMeasurementAxes',
+  'samUseTiling',
+  'rejectNonSeedObjects',
+]);
+
+// String fields that pass through without numeric/boolean coercion
+const passthroughFields = new Set([
+  'maskSource',
+  'samModelType',
+  'samCheckpoint',
+  'clusterSpace',
+  'watershedMode',
+  'pcaMethod',
+  'referencePixelSpace',
+  'segmentationMode',
 ]);
 
 export const analyzeGrainImageBuffer = async ({ buffer, originalName, params }) => {
@@ -156,7 +212,9 @@ const runPythonWorker = (imagePath, params) => new Promise((resolve, reject) => 
     clearTimeout(timer);
 
     try {
-      const parsed = JSON.parse(stdout || '{}');
+      const jsonStart = stdout.indexOf('{"ok"');
+      const jsonText = jsonStart >= 0 ? stdout.slice(jsonStart) : stdout;
+      const parsed = JSON.parse(jsonText || '{}');
       if (code !== 0 && parsed?.error) {
         const error = new Error(`${parsed.error}${stderr ? ` (${stderr.trim()})` : ''}`);
         error.statusCode = 422;
@@ -173,7 +231,7 @@ const runPythonWorker = (imagePath, params) => new Promise((resolve, reject) => 
 });
 
 export const normalizeGrainParams = (params = {}) => {
-  const normalized = {};
+  const normalized = { maskSource: 'sam', samModelType: 'fast_sam', useSamInstances: true };
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;
 
@@ -190,6 +248,12 @@ export const normalizeGrainParams = (params = {}) => {
 
     if (key === 'selectedClusters') {
       normalized[key] = parseClusters(value);
+      continue;
+    }
+
+    // Pass through string fields (maskSource, samModelType, etc.)
+    if (passthroughFields.has(key)) {
+      normalized[key] = String(value).trim();
       continue;
     }
 

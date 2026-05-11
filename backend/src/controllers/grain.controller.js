@@ -38,6 +38,7 @@ export const analyzeGrainImage = async (req, res) => {
       image: result.image,
       summary: result.summary,
       segmentation: result.segmentation,
+      calibration: result.calibration,
       kmeans: {
         k: result.kmeans?.k,
         cluster_space: result.kmeans?.cluster_space,
@@ -138,6 +139,7 @@ const serializeLeanRunSummary = (run) => ({
   image: run.image || {},
   summary: run.summary || {},
   segmentation: run.segmentation || {},
+  calibration: run.calibration || {},
   kmeans: run.kmeans || {},
   features: run.features || {},
   createdAt: run.createdAt,
@@ -149,6 +151,7 @@ const serializeRunResult = (run) => ({
   features: run.features || {},
   kmeans: run.kmeans || {},
   segmentation: run.segmentation || {},
+  calibration: run.calibration || {},
   summary: run.summary || {},
   measurements: [],
   csv: '',

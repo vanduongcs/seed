@@ -4,6 +4,7 @@ import argparse
 import base64
 import csv
 import json
+import logging
 import math
 import sys
 from dataclasses import dataclass
@@ -19,6 +20,11 @@ from skimage.feature import peak_local_max
 from skimage.segmentation import relabel_sequential, watershed
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
+
+from sam_integration import build_sam_labels, build_sam_mask, is_sam_available, resolve_sam_checkpoint
+
+
+logger = logging.getLogger(__name__)
 
 
 CSV_COLUMNS = [
@@ -40,6 +46,7 @@ CSV_COLUMNS = [
     "extent",
     "aspect_ratio",
     "mean_seedness",
+    "seed_color_distance",
 ]
 
 
@@ -190,6 +197,39 @@ def normalize01(values: np.ndarray) -> np.ndarray:
     return ((values - low) / (high - low)).astype(np.float32)
 
 
+def fill_probable_outline_regions(mask: np.ndarray, params: dict) -> np.ndarray:
+    if not coerce_bool(params.get("fillContourMasks"), True):
+        return mask.astype(bool)
+
+    binary = mask.astype(bool)
+    if not binary.any():
+        return binary
+
+    pixel_count = max(1, int(binary.size))
+    min_area = clamp_int(params.get("minArea"), 0, 10_000_000, max(16, int(pixel_count * 0.000035)))
+    max_area = clamp_int(params.get("maxArea"), 0, 10_000_000, max(min_area + 1, int(pixel_count * 0.008)))
+    min_fill_area = clamp_int(params.get("contourFillMinArea"), 1, 250_000, max(8, int(min_area * 0.35)))
+    max_fill_area = clamp_int(params.get("contourFillMaxArea"), 1, 1_000_000, max(max_area, int(pixel_count * 0.018)))
+    close_radius = clamp_int(params.get("contourFillClosingRadius"), 0, 6, 2)
+
+    source = binary
+    if close_radius > 0:
+        source = morphology.closing(source, footprint=morphology.disk(close_radius))
+
+    contours, _ = cv2.findContours(source.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    filled = binary.copy()
+    fill_plane = np.zeros(binary.shape, dtype=np.uint8)
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area < min_fill_area or area > max_fill_area:
+            continue
+        fill_plane.fill(0)
+        cv2.drawContours(fill_plane, [contour], -1, 1, thickness=cv2.FILLED)
+        filled |= fill_plane.astype(bool)
+
+    return filled.astype(bool)
+
+
 def compute_pca_images(
     feature_stack: np.ndarray,
     n_components: int = 3,
@@ -323,6 +363,7 @@ def suggest_foreground_clusters(labels: np.ndarray, k: int, stats: list[dict] | 
     border_pixels = max(1, border.size)
 
     seed_color_selected = []
+    max_seed_cluster_value = 0.97
     if stats:
         for item in stats:
             idx = int(item["cluster"])
@@ -334,7 +375,7 @@ def suggest_foreground_clusters(labels: np.ndarray, k: int, stats: list[dict] | 
 
             earthy_hue = 12 <= hue <= 95
             useful_saturation = saturation >= 0.11
-            not_too_bright = value <= 0.92
+            not_too_bright = value <= max_seed_cluster_value
             not_global_background = not (area_ratio > 0.35 and border_ratio > 0.18)
             if earthy_hue and useful_saturation and not_too_bright and not_global_background:
                 seed_color_selected.append(idx)
@@ -380,7 +421,8 @@ def build_binary_mask(labels: np.ndarray, selected_clusters: list[int], params: 
     opening_radius = clamp_int(params.get("openingRadius"), 0, 8, 1)
     closing_radius = clamp_int(params.get("closingRadius"), 0, 10, 2)
     noise_size = clamp_int(params.get("noiseSize"), 1, 50_000, 25)
-    hole_size = clamp_int(params.get("holeSize"), 1, 50_000, 64)
+    default_hole_size = max(64, int(labels.size * 0.0025))
+    hole_size = clamp_int(params.get("holeSize"), 1, 50_000, default_hole_size)
 
     mask = np.isin(labels, np.asarray(selected_clusters, dtype=np.int32))
     if opening_radius > 0:
@@ -391,6 +433,7 @@ def build_binary_mask(labels: np.ndarray, selected_clusters: list[int], params: 
         mask = morphology.remove_small_objects(mask, max_size=noise_size)
     if hole_size > 1:
         mask = morphology.remove_small_holes(mask, max_size=hole_size)
+    mask = fill_probable_outline_regions(mask, params)
     return mask.astype(bool)
 
 
@@ -464,7 +507,8 @@ def build_seed_color_mask(rgb: np.ndarray, params: dict) -> tuple[np.ndarray, np
     opening_radius = clamp_int(params.get("openingRadius"), 0, 8, 1)
     closing_radius = clamp_int(params.get("closingRadius"), 0, 10, 1)
     noise_size = clamp_int(params.get("noiseSize"), 1, 50_000, 25)
-    hole_size = clamp_int(params.get("holeSize"), 1, 50_000, 64)
+    default_hole_size = max(64, int(mask.size * 0.0025))
+    hole_size = clamp_int(params.get("holeSize"), 1, 50_000, default_hole_size)
 
     if opening_radius > 0:
         mask = morphology.opening(mask, footprint=morphology.disk(opening_radius))
@@ -474,8 +518,61 @@ def build_seed_color_mask(rgb: np.ndarray, params: dict) -> tuple[np.ndarray, np
         mask = morphology.remove_small_objects(mask, max_size=noise_size)
     if hole_size > 1:
         mask = morphology.remove_small_holes(mask, max_size=hole_size)
+    mask = fill_probable_outline_regions(mask, params)
 
     return mask.astype(bool), seedness.astype(np.float32)
+
+
+def fill_label_holes(labels: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
+    stats = {
+        "enabled": coerce_bool(params.get("fillSegmentHoles"), True),
+        "filled_pixels": 0,
+        "segment_hole_size": 0,
+    }
+    if not stats["enabled"] or labels.max() == 0:
+        return labels.astype(np.int32), stats
+
+    default_hole_size = max(
+        clamp_int(params.get("holeSize"), 1, 50_000, max(64, int(labels.size * 0.0025))),
+        int(labels.size * 0.012),
+    )
+    hole_size = clamp_int(params.get("segmentHoleSize"), 1, 250_000, min(250_000, default_hole_size))
+    closing_radius = clamp_int(params.get("segmentClosingRadius"), 0, 4, 1)
+    output = labels.astype(np.int32).copy()
+    occupied = output > 0
+    filled_pixels = 0
+
+    for source_id in [int(v) for v in np.unique(labels) if v > 0]:
+        component = labels == source_id
+        if not component.any():
+            continue
+
+        rows, cols = np.where(component)
+        pad = max(2, closing_radius + 2)
+        row0 = max(0, int(rows.min()) - pad)
+        row1 = min(labels.shape[0], int(rows.max()) + pad + 1)
+        col0 = max(0, int(cols.min()) - pad)
+        col1 = min(labels.shape[1], int(cols.max()) + pad + 1)
+
+        local_component = component[row0:row1, col0:col1]
+        local_occupied = occupied[row0:row1, col0:col1]
+        refined = local_component
+        if closing_radius > 0:
+            refined = morphology.closing(refined, footprint=morphology.disk(closing_radius))
+        refined = morphology.remove_small_holes(refined.astype(bool), max_size=hole_size)
+        refined &= ~local_occupied | local_component
+
+        target = output[row0:row1, col0:col1]
+        added = refined & (target == 0)
+        if added.any():
+            target[added] = source_id
+            occupied[row0:row1, col0:col1] |= refined
+            filled_pixels += int(added.sum())
+
+    stats["filled_pixels"] = int(filled_pixels)
+    stats["segment_hole_size"] = int(hole_size)
+    output, _, _ = relabel_sequential(output.astype(np.int32))
+    return output.astype(np.int32), stats
 
 
 def combine_masks(seed_mask: np.ndarray, kmeans_mask: np.ndarray, params: dict) -> np.ndarray:
@@ -768,7 +865,9 @@ def estimate_dynamic_thresholds(mask: np.ndarray, params: dict) -> dict:
     suggested_max_area = int(max(suggested_min_area + 1, round(p90_area * 1.85), round(median_area * 2.8)))
     suggested_min_length = int(max(1, round(p10_diag * 0.28)))
     suggested_max_length = int(max(suggested_min_length + 1, round(p90_diag * 1.75), round(median_diag * 2.45)))
-    suggested_marker = int(np.clip(round(math.sqrt(max(1.0, median_area)) * shrink_factor), 3, 40))
+    area_marker = math.sqrt(max(1.0, median_area)) * shrink_factor
+    diagonal_marker = median_diag * (0.14 + (0.10 * shrink_factor))
+    suggested_marker = int(np.clip(round(min(area_marker, diagonal_marker)), 3, 40))
 
     stats.update({
         "candidate_count": len(candidates),
@@ -802,7 +901,7 @@ def apply_dynamic_thresholds(params: dict, threshold_stats: dict) -> dict:
             else:
                 effective["maxArea"] = int(suggested_max)
 
-    if coerce_bool(params.get("dynamicDiagonalThresholds"), True):
+    if coerce_bool(params.get("dynamicDiagonalThresholds"), False):
         suggested_min = threshold_stats.get("suggested_min_length")
         suggested_max = threshold_stats.get("suggested_max_length")
         if suggested_min:
@@ -836,7 +935,7 @@ def watershed_split(
         marker_distance = int(np.clip(34 - (split_sensitivity * 3), 3, 40))
     else:
         sensitivity_distance = int(np.clip(34 - (split_sensitivity * 3), 3, 40))
-        marker_distance = min(int(marker_distance), sensitivity_distance)
+        marker_distance = min(int(np.clip(marker_distance, 3, 60)), sensitivity_distance)
 
     threshold_rel = peak_threshold_rel
     if threshold_rel is None:
@@ -880,7 +979,7 @@ def dense_seed_watershed(
     if marker_min_distance is None:
         marker_distance = sensitivity_distance
     else:
-        marker_distance = min(int(np.clip(marker_min_distance, 3, 40)), sensitivity_distance)
+        marker_distance = min(int(np.clip(marker_min_distance, 3, 60)), sensitivity_distance)
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
     gray_smooth = cv2.GaussianBlur(gray, (0, 0), 1.0)
     seed_smooth = cv2.GaussianBlur(seedness.astype(np.float32), (0, 0), 1.2)
@@ -942,27 +1041,32 @@ def dense_pile_watershed(
         return empty_i, empty_f, empty_i, 0, 0.0
 
     params = params or {}
-    sensitivity_distance = int(np.clip(30 - (split_sensitivity * 1.35), 10, 24))
-    if marker_min_distance is None:
-        marker_distance = clamp_int(params.get("denseMarkerMinDistance"), 4, 60, sensitivity_distance)
-    else:
-        marker_distance = min(int(np.clip(marker_min_distance, 4, 60)), sensitivity_distance)
+    sensitivity_distance = int(np.clip(22 - split_sensitivity, 8, 18))
+    requested_marker = clamp_int(
+        params.get("denseMarkerMinDistance"),
+        4,
+        60,
+        sensitivity_distance,
+    )
+    if marker_min_distance is not None:
+        requested_marker = min(requested_marker, int(np.clip(marker_min_distance, 4, 60)))
+    marker_distance = int(np.clip(min(requested_marker, sensitivity_distance), 4, 60))
 
     rgb_float = rgb.astype(np.float32) / 255.0
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
     gray_smooth = cv2.GaussianBlur(gray, (0, 0), 1.15)
     seed_smooth = cv2.GaussianBlur(seedness.astype(np.float32), (0, 0), 1.0)
-
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
     lab_yellow = normalize01(lab[..., 2])
-    saturation = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)[..., 1] / 255.0
+    saturation = hsv[..., 1]
 
     grad_x = cv2.Sobel(gray_smooth, cv2.CV_32F, 1, 0, ksize=3)
     grad_y = cv2.Sobel(gray_smooth, cv2.CV_32F, 0, 1, ksize=3)
     gradient = normalize01(np.sqrt((grad_x * grad_x) + (grad_y * grad_y)))
-
     local_mean = cv2.GaussianBlur(gray_smooth, (0, 0), 7.0)
     local_bright = normalize01(gray_smooth - local_mean)
+
     center_response = normalize01(
         (0.34 * gray_smooth)
         + (0.24 * seed_smooth)
@@ -974,7 +1078,8 @@ def dense_pile_watershed(
 
     inside = center_response[binary]
     if inside.size:
-        percentile = clamp_float(params.get("densePeakPercentile"), 35.0, 90.0, 72.0 - (split_sensitivity * 1.25))
+        default_percentile = 72.0 - split_sensitivity * 1.25
+        percentile = clamp_float(params.get("densePeakPercentile"), 35.0, 90.0, default_percentile)
         threshold_abs = max(0.08, float(np.percentile(inside, percentile)))
     else:
         threshold_abs = 0.12
@@ -1042,10 +1147,10 @@ def should_use_dense_pile_mode(raw_mask: np.ndarray, mask: np.ndarray, mask_stat
 def dense_pile_params(params: dict, pixel_count: int) -> dict:
     effective = dict(params)
     current_min = clamp_int(effective.get("minArea"), 0, 10_000_000, max(20, int(pixel_count * 0.00008)))
-    current_max = clamp_int(effective.get("maxArea"), 0, 10_000_000, max(current_min + 1, int(pixel_count * 0.014)))
+    current_max = clamp_int(effective.get("maxArea"), 0, 10_000_000, max(400, int(pixel_count * 0.008)))
     effective["minArea"] = max(12, min(current_min, max(20, int(pixel_count * 0.00009))))
     effective["maxArea"] = max(current_max, int(pixel_count * 0.014), effective["minArea"] + 1)
-    current_max_length = clamp_int(effective.get("maxLength"), 0, 100_000, int(math.sqrt(pixel_count) * 0.42))
+    current_max_length = clamp_int(effective.get("maxLength"), 0, 100_000, int(math.sqrt(pixel_count) * 0.28))
     effective["maxLength"] = max(current_max_length, int(math.sqrt(pixel_count) * 0.42), 1)
     effective["minSegmentSolidity"] = min(
         clamp_float(effective.get("minSegmentSolidity"), 0.0, 0.99, 0.35),
@@ -1159,6 +1264,119 @@ def refine_oversized_segments(
     return output.astype(np.int32)
 
 
+def edge_snap_labels(
+    labels: np.ndarray,
+    rgb: np.ndarray,
+    seedness: np.ndarray,
+    params: dict,
+) -> tuple[np.ndarray, dict]:
+    stats = {
+        "enabled": coerce_bool(params.get("edgeSnap"), False),
+        "input_segments": int(labels.max()) if labels.size else 0,
+        "output_segments": int(labels.max()) if labels.size else 0,
+        "candidate_pixels": int((labels > 0).sum()) if labels.size else 0,
+    }
+    if not stats["enabled"] or labels.max() == 0:
+        return labels.astype(np.int32), stats
+
+    foreground = labels > 0
+    snap_radius = clamp_int(params.get("edgeSnapRadius"), 0, 12, 4)
+    marker_erode = clamp_int(params.get("edgeSnapMarkerErode"), 0, 10, 2)
+    seed_threshold = clamp_float(params.get("seednessThreshold"), 0.05, 0.95, 0.30)
+    seedness_scale = clamp_float(params.get("edgeSnapSeednessScale"), 0.15, 1.0, 0.55)
+    max_extra_ratio = clamp_float(params.get("edgeSnapMaxExtraRatio"), 0.0, 0.80, 0.24)
+    min_marker_fraction = clamp_float(params.get("edgeSnapMinMarkerFraction"), 0.01, 0.65, 0.18)
+
+    candidate = foreground.copy()
+    if snap_radius > 0:
+        candidate = morphology.dilation(candidate, footprint=morphology.disk(snap_radius))
+        relaxed_seed = seedness >= max(0.03, seed_threshold * seedness_scale)
+        candidate = candidate & (relaxed_seed | foreground)
+
+    max_candidate_pixels = int(foreground.sum() * (1.0 + max_extra_ratio))
+    if max_candidate_pixels > 0 and int(candidate.sum()) > max_candidate_pixels:
+        distance_to_foreground = cv2.distanceTransform((~foreground).astype(np.uint8), cv2.DIST_L2, 3)
+        extra = candidate & ~foreground
+        if extra.any():
+            cutoff = float(np.percentile(distance_to_foreground[extra], max(1.0, 100.0 * max_extra_ratio)))
+            candidate = foreground | (extra & (distance_to_foreground <= max(1.0, cutoff)))
+
+    markers = np.zeros(labels.shape, dtype=np.int32)
+    next_marker = 1
+    for source_id in [int(v) for v in np.unique(labels) if v > 0]:
+        component = labels == source_id
+        marker = component
+        if marker_erode > 0 and int(component.sum()) > marker_erode * marker_erode * 8:
+            eroded = morphology.erosion(component, footprint=morphology.disk(marker_erode))
+            if int(eroded.sum()) >= max(2, int(component.sum() * min_marker_fraction)):
+                marker = eroded
+            else:
+                distance = cv2.distanceTransform(component.astype(np.uint8), cv2.DIST_L2, 5)
+                if distance.max() > 0:
+                    marker = distance >= max(1.0, float(distance.max()) * 0.46)
+
+        if not marker.any():
+            rows, cols = np.where(component)
+            if rows.size == 0:
+                continue
+            markers[int(round(rows.mean())), int(round(cols.mean()))] = next_marker
+        else:
+            markers[marker] = next_marker
+        next_marker += 1
+
+    if markers.max() == 0:
+        stats["output_segments"] = 0
+        return labels.astype(np.int32), stats
+
+    rgb_float = rgb.astype(np.float32) / 255.0
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+    gray_smooth = cv2.GaussianBlur(gray, (0, 0), 0.85)
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab_l = normalize01(lab[..., 0])
+    lab_b = normalize01(lab[..., 2])
+
+    grad_x = cv2.Sobel(gray_smooth, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray_smooth, cv2.CV_32F, 0, 1, ksize=3)
+    gray_gradient = normalize01(np.sqrt((grad_x * grad_x) + (grad_y * grad_y)))
+
+    lab_l_blur = cv2.GaussianBlur(lab_l, (0, 0), 0.85)
+    lab_b_blur = cv2.GaussianBlur(lab_b, (0, 0), 0.85)
+    lab_grad_x = cv2.Sobel(lab_l_blur, cv2.CV_32F, 1, 0, ksize=3)
+    lab_grad_y = cv2.Sobel(lab_l_blur, cv2.CV_32F, 0, 1, ksize=3)
+    yellow_grad_x = cv2.Sobel(lab_b_blur, cv2.CV_32F, 1, 0, ksize=3)
+    yellow_grad_y = cv2.Sobel(lab_b_blur, cv2.CV_32F, 0, 1, ksize=3)
+    color_gradient = normalize01(
+        np.sqrt((lab_grad_x * lab_grad_x) + (lab_grad_y * lab_grad_y))
+        + np.sqrt((yellow_grad_x * yellow_grad_x) + (yellow_grad_y * yellow_grad_y))
+    )
+
+    local_mean = cv2.GaussianBlur(gray_smooth, (0, 0), 4.0)
+    dark_valley = normalize01(local_mean - gray_smooth)
+    channel_spread = normalize01(np.std(rgb_float, axis=2))
+    seed_low = normalize01(1.0 - cv2.GaussianBlur(seedness.astype(np.float32), (0, 0), 0.9))
+
+    gradient_weight = clamp_float(params.get("edgeSnapGradientWeight"), 0.0, 1.0, 0.42)
+    valley_weight = clamp_float(params.get("edgeSnapValleyWeight"), 0.0, 1.0, 0.30)
+    color_weight = clamp_float(params.get("edgeSnapColorWeight"), 0.0, 1.0, 0.18)
+    seed_weight = clamp_float(params.get("edgeSnapSeednessWeight"), 0.0, 1.0, 0.10)
+    elevation = normalize01(
+        (gradient_weight * gray_gradient)
+        + (valley_weight * dark_valley)
+        + (color_weight * normalize01((0.65 * color_gradient) + (0.35 * channel_spread)))
+        + (seed_weight * seed_low)
+    )
+
+    snapped = watershed(elevation, markers=markers, mask=candidate.astype(bool))
+    snapped, _, _ = relabel_sequential(snapped.astype(np.int32))
+    stats.update({
+        "output_segments": int(snapped.max()),
+        "candidate_pixels": int(candidate.sum()),
+        "snap_radius": int(snap_radius),
+        "marker_erode": int(marker_erode),
+    })
+    return snapped.astype(np.int32), stats
+
+
 def largest_contour(mask: np.ndarray):
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
@@ -1192,10 +1410,186 @@ def contour_centroid(contour: np.ndarray, mask: np.ndarray) -> tuple[float, floa
     return float(cols.mean()), float(rows.mean())
 
 
+def segment_axis_vectors(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    rows, cols = np.where(mask)
+    if rows.size < 2:
+        return None
+
+    points = np.column_stack((cols.astype(np.float32), rows.astype(np.float32)))
+    centered = points - points.mean(axis=0, keepdims=True)
+    covariance = np.cov(centered, rowvar=False)
+    if not np.isfinite(covariance).all():
+        return None
+
+    values, vectors = np.linalg.eigh(covariance)
+    order = np.argsort(values)[::-1]
+    major = vectors[:, order[0]].astype(np.float32)
+    minor = np.asarray([-major[1], major[0]], dtype=np.float32)
+    major_norm = float(np.linalg.norm(major))
+    minor_norm = float(np.linalg.norm(minor))
+    if major_norm <= 0 or minor_norm <= 0:
+        return None
+    return major / major_norm, minor / minor_norm
+
+
+def draw_axis_line(
+    image: np.ndarray,
+    center: tuple[float, float],
+    vector: np.ndarray,
+    length: float,
+    color: tuple[int, int, int],
+    thickness: int,
+) -> None:
+    half = max(1.0, float(length) * 0.38)
+    cx, cy = center
+    start = (int(round(cx - vector[0] * half)), int(round(cy - vector[1] * half)))
+    end = (int(round(cx + vector[0] * half)), int(round(cy + vector[1] * half)))
+    cv2.line(image, start, end, color, max(1, thickness), lineType=cv2.LINE_AA)
+
+
+def build_reference_exclusion_mask(shape: tuple[int, int], params: dict, image_scale: float) -> tuple[np.ndarray | None, dict]:
+    stats = {"enabled": False, "pixels": 0, "padding": 0}
+    reference_px = clamp_float(params.get("referencePixels"), 0.0, 1_000_000.0, 0.0)
+    reference_mm = clamp_float(params.get("referenceMm"), 0.0, 1_000_000.0, 0.0)
+    if reference_px <= 0 or reference_mm <= 0:
+        return None, stats
+
+    def parse_coord(key: str) -> float:
+        try:
+            return float(params.get(key))
+        except (TypeError, ValueError):
+            return float("nan")
+
+    coords = [parse_coord("referenceX1"), parse_coord("referenceY1"), parse_coord("referenceX2"), parse_coord("referenceY2")]
+    if not all(np.isfinite(coords)):
+        return None, stats
+
+    pixel_space = str(params.get("referencePixelSpace") or "original")
+    scale = float(image_scale) if pixel_space == "original" else 1.0
+    x1, y1, x2, y2 = [float(v) * scale for v in coords]
+    line_px = math.hypot(x2 - x1, y2 - y1)
+    if line_px <= 1:
+        return None, stats
+
+    default_padding = max(6, int(round(line_px * 0.12)))
+    padding = clamp_int(params.get("referenceExcludePadding"), 1, 500, default_padding)
+    mask = np.zeros(shape, dtype=np.uint8)
+    cv2.line(
+        mask,
+        (int(round(x1)), int(round(y1))),
+        (int(round(x2)), int(round(y2))),
+        1,
+        thickness=max(1, padding * 2),
+        lineType=cv2.LINE_AA,
+    )
+
+    stats.update({"enabled": bool(mask.any()), "pixels": int(mask.sum()), "padding": int(padding)})
+    return mask.astype(bool), stats
+
+
+def circular_hue_delta(a: float, b: float) -> float:
+    delta = abs(float(a) - float(b))
+    return min(delta, 360.0 - delta) / 180.0
+
+
+def robust_seed_color_model(
+    labels: np.ndarray,
+    seedness: np.ndarray | None,
+    hsv: np.ndarray,
+    lab: np.ndarray,
+    params: dict,
+) -> dict | None:
+    if seedness is None or labels.max() == 0:
+        return None
+
+    samples = []
+    seed_floor = clamp_float(params.get("seedColorModelSeednessFloor"), 0.0, 1.0, 0.42)
+    for source_id in [int(v) for v in np.unique(labels) if v > 0]:
+        mask = labels == source_id
+        area = int(mask.sum())
+        if area <= 0:
+            continue
+        mean_seed = float(seedness[mask].mean())
+        if mean_seed < seed_floor:
+            continue
+        hsv_values = hsv[mask]
+        lab_values = lab[mask]
+        hue = float(np.mean(hsv_values[:, 0]) * 2.0)
+        saturation = float(np.mean(hsv_values[:, 1]) / 255.0)
+        value = float(np.mean(hsv_values[:, 2]) / 255.0)
+        lab_mean = lab_values.mean(axis=0)
+        samples.append((area, mean_seed, hue, saturation, value, lab_mean))
+
+    if len(samples) < 12:
+        return None
+
+    samples = sorted(samples, key=lambda item: item[1], reverse=True)
+    keep = samples[: max(12, int(len(samples) * 0.55))]
+    weights = np.asarray([max(1, item[0]) for item in keep], dtype=np.float32)
+    hues = np.asarray([item[2] for item in keep], dtype=np.float32)
+    hue_rad = np.deg2rad(hues)
+    mean_sin = float(np.average(np.sin(hue_rad), weights=weights))
+    mean_cos = float(np.average(np.cos(hue_rad), weights=weights))
+    mean_hue = (math.degrees(math.atan2(mean_sin, mean_cos)) + 360.0) % 360.0
+
+    sat = np.asarray([item[3] for item in keep], dtype=np.float32)
+    val = np.asarray([item[4] for item in keep], dtype=np.float32)
+    lab_stack = np.vstack([item[5] for item in keep]).astype(np.float32)
+    seed_values = np.asarray([item[1] for item in keep], dtype=np.float32)
+    return {
+        "hue": mean_hue,
+        "saturation": float(np.median(sat)),
+        "value": float(np.median(val)),
+        "lab": np.median(lab_stack, axis=0),
+        "seedness_floor": max(0.10, float(np.percentile(seed_values, 18)) * 0.62),
+        "area_median": float(np.median([item[0] for item in keep])),
+    }
+
+
+def seed_color_distance(
+    hue: float,
+    saturation: float,
+    value: float,
+    lab_mean: np.ndarray,
+    model: dict | None,
+) -> float:
+    if model is None:
+        return 0.0
+    hue_delta = circular_hue_delta(hue, float(model["hue"]))
+    sat_delta = abs(float(saturation) - float(model["saturation"]))
+    val_delta = abs(float(value) - float(model["value"]))
+    lab_delta = float(np.linalg.norm(lab_mean.astype(np.float32) - model["lab"].astype(np.float32)) / 140.0)
+    return float((0.34 * hue_delta) + (0.22 * sat_delta) + (0.18 * val_delta) + (0.26 * lab_delta))
+
+
+def build_skin_like_mask(rgb: np.ndarray) -> np.ndarray:
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
+    ycrcb = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb).astype(np.float32)
+    hue = hsv[..., 0] * 2.0
+    saturation = hsv[..., 1] / 255.0
+    value = hsv[..., 2] / 255.0
+    y = ycrcb[..., 0]
+    cr = ycrcb[..., 1]
+    cb = ycrcb[..., 2]
+
+    hsv_skin = (
+        ((hue <= 38.0) | (hue >= 345.0))
+        & (saturation >= 0.18)
+        & (saturation <= 0.78)
+        & (value >= 0.32)
+    )
+    ycrcb_skin = (y >= 45.0) & (cr >= 133.0) & (cr <= 185.0) & (cb >= 75.0) & (cb <= 145.0)
+    skin = hsv_skin & ycrcb_skin
+    skin = morphology.remove_small_objects(skin.astype(bool), max_size=32)
+    skin = morphology.closing(skin.astype(bool), footprint=morphology.disk(2))
+    return skin.astype(bool)
+
+
 def measure_segments(
     labels: np.ndarray,
     params: dict,
     seedness: np.ndarray | None = None,
+    rgb: np.ndarray | None = None,
     image_scale: float = 1.0,
 ) -> tuple[list[dict], np.ndarray]:
     min_area = clamp_int(params.get("minArea"), 0, 10_000_000, 0)
@@ -1222,9 +1616,26 @@ def measure_segments(
     if reference_pixel_space == "original":
         reference_px *= max(1e-9, float(image_scale))
     pixels_per_mm = reference_px / reference_mm if reference_px > 0 and reference_mm > 0 else None
+    reference_exclusion, exclusion_stats = build_reference_exclusion_mask(labels.shape, params, image_scale)
+    exclusion_overlap_ratio = clamp_float(params.get("referenceExcludeOverlapRatio"), 0.05, 1.0, 0.45)
+    reject_non_seed = coerce_bool(params.get("rejectNonSeedObjects"), True)
+    max_seed_color_distance = clamp_float(params.get("maxSeedColorDistance"), 0.05, 1.5, 0.34)
+    min_non_seed_seedness = clamp_float(params.get("minNonSeedObjectSeedness"), 0.0, 1.0, 0.085)
+    large_non_seed_area_multiplier = clamp_float(params.get("largeNonSeedAreaMultiplier"), 1.0, 80.0, 8.0)
+    hard_max_area_ratio = clamp_float(params.get("hardMaxObjectAreaRatio"), 0.0001, 0.50, 0.12)
+    hard_max_area = int(labels.size * hard_max_area_ratio)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32) if rgb is not None else None
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32) if rgb is not None else None
+    skin_like_mask = build_skin_like_mask(rgb) if reject_non_seed and rgb is not None else None
+    seed_color_model = (
+        robust_seed_color_model(labels, seedness, hsv, lab, params)
+        if reject_non_seed and hsv is not None and lab is not None
+        else None
+    )
 
     records = []
     filtered = np.zeros(labels.shape, dtype=np.int32)
+    rejected_non_seed = 0
 
     for source_id in [int(v) for v in np.unique(labels) if v > 0]:
         mask = labels == source_id
@@ -1235,6 +1646,7 @@ def measure_segments(
         area = float(cv2.contourArea(contour))
         if area <= 0:
             area = float(mask.sum())
+        mask_area = int(mask.sum())
 
         length, width, angle = contour_axes(contour)
         aspect_ratio = float(length / max(width, 1e-6))
@@ -1244,10 +1656,79 @@ def measure_segments(
         hull = cv2.convexHull(contour)
         hull_area = float(cv2.contourArea(hull))
         solidity = float(area / hull_area) if hull_area > 0 else 0.0
+        centroid_x, centroid_y = contour_centroid(contour, mask)
         mean_seedness = None
         if seedness is not None:
             seed_values = seedness[mask]
             mean_seedness = float(seed_values.mean()) if seed_values.size else 0.0
+        skin_overlap_ratio = 0.0
+        if skin_like_mask is not None:
+            skin_overlap_ratio = int((mask & skin_like_mask).sum()) / max(1, mask_area)
+        color_distance = 0.0
+        if seed_color_model is not None and hsv is not None and lab is not None:
+            hsv_values = hsv[mask]
+            lab_values = lab[mask]
+            hue = float(np.mean(hsv_values[:, 0]) * 2.0)
+            saturation = float(np.mean(hsv_values[:, 1]) / 255.0)
+            value = float(np.mean(hsv_values[:, 2]) / 255.0)
+            lab_mean = lab_values.mean(axis=0)
+            color_distance = seed_color_distance(hue, saturation, value, lab_mean, seed_color_model)
+            seedness_floor = float(seed_color_model["seedness_floor"])
+            typical_area = max(1.0, float(seed_color_model.get("area_median") or 1.0))
+            large_object = area > typical_area * large_non_seed_area_multiplier
+            huge_object = hard_max_area > 0 and mask_area > hard_max_area
+            very_low_seedness = mean_seedness is not None and mean_seedness < min_non_seed_seedness
+            weak_seedness = mean_seedness is None or mean_seedness < seedness_floor
+            large_low_seedness = large_object and mean_seedness is not None and mean_seedness < max(seedness_floor, 0.20)
+            saturation_gap = abs(saturation - float(seed_color_model["saturation"]))
+            value_gap = abs(value - float(seed_color_model["value"]))
+            clearly_foreign_color = (
+                color_distance > max_seed_color_distance
+                or saturation_gap > 0.34
+                or value_gap > 0.42
+            )
+            shape_not_seed_like = (
+                aspect_ratio < 1.18
+                or aspect_ratio > max(18.0, max_aspect_ratio * 1.7)
+                or solidity < 0.18
+                or extent < 0.06
+            )
+            skin_like_object = (
+                skin_overlap_ratio >= 0.40
+                and area > typical_area * 4.0
+                and (large_object or weak_seedness or shape_not_seed_like or color_distance > max_seed_color_distance * 0.55)
+            )
+            if skin_like_object:
+                rejected_non_seed += 1
+                continue
+            if huge_object and (weak_seedness or clearly_foreign_color or shape_not_seed_like):
+                rejected_non_seed += 1
+                continue
+            if large_low_seedness and (clearly_foreign_color or shape_not_seed_like or area > typical_area * 14.0):
+                rejected_non_seed += 1
+                continue
+            if very_low_seedness and (clearly_foreign_color or large_object):
+                rejected_non_seed += 1
+                continue
+            if clearly_foreign_color and weak_seedness:
+                rejected_non_seed += 1
+                continue
+            if large_object and shape_not_seed_like and color_distance > max_seed_color_distance * 0.78:
+                rejected_non_seed += 1
+                continue
+        if reference_exclusion is not None:
+            overlap = int((mask & reference_exclusion).sum())
+            overlap_ratio = overlap / max(1, int(mask.sum()))
+            center_x = int(round(centroid_x))
+            center_y = int(round(centroid_y))
+            center_inside_reference = (
+                0 <= center_y < reference_exclusion.shape[0]
+                and 0 <= center_x < reference_exclusion.shape[1]
+                and bool(reference_exclusion[center_y, center_x])
+            )
+            if overlap_ratio >= exclusion_overlap_ratio or (center_inside_reference and overlap_ratio >= 0.18):
+                exclusion_stats["removed_segments"] = int(exclusion_stats.get("removed_segments", 0)) + 1
+                continue
 
         if area < min_area:
             continue
@@ -1272,7 +1753,6 @@ def measure_segments(
         if reject_border_segments and touches_border((y, x, y + bbox_h, x + bbox_w), labels.shape, border_margin):
             continue
 
-        centroid_x, centroid_y = contour_centroid(contour, mask)
         grain_id = len(records) + 1
         filtered[mask] = grain_id
 
@@ -1295,6 +1775,7 @@ def measure_segments(
             "extent": round(extent, 6),
             "aspect_ratio": round(aspect_ratio, 6),
             "mean_seedness": round(mean_seedness, 6) if mean_seedness is not None else None,
+            "seed_color_distance": round(float(color_distance), 6),
         }
 
         if pixels_per_mm:
@@ -1304,6 +1785,8 @@ def measure_segments(
 
         records.append(record)
 
+    if rejected_non_seed:
+        logger.info("Rejected %d non-seed-like segments by color model", rejected_non_seed)
     return records, filtered
 
 
@@ -1328,6 +1811,7 @@ def draw_overlay(
     show_labels: bool = True,
     fill_alpha: float = 0.28,
     line_width: int = 2,
+    show_axes: bool = False,
 ) -> np.ndarray:
     overlay = rgb.copy()
     fill = rgb.copy()
@@ -1350,6 +1834,26 @@ def draw_overlay(
 
         color = color_for_id(grain_id)
         cv2.drawContours(overlay, [contour], -1, color, max(1, int(line_width)), lineType=cv2.LINE_AA)
+        axes = segment_axis_vectors(mask) if show_axes else None
+        if axes is not None:
+            center = (float(record["centroid_x"]), float(record["centroid_y"]))
+            major, minor = axes
+            draw_axis_line(
+                overlay,
+                center,
+                major,
+                float(record["length_px"]),
+                (245, 247, 250),
+                1,
+            )
+            draw_axis_line(
+                overlay,
+                center,
+                minor,
+                float(record["width_px"]),
+                (255, 205, 72),
+                1,
+            )
         if not show_labels:
             continue
 
@@ -1400,12 +1904,15 @@ def summarize(records: list[dict]) -> dict:
             "mean_area_px": 0,
             "mean_length_px": 0,
             "mean_width_px": 0,
+            "mean_area_mm2": None,
+            "mean_length_mm": None,
+            "mean_width_mm": None,
         }
 
     area = np.asarray([r["area_px"] for r in records], dtype=np.float32)
     length = np.asarray([r["length_px"] for r in records], dtype=np.float32)
     width = np.asarray([r["width_px"] for r in records], dtype=np.float32)
-    return {
+    summary = {
         "count": len(records),
         "mean_area_px": round(float(area.mean()), 3),
         "mean_length_px": round(float(length.mean()), 3),
@@ -1413,6 +1920,27 @@ def summarize(records: list[dict]) -> dict:
         "min_length_px": round(float(length.min()), 3),
         "max_length_px": round(float(length.max()), 3),
     }
+    calibrated = [r for r in records if r.get("length_mm") is not None and r.get("width_mm") is not None]
+    if calibrated:
+        area_mm2 = np.asarray([r["area_mm2"] for r in calibrated], dtype=np.float32)
+        length_mm = np.asarray([r["length_mm"] for r in calibrated], dtype=np.float32)
+        width_mm = np.asarray([r["width_mm"] for r in calibrated], dtype=np.float32)
+        summary.update({
+            "mean_area_mm2": round(float(area_mm2.mean()), 5),
+            "mean_length_mm": round(float(length_mm.mean()), 5),
+            "mean_width_mm": round(float(width_mm.mean()), 5),
+            "min_length_mm": round(float(length_mm.min()), 5),
+            "max_length_mm": round(float(length_mm.max()), 5),
+        })
+    else:
+        summary.update({
+            "mean_area_mm2": None,
+            "mean_length_mm": None,
+            "mean_width_mm": None,
+            "min_length_mm": None,
+            "max_length_mm": None,
+        })
+    return summary
 
 
 def analyze(image_path: Path, params: dict) -> dict:
@@ -1434,7 +1962,14 @@ def analyze(image_path: Path, params: dict) -> dict:
     params.setdefault("minArea", max(20, int(pixel_count * 0.000035)))
     params.setdefault("maxArea", max(int(params["minArea"]) + 1, int(pixel_count * 0.006)))
     params.setdefault("maxLength", int(max(height, width) * 0.18))
-    params.setdefault("maskSource", "auto")
+    params.setdefault("maskSource", "sam")
+    params.setdefault("samModelType", "fast_sam")
+    params.setdefault("useSamInstances", True)
+    reference_px = clamp_float(params.get("referencePixels"), 0.0, 1_000_000.0, 0.0)
+    reference_mm = clamp_float(params.get("referenceMm"), 0.0, 1_000_000.0, 0.0)
+    reference_pixel_space = str(params.get("referencePixelSpace") or "original")
+    adjusted_reference_px = reference_px * max(1e-9, float(prepared.scale)) if reference_pixel_space == "original" else reference_px
+    mm_per_pixel = reference_mm / adjusted_reference_px if adjusted_reference_px > 0 and reference_mm > 0 else None
 
     features, feature_names = build_color_features(prepared.rgb)
     rgb_pcs, rgb_explained = compute_pca_images(features[..., :3], method=pca_method)
@@ -1464,6 +1999,61 @@ def analyze(image_path: Path, params: dict) -> dict:
     kmeans_mask = build_binary_mask(cluster_labels, selected_clusters, params)
     seed_mask, seedness = build_seed_color_mask(prepared.rgb, params)
     raw_mask = combine_masks(seed_mask, kmeans_mask, params)
+
+    # ── SAM mask override ───────────────────────────────────
+    sam_summary = None
+    sam_instance_labels = None
+    mask_source = str(params.get("maskSource") or "auto")
+    if mask_source == "sam":
+        try:
+            if coerce_bool(params.get("useSamInstances"), True):
+                labels_result, sam_summary = build_sam_labels(prepared.rgb, params)
+                if int(labels_result.max()) > 0:
+                    sam_instance_labels = labels_result.astype(np.int32)
+                    raw_mask = sam_instance_labels > 0
+                else:
+                    sam_result = build_sam_mask(prepared.rgb, params)
+                    raw_mask = sam_result
+                    sam_summary["fallback"] = "binary_sam_mask"
+                    sam_summary["pixels"] = int(sam_result.sum())
+                    sam_summary["ratio"] = round(float(sam_result.mean()), 6)
+            else:
+                sam_result = build_sam_mask(prepared.rgb, params)
+                raw_mask = sam_result
+                sam_summary = {
+                    "enabled": True,
+                    "pixels": int(sam_result.sum()),
+                    "ratio": round(float(sam_result.mean()), 6),
+                }
+        except Exception as exc:
+            logger.warning("SAM failed, falling back to hybrid: %s", exc)
+            sam_summary = {
+                "enabled": True,
+                "error": str(exc),
+                "fallback": "hybrid",
+            }
+    elif mask_source == "sam+hybrid":
+        try:
+            sam_result = build_sam_mask(prepared.rgb, params)
+            # Kết hợp SAM mask với raw_mask hiện tại
+            combined_mask = raw_mask.astype(bool) | sam_result.astype(bool)
+            raw_mask = combined_mask
+            sam_summary = {
+                "enabled": True,
+                "mode": "sam+hybrid",
+                "sam_pixels": int(sam_result.sum()),
+                "hybrid_pixels": int((raw_mask.astype(bool) & ~sam_result).sum()),
+                "combined_pixels": int(combined_mask.sum()),
+            }
+        except Exception as exc:
+            logger.warning("SAM+hybrid failed, using hybrid alone: %s", exc)
+            sam_summary = {
+                "enabled": True,
+                "mode": "sam+hybrid",
+                "error": str(exc),
+                "fallback": "hybrid",
+            }
+
     mask, mask_filter_stats = filter_foreground_mask(raw_mask, seedness, prepared.rgb, params)
     dense_pile_mode = should_use_dense_pile_mode(raw_mask, mask, mask_filter_stats, params)
     if dense_pile_mode:
@@ -1544,12 +2134,60 @@ def analyze(image_path: Path, params: dict) -> dict:
         marker_min_distance=marker_distance,
         peak_threshold_rel=peak_threshold,
     )
-    records, measured_labels = measure_segments(
+    snapped_labels, edge_snap_stats = edge_snap_labels(
         refined_labels,
+        prepared.rgb,
+        seedness,
+        effective_params,
+    )
+    measured_source_labels, label_fill_stats = fill_label_holes(snapped_labels, effective_params)
+    records, measured_labels = measure_segments(
+        measured_source_labels,
         effective_params,
         seedness=seedness,
+        rgb=prepared.rgb,
         image_scale=prepared.scale,
     )
+
+    if sam_instance_labels is not None:
+        sam_params = dict(effective_params)
+        sam_params["minArea"] = 1
+        sam_params["maxArea"] = 0
+        sam_params["minLength"] = 0
+        sam_params["maxLength"] = 0
+        sam_params["minWidth"] = 0
+        sam_params["maxWidth"] = 0
+        sam_params["maxSegmentAspectRatio"] = 50.0
+        sam_params["minSegmentSeednessMean"] = 0
+        sam_params["minSegmentSolidity"] = 0.0
+        sam_params["minSegmentExtent"] = 0.0
+        measured_source_labels, label_fill_stats = fill_label_holes(sam_instance_labels, sam_params)
+        records, measured_labels = measure_segments(
+            measured_source_labels,
+            sam_params,
+            seedness=seedness,
+            rgb=prepared.rgb,
+            image_scale=prepared.scale,
+        )
+        mask = measured_labels > 0
+        mask_filter_stats = {
+            "sam_instances": True,
+            "pixels_after": int(mask.sum()),
+            "component_count_after": int(measured_labels.max()) if measured_labels.size else 0,
+        }
+        dense_pile_mode = False
+        refined_labels = sam_instance_labels
+        markers = sam_instance_labels
+        marker_distance = 0
+        peak_threshold = 0.0
+        effective_watershed_mode = "sam_instances"
+        threshold_stats = {
+            "enabled": False,
+            "component_count": int(sam_instance_labels.max()) if sam_instance_labels.size else 0,
+            "candidate_count": int(sam_summary.get("candidate_count") or 0) if sam_summary else 0,
+            "sam_instances": True,
+        }
+        effective_params = sam_params
 
     overlay = draw_overlay(
         prepared.rgb,
@@ -1558,6 +2196,7 @@ def analyze(image_path: Path, params: dict) -> dict:
         show_labels=not dense_pile_mode,
         fill_alpha=0.16 if dense_pile_mode else 0.28,
         line_width=1 if dense_pile_mode else 2,
+        show_axes=coerce_bool(params.get("showMeasurementAxes"), False),
     )
     csv_text = records_to_csv(records)
 
@@ -1594,11 +2233,14 @@ def analyze(image_path: Path, params: dict) -> dict:
             "marker_min_distance": int(marker_distance),
             "peak_threshold_rel": round(float(peak_threshold), 6),
             "split_sensitivity": split_sensitivity,
+            "edge_snap": edge_snap_stats,
+            "label_fill": label_fill_stats,
             "segmentation_mode": "dense_pile" if dense_pile_mode else "foreground",
             "watershed_mode": effective_watershed_mode,
             "requested_watershed_mode": watershed_mode,
             "mask_source": str(params.get("maskSource") or "auto"),
             "mask_filter": mask_filter_stats,
+            "sam": sam_summary,
             "dynamic_thresholds": threshold_stats,
             "effective_thresholds": {
                 "minArea": effective_params.get("minArea"),
@@ -1606,6 +2248,15 @@ def analyze(image_path: Path, params: dict) -> dict:
                 "minLength": effective_params.get("minLength"),
                 "maxLength": effective_params.get("maxLength"),
             },
+        },
+        "calibration": {
+            "enabled": bool(mm_per_pixel),
+            "reference_pixels": round(float(reference_px), 6) if reference_px > 0 else None,
+            "reference_mm": round(float(reference_mm), 6) if reference_mm > 0 else None,
+            "reference_pixel_space": reference_pixel_space,
+            "image_scale": round(float(prepared.scale), 6),
+            "mm_per_pixel": round(float(mm_per_pixel), 8) if mm_per_pixel else None,
+            "pixels_per_mm": round(float(1.0 / mm_per_pixel), 6) if mm_per_pixel else None,
         },
         "summary": summarize(records),
         "measurements": records,

@@ -24,7 +24,7 @@ class StorageScreen extends ConsumerWidget {
             const _Header(),
             const SizedBox(height: 18),
             Text(
-              'Không tải được lịch sử: $error',
+              error.toString(),
               style: TextStyle(color: Colors.red.shade700),
             ),
           ],
