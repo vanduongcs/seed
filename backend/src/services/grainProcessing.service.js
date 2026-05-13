@@ -103,6 +103,8 @@ const numericFields = new Set([
   'riceMarkerMinDistance',
   'riceMaskPercentile',
   'ricePeakPercentile',
+  'denseAutoTargetCount',
+  'denseAutoMaxCount',
 ]);
 
 const booleanFields = new Set([
@@ -121,6 +123,8 @@ const booleanFields = new Set([
   'showMeasurementAxes',
   'samUseTiling',
   'rejectNonSeedObjects',
+  'autoImageProfile',
+  'autoSurfaceTune',
 ]);
 
 const requestOverrideFields = new Set([

@@ -156,6 +156,19 @@ Khi deploy có thể override bằng biến môi trường `GRAIN_DEFAULT_PARAMS
 GRAIN_DEFAULT_PARAMS_JSON={"maskSource":"hybrid","maxSide":1800,"splitSensitivity":7}
 ```
 
+Để đổi nhanh theo môi trường, dùng `GRAIN_PROCESS_PROFILE`:
+
+```env
+GRAIN_PROCESS_PROFILE=surface_quality # mặc định: auto mode, ảnh lớn hơn, hybrid; dense-pile sẽ tự tune khi cần
+GRAIN_PROCESS_PROFILE=surface_pile # nhanh hơn quality, ít over-seg hơn seed_fast nhưng có thể bỏ sót
+GRAIN_PROCESS_PROFILE=seed_fast    # nhanh nhất nhưng dễ over-seg texture, chỉ hợp ảnh rất sạch
+GRAIN_PROCESS_PROFILE=balanced     # hybrid mask + dense watershed, ổn hơn khi nền khó
+GRAIN_PROCESS_PROFILE=dense_fast   # ép dense-pile, giảm maxSide cho ảnh đống hạt dày
+GRAIN_PROCESS_PROFILE=sam_instances # chỉ dùng khi thật sự cần SAM instance, chậm hơn đáng kể
+```
+
+Profile `surface_quality` không ép một thuật toán cho mọi ảnh. Worker đo tỷ lệ foreground, số component, edge/contrast và seedness để tự phân loại bối cảnh ảnh trong `segmentation.image_profile`, rồi mới chọn foreground/dense-pile và tự chỉnh tham số. Khi vào dense-pile, nó thử nhiều tổ hợp marker/peak và chọn cấu hình có score tốt nhất trong `segmentation.dense_auto_tune`.
+
 Response trả về:
 
 - `summary`: thống kê tổng quan.
@@ -193,6 +206,7 @@ JWT_REFRESH_SECRET=your_refresh_secret_here
 ALLOWED_ORIGINS=http://localhost:5173
 GRAIN_PROCESS_TIMEOUT_MS=180000
 GRAIN_PYTHON_BIN=
+GRAIN_PROCESS_PROFILE=surface_quality
 GRAIN_DEFAULT_PARAMS_JSON=
 ```
 
