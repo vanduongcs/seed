@@ -430,7 +430,7 @@ def build_binary_mask(labels: np.ndarray, selected_clusters: list[int], params: 
     if closing_radius > 0:
         mask = morphology.closing(mask, footprint=morphology.disk(closing_radius))
     if noise_size > 1:
-        mask = morphology.remove_small_objects(mask, max_size=noise_size)
+        mask = morphology.remove_small_objects(mask, min_size=noise_size)
     if hole_size > 1:
         mask = morphology.remove_small_holes(mask, max_size=hole_size)
     mask = fill_probable_outline_regions(mask, params)
@@ -515,7 +515,7 @@ def build_seed_color_mask(rgb: np.ndarray, params: dict) -> tuple[np.ndarray, np
     if closing_radius > 0:
         mask = morphology.closing(mask, footprint=morphology.disk(closing_radius))
     if noise_size > 1:
-        mask = morphology.remove_small_objects(mask, max_size=noise_size)
+        mask = morphology.remove_small_objects(mask, min_size=noise_size)
     if hole_size > 1:
         mask = morphology.remove_small_holes(mask, max_size=hole_size)
     mask = fill_probable_outline_regions(mask, params)
@@ -1293,9 +1293,11 @@ def build_dense_pile_mask(rgb: np.ndarray, seedness: np.ndarray, params: dict) -
         - (0.22 * gradient)
     )
 
+    roi, roi_stats = build_pile_roi_mask(rgb, seedness, params)
+    score_values = surface_score[roi] if roi.any() else surface_score.reshape(-1)
     percentile = clamp_float(params.get("denseMaskPercentile"), 5.0, 45.0, 28.0)
-    threshold = max(0.05, float(np.percentile(surface_score, percentile)))
-    mask = surface_score >= threshold
+    threshold = max(0.05, float(np.percentile(score_values, percentile)))
+    mask = (surface_score >= threshold) & roi
 
     closing_radius = clamp_int(params.get("denseMaskClosingRadius"), 0, 5, 1)
     min_area = clamp_int(params.get("denseMaskMinArea"), 1, 50_000, 12)
@@ -1310,7 +1312,71 @@ def build_dense_pile_mask(rgb: np.ndarray, seedness: np.ndarray, params: dict) -
         "dense_mask_pixels": int(mask.sum()),
         "dense_mask_ratio": round(float(mask.mean()), 6),
     }
+    stats.update(roi_stats)
     return mask.astype(bool), stats
+
+
+def build_pile_roi_mask(rgb: np.ndarray, seedness: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
+    height, width = rgb.shape[:2]
+    pixel_count = max(1, height * width)
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+    border_width = clamp_int(params.get("backgroundBorderWidth"), 1, 120, max(8, int(round(min(height, width) * 0.035))))
+    border_width = min(border_width, max(1, height // 4), max(1, width // 4))
+    border_mask = np.zeros((height, width), dtype=bool)
+    border_mask[:border_width, :] = True
+    border_mask[-border_width:, :] = True
+    border_mask[:, :border_width] = True
+    border_mask[:, -border_width:] = True
+
+    saturation = hsv[..., 1] / 255.0
+    grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    edge = normalize01(np.sqrt((grad_x * grad_x) + (grad_y * grad_y)))
+    border_lab = lab[border_mask]
+    border_saturation = saturation[border_mask]
+    border_edge = edge[border_mask]
+    quiet_border = (border_saturation <= np.percentile(border_saturation, 45)) & (border_edge <= np.percentile(border_edge, 55))
+    if int(quiet_border.sum()) >= max(32, int(border_lab.shape[0] * 0.08)):
+        background_lab = np.median(border_lab[quiet_border], axis=0)
+    else:
+        background_lab = np.median(border_lab, axis=0)
+
+    lab_distance = np.linalg.norm(lab - background_lab, axis=2)
+    border_distance = lab_distance[border_mask]
+    quiet_distance = border_distance[quiet_border] if int(quiet_border.sum()) else border_distance
+    distance_floor = max(
+        clamp_float(params.get("denseRoiBackgroundDistance"), 2.0, 80.0, 8.0),
+        float(np.percentile(quiet_distance, 98)) + 4.0 if quiet_distance.size else 8.0,
+    )
+    foreground = (
+        (lab_distance >= distance_floor)
+        | (
+            (seedness >= max(0.16, clamp_float(params.get("seednessThreshold"), 0.05, 0.95, 0.24) * 0.70))
+            & (lab_distance >= distance_floor * 0.45)
+        )
+        | ((saturation >= 0.11) & (edge >= 0.08))
+    )
+
+    foreground = morphology.closing(foreground.astype(bool), footprint=morphology.disk(5))
+    foreground = morphology.remove_small_holes(foreground, max_size=max(256, int(pixel_count * 0.025)))
+    foreground = morphology.remove_small_objects(foreground, min_size=max(64, int(pixel_count * 0.002)))
+
+    labels = measure.label(foreground, connectivity=2).astype(np.int32)
+    if labels.max() > 0:
+        props = measure.regionprops(labels)
+        largest = max(props, key=lambda item: item.area)
+        keep = labels == largest.label
+        if largest.area >= max(64, int(pixel_count * 0.04)):
+            foreground = morphology.dilation(keep, footprint=morphology.disk(2))
+
+    stats = {
+        "dense_roi_pixels": int(foreground.sum()),
+        "dense_roi_ratio": round(float(foreground.mean()), 6),
+        "dense_roi_background_distance": round(float(distance_floor), 6),
+    }
+    return foreground.astype(bool), stats
 
 
 def refine_oversized_segments(
@@ -1834,7 +1900,7 @@ def build_skin_like_mask(rgb: np.ndarray) -> np.ndarray:
     )
     ycrcb_skin = (y >= 45.0) & (cr >= 133.0) & (cr <= 185.0) & (cb >= 75.0) & (cb <= 145.0)
     skin = hsv_skin & ycrcb_skin
-    skin = morphology.remove_small_objects(skin.astype(bool), max_size=32)
+    skin = morphology.remove_small_objects(skin.astype(bool), min_size=32)
     skin = morphology.closing(skin.astype(bool), footprint=morphology.disk(2))
     return skin.astype(bool)
 
@@ -2333,15 +2399,96 @@ def analyze(image_path: Path, params: dict) -> dict:
         params.update(image_profile_params)
         watershed_mode = str(params.get("watershedMode") or watershed_mode)
     dense_pile_mode = should_use_dense_pile_mode(raw_mask, mask, mask_filter_stats, params)
+    precomputed_dense_tune = None
+    precomputed_dense_effective_params = None
     if dense_pile_mode:
         foreground_pixels_after_filter = int(mask_filter_stats.get("pixels_after") or int(mask.sum()))
         foreground_components_after_filter = int(mask_filter_stats.get("component_count_after") or 0)
-        dense_mask, dense_mask_stats = build_dense_pile_mask(prepared.rgb, seedness, params)
-        if int(dense_mask.sum()) < max(100, int(pixel_count * 0.12)):
-            dense_mask = raw_mask.astype(bool) if raw_mask.any() else np.ones(mask.shape, dtype=bool)
-            dense_mask_stats["dense_mask_fallback"] = True
-            dense_mask_stats["dense_mask_pixels"] = int(dense_mask.sum())
-            dense_mask_stats["dense_mask_ratio"] = round(float(dense_mask.mean()), 6)
+        dense_mask = None
+        dense_mask_stats = {}
+        if coerce_bool(params.get("autoSurfaceTune"), True):
+            mask_candidates = parse_int_list(params.get("denseAutoMaskPercentiles"), [24, 28, 34], 5, 45)
+            best_pipeline = None
+            pipeline_candidates = []
+            for mask_percentile in mask_candidates[:4]:
+                candidate_params = dict(params)
+                candidate_params["denseMaskPercentile"] = float(mask_percentile)
+                candidate_mask, candidate_mask_stats = build_dense_pile_mask(prepared.rgb, seedness, candidate_params)
+                if int(candidate_mask.sum()) < max(100, int(pixel_count * 0.12)):
+                    candidate_mask = raw_mask.astype(bool) if raw_mask.any() else np.ones(mask.shape, dtype=bool)
+                    candidate_mask_stats["dense_mask_fallback"] = True
+                    candidate_mask_stats["dense_mask_pixels"] = int(candidate_mask.sum())
+                    candidate_mask_stats["dense_mask_ratio"] = round(float(candidate_mask.mean()), 6)
+
+                candidate_effective = dense_pile_params(candidate_params, pixel_count)
+                (
+                    candidate_labels,
+                    candidate_distance,
+                    candidate_markers,
+                    candidate_marker_distance,
+                    candidate_peak_threshold,
+                    candidate_effective,
+                    candidate_tune_stats,
+                ) = auto_tune_dense_pile_watershed(
+                    candidate_mask,
+                    prepared.rgb,
+                    seedness,
+                    split_sensitivity,
+                    marker_min_distance=None,
+                    params=candidate_effective,
+                    image_scale=prepared.scale,
+                )
+                selected = dict(candidate_tune_stats.get("selected") or {})
+                mask_ratio = float(candidate_mask.mean())
+                score = float(selected.get("score", -1_000_000.0))
+                score -= max(0.0, mask_ratio - 0.88) * 140.0
+                score -= max(0.0, 0.16 - mask_ratio) * 220.0
+                selected.update({
+                    "denseMaskPercentile": float(mask_percentile),
+                    "dense_mask_ratio": round(mask_ratio, 6),
+                    "pipeline_score": round(float(score), 6),
+                })
+                pipeline_candidates.append(selected)
+                if best_pipeline is None or score > best_pipeline["score"]:
+                    candidate_tune_stats["selected"] = selected
+                    best_pipeline = {
+                        "score": score,
+                        "mask": candidate_mask,
+                        "mask_stats": candidate_mask_stats,
+                        "labels": candidate_labels,
+                        "distance": candidate_distance,
+                        "markers": candidate_markers,
+                        "marker_distance": candidate_marker_distance,
+                        "peak_threshold": candidate_peak_threshold,
+                        "effective_params": candidate_effective,
+                        "tune_stats": candidate_tune_stats,
+                    }
+
+            if best_pipeline is not None:
+                dense_mask = best_pipeline["mask"]
+                dense_mask_stats = best_pipeline["mask_stats"]
+                precomputed_dense_effective_params = best_pipeline["effective_params"]
+                precomputed_dense_tune = (
+                    best_pipeline["labels"],
+                    best_pipeline["distance"],
+                    best_pipeline["markers"],
+                    best_pipeline["marker_distance"],
+                    best_pipeline["peak_threshold"],
+                    best_pipeline["tune_stats"],
+                )
+                dense_mask_stats["dense_pipeline_candidates"] = sorted(
+                    pipeline_candidates,
+                    key=lambda item: float(item.get("pipeline_score", item.get("score", -1_000_000.0))),
+                    reverse=True,
+                )[:8]
+
+        if dense_mask is None:
+            dense_mask, dense_mask_stats = build_dense_pile_mask(prepared.rgb, seedness, params)
+            if int(dense_mask.sum()) < max(100, int(pixel_count * 0.12)):
+                dense_mask = raw_mask.astype(bool) if raw_mask.any() else np.ones(mask.shape, dtype=bool)
+                dense_mask_stats["dense_mask_fallback"] = True
+                dense_mask_stats["dense_mask_pixels"] = int(dense_mask.sum())
+                dense_mask_stats["dense_mask_ratio"] = round(float(dense_mask.mean()), 6)
         mask = dense_mask
         mask_filter_stats = dict(mask_filter_stats)
         mask_filter_stats.update({
@@ -2367,7 +2514,7 @@ def analyze(image_path: Path, params: dict) -> dict:
             "suggested_marker_min_distance": None,
             "dense_pile_override": True,
         }
-        effective_params = dense_pile_params(params, pixel_count)
+        effective_params = precomputed_dense_effective_params or dense_pile_params(params, pixel_count)
     else:
         threshold_stats = estimate_dynamic_thresholds(mask, params)
         effective_params = apply_dynamic_thresholds(params, threshold_stats)
@@ -2379,7 +2526,9 @@ def analyze(image_path: Path, params: dict) -> dict:
 
     dense_auto_tune_stats = {"enabled": False}
     if dense_pile_mode:
-        if coerce_bool(effective_params.get("autoSurfaceTune"), True):
+        if precomputed_dense_tune is not None:
+            labels, distance, markers, marker_distance, peak_threshold, dense_auto_tune_stats = precomputed_dense_tune
+        elif coerce_bool(effective_params.get("autoSurfaceTune"), True):
             labels, distance, markers, marker_distance, peak_threshold, effective_params, dense_auto_tune_stats = auto_tune_dense_pile_watershed(
                 mask,
                 prepared.rgb,

@@ -72,6 +72,7 @@ const numericFields = new Set([
   'denseMaskPercentile',
   'denseMaskClosingRadius',
   'denseMaskMinArea',
+  'denseRoiBackgroundDistance',
   'edgeSnapRadius',
   'edgeSnapMarkerErode',
   'edgeSnapSeednessScale',
@@ -105,6 +106,7 @@ const numericFields = new Set([
   'ricePeakPercentile',
   'denseAutoTargetCount',
   'denseAutoMaxCount',
+  'denseAutoMaskPercentiles',
 ]);
 
 const booleanFields = new Set([
