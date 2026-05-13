@@ -7,7 +7,7 @@ const String baseUrl = String.fromEnvironment(
 // const String baseUrl = 'http://192.168.1.x:3000/api';
 
 const Duration connectTimeout = Duration(seconds: 15);
-const Duration receiveTimeout = Duration(seconds: 60);
+const Duration receiveTimeout = Duration(seconds: 180);
 
 const String accessTokenKey = 'access_token';
 const String refreshTokenKey = 'refresh_token';

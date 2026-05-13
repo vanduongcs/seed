@@ -4,6 +4,8 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { grainDefaultParams } from '../config/grain.defaults.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.resolve(__dirname, '..', '..');
@@ -121,6 +123,18 @@ const booleanFields = new Set([
   'rejectNonSeedObjects',
 ]);
 
+const requestOverrideFields = new Set([
+  'referencePixels',
+  'referenceMm',
+  'referencePixelSpace',
+  'referenceX1',
+  'referenceY1',
+  'referenceX2',
+  'referenceY2',
+  'referenceExcludePadding',
+  'referenceExcludeOverlapRatio',
+]);
+
 // String fields that pass through without numeric/boolean coercion
 const passthroughFields = new Set([
   'maskSource',
@@ -162,6 +176,7 @@ export const getGrainWorkerInfo = () => ({
   python: resolvePythonExecutable(),
   workerScript,
   timeoutMs: PYTHON_TIMEOUT_MS,
+  defaultParams: grainDefaultParams,
 });
 
 const runPythonWorker = (imagePath, params) => new Promise((resolve, reject) => {
@@ -231,9 +246,10 @@ const runPythonWorker = (imagePath, params) => new Promise((resolve, reject) => 
 });
 
 export const normalizeGrainParams = (params = {}) => {
-  const normalized = { maskSource: 'sam', samModelType: 'fast_sam', useSamInstances: true };
+  const normalized = { ...grainDefaultParams };
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue;
+    if (!requestOverrideFields.has(key)) continue;
 
     if (numericFields.has(key)) {
       const parsed = Number(value);
@@ -246,12 +262,6 @@ export const normalizeGrainParams = (params = {}) => {
       continue;
     }
 
-    if (key === 'selectedClusters') {
-      normalized[key] = parseClusters(value);
-      continue;
-    }
-
-    // Pass through string fields (maskSource, samModelType, etc.)
     if (passthroughFields.has(key)) {
       normalized[key] = String(value).trim();
       continue;
@@ -260,17 +270,6 @@ export const normalizeGrainParams = (params = {}) => {
     normalized[key] = value;
   }
   return normalized;
-};
-
-const parseClusters = (value) => {
-  if (Array.isArray(value)) return value.map(Number).filter(Number.isFinite);
-  if (typeof value !== 'string') return [];
-  return value
-    .replace('[', '')
-    .replace(']', '')
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter(Number.isFinite);
 };
 
 const safeExtension = (name = '') => {

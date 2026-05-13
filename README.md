@@ -10,9 +10,9 @@ Seed tập trung vào ba nhu cầu chính:
 
 - Nhận dạng và segment hạt giống từ ảnh RGB.
 - Đo các chỉ số hình thái cơ bản như số lượng, diện tích, chiều dài và chiều rộng.
-- Cung cấp giao diện web/mobile để thao tác, xem overlay, tinh chỉnh tham số và xuất dữ liệu.
+- Cung cấp giao diện web/mobile để thao tác, xem overlay và xuất dữ liệu.
 
-Pipeline xử lý ảnh hiện ưu tiên khả năng chạy local, dễ kiểm tra và dễ tinh chỉnh hơn là phụ thuộc vào mô hình học sâu cần huấn luyện riêng.
+Pipeline xử lý ảnh được cấu hình tập trung ở backend để web/mobile luôn chạy cùng một bộ tham số khi deploy.
 
 ## Kiến Trúc
 
@@ -59,23 +59,16 @@ Dashboard phân tích hạt hỗ trợ:
 - Import ảnh JPG/PNG hoặc lấy frame từ camera.
 - Chạy phân tích ảnh qua backend.
 - Xem overlay, clusters, mask, seed mask, KMeans mask và labels.
-- Điều chỉnh threshold, KMeans K, PCA blend, morphology và lọc shape.
-- Chọn cluster thủ công khi nền khó.
+- Sử dụng cấu hình xử lý tập trung từ backend; tham số nâng cao được đặt bằng file/env khi deploy.
 - Export CSV measurements và PNG overlay.
 
 ### Mobile
 
-Mobile app nằm trong `mobile/`, dùng Flutter. Ứng dụng hiện cung cấp shell giao diện, auth flow, dashboard, storage và account screen. Mobile dùng chung backend API với web.
+Mobile app nằm trong `mobile/`, dùng Flutter. Ứng dụng cung cấp auth flow, dashboard phân tích ảnh, storage và account screen. Mobile dùng chung backend API với web để đảm bảo cùng một pipeline segmentation/measurement trên cả hai nền tảng.
 
-Mobile có thêm chế độ AI offline để đáp ứng yêu cầu xử lý local trên điện thoại. Model TFLite được nạp từ:
+Luồng mobile chính: chọn ảnh hoặc camera trong Dashboard mobile, gửi ảnh đến `POST /api/grain/analyze`, nhận lại overlay/mask/labels/clusters, thống kê count/area/length/width, và export CSV/PNG qua share sheet của hệ điều hành. Storage mobile cũng mở được chi tiết run đã lưu và export lại artifact giống web.
 
-```text
-mobile/assets/models/seed_segmentation.tflite
-```
-
-Luồng offline: chọn ảnh hoặc camera trong Dashboard mobile, app chạy model segmentation TFLite local, hậu xử lý mask thành connected components, đếm hạt, đo bbox/diện tích và hiển thị overlay. Ảnh không cần gửi lên backend.
-
-Khuyến nghị model mobile: MobileNetV3-DeepLab Lite, U-Net encoder MobileNet, hoặc YOLO-seg nano export TFLite. SAM/SAM2 nên dùng trên desktop để hỗ trợ tạo nhãn training, không nên nhúng trực tiếp vào mobile vì nặng.
+Pipeline nặng như SAM/FastSAM, PCA/KMeans, dynamic threshold và watershed chạy trên backend để dễ deploy, dễ cập nhật model và tránh lệch kết quả giữa web/mobile. Nếu cần offline thật trong tương lai, model TFLite nên được huấn luyện/export riêng nhưng phải giữ schema output tương thích với API hiện tại.
 
 ### Shared
 
@@ -119,9 +112,9 @@ Route yêu cầu bearer token giống các API có xác thực khác.
 Multipart form:
 
 - `image`: file JPG/PNG.
-- Các field tùy chọn: tham số xử lý ảnh.
+- Các field tùy chọn từ client: calibration (`referencePixels`, `referenceMm`, `referencePixelSpace`, `referenceX1`, `referenceY1`, `referenceX2`, `referenceY2`).
 
-Các tham số thường dùng:
+Các tham số xử lý hiện được cấu hình tập trung, không gửi từ web/mobile:
 
 ```text
 maxSide
@@ -149,6 +142,18 @@ minSegmentExtent
 referencePixels
 referenceMm
 referencePixelSpace
+```
+
+Web/mobile không expose và backend không nhận override các tham số xử lý từ request public. Cấu hình mặc định nằm ở:
+
+```text
+backend/src/config/grain.defaults.js
+```
+
+Khi deploy có thể override bằng biến môi trường `GRAIN_DEFAULT_PARAMS_JSON`, ví dụ:
+
+```env
+GRAIN_DEFAULT_PARAMS_JSON={"maskSource":"hybrid","maxSide":1800,"splitSensitivity":7}
 ```
 
 Response trả về:
@@ -188,6 +193,7 @@ JWT_REFRESH_SECRET=your_refresh_secret_here
 ALLOWED_ORIGINS=http://localhost:5173
 GRAIN_PROCESS_TIMEOUT_MS=180000
 GRAIN_PYTHON_BIN=
+GRAIN_DEFAULT_PARAMS_JSON=
 ```
 
 Nếu `GRAIN_PYTHON_BIN` không được đặt, backend sẽ ưu tiên Python trong `backend/.venv`, sau đó fallback sang `python` hoặc `python3`.

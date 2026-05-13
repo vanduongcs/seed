@@ -6,12 +6,14 @@ scikit-image>=0.26
 scikit-learn>=1.4
 scipy>=1.12
 
-# SAM support (optional, only needed when using maskSource=sam)
-# torch>=2.4  # Uncomment when using SAM
-# segment-anything>=1.0  # For MobileSAM
-# mobile-sam  # Alternative MobileSAM package
-# segment-anything-2  # For SAM2
-# ultralytics>=8.2  # For FastSAM
+# SAM/FastSAM support used by the default web/mobile pipeline.
+torch>=2.4
+ultralytics>=8.2
+segment-anything>=1.0
+
+# Optional alternatives for other samModelType values.
+# mobile-sam
+# segment-anything-2
 
 # TFLite export (only needed when exporting to mobile)
 # onnx>=1.16

@@ -1,8 +1,14 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../grain/providers/grain_runs_provider.dart';
+import '../../grain/services/grain_analysis_api.dart';
 
 class StorageScreen extends ConsumerWidget {
   const StorageScreen({super.key});
@@ -45,7 +51,10 @@ class StorageScreen extends ConsumerWidget {
                 ),
               )
             else
-              ...runs.map((run) => _RunCard(run: run)),
+              ...runs.map((run) => _RunCard(
+                    run: run,
+                    onTap: () => _openRunDetail(context, run.id),
+                  )),
           ],
         ),
       ),
@@ -77,76 +86,254 @@ class _Header extends StatelessWidget {
 
 class _RunCard extends StatelessWidget {
   final GrainRun run;
+  final VoidCallback onTap;
 
-  const _RunCard({required this.run});
+  const _RunCard({required this.run, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Center(
-                child: Text(
-                  run.id.length >= 4
-                      ? run.id.substring(run.id.length - 4).toUpperCase()
-                      : 'RUN',
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontWeight: FontWeight.w700,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Center(
+                  child: Text(
+                    run.id.length >= 4
+                        ? run.id.substring(run.id.length - 4).toUpperCase()
+                        : 'RUN',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    run.sourceFileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _formatDate(run.createdAt),
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      run.sourceFileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${run.count} hạt - ${run.meanLengthPx.toStringAsFixed(1)} x ${run.meanWidthPx.toStringAsFixed(1)} px',
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${run.imageWidth} x ${run.imageHeight} px',
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatDate(run.createdAt),
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 6),
+                    Text(
+                      '${run.count} hạt - ${run.meanLengthPx.toStringAsFixed(1)} x ${run.meanWidthPx.toStringAsFixed(1)} px',
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${run.imageWidth} x ${run.imageHeight} px',
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+Future<void> _openRunDetail(BuildContext context, String runId) async {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(child: CircularProgressIndicator()),
+  );
+
+  try {
+    final detail = await GrainAnalysisApi().getRun(runId);
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _RunDetailDialog(detail: detail),
+    );
+  } catch (error) {
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Khong tai duoc chi tiet: $error')),
+    );
+  }
+}
+
+class _RunDetailDialog extends StatefulWidget {
+  final GrainRunDetail detail;
+
+  const _RunDetailDialog({required this.detail});
+
+  @override
+  State<_RunDetailDialog> createState() => _RunDetailDialogState();
+}
+
+class _RunDetailDialogState extends State<_RunDetailDialog> {
+  String _previewMode = 'overlay';
+
+  @override
+  Widget build(BuildContext context) {
+    final result = widget.detail.result;
+    final run = widget.detail.run;
+    final preview = result.previewBase64(_previewMode);
+    final name = run['sourceFileName']?.toString() ?? 'seed-image';
+
+    return AlertDialog(
+      title: Text('Run ${_shortId(run['id']?.toString() ?? '')}'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _chip('overlay', 'Overlay'),
+                  _chip('labels', 'Labels'),
+                  _chip('mask', 'Mask'),
+                  _chip('seedMask', 'Seed'),
+                  _chip('kmeansMask', 'KMeans'),
+                  _chip('clusters', 'Clusters'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (preview.isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(base64Decode(preview)),
+                ),
+              const SizedBox(height: 12),
+              _detailRow('So hat', '${result.count}'),
+              _detailRow(
+                  'Dai TB',
+                  _formatMeasure(
+                      result.meanLengthMm, 'mm', result.meanLengthPx, 'px')),
+              _detailRow(
+                  'Rong TB',
+                  _formatMeasure(
+                      result.meanWidthMm, 'mm', result.meanWidthPx, 'px')),
+              _detailRow(
+                  'Dien tich TB',
+                  _formatMeasure(
+                      result.meanAreaMm2, 'mm2', result.meanAreaPx, 'px2')),
+              _detailRow('Watershed',
+                  result.segmentation['watershed_mode']?.toString() ?? '-'),
+              _detailRow('Markers',
+                  result.segmentation['marker_count']?.toString() ?? '-'),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Dong'),
+        ),
+        TextButton.icon(
+          onPressed:
+              result.csv.isEmpty ? null : () => _shareCsv(name, result.csv),
+          icon: const Icon(Icons.table_view_outlined),
+          label: const Text('CSV'),
+        ),
+        TextButton.icon(
+          onPressed: result.previewBase64('overlay').isEmpty
+              ? null
+              : () => _sharePng(name, result.previewBase64('overlay')),
+          icon: const Icon(Icons.image_outlined),
+          label: const Text('PNG'),
+        ),
+      ],
+    );
+  }
+
+  Widget _chip(String mode, String label) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: _previewMode == mode,
+      onSelected: (_) => setState(() => _previewMode = mode),
+    );
+  }
+}
+
+Widget _detailRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      children: [
+        Expanded(
+            child: Text(label,
+                style: const TextStyle(color: AppTheme.textSecondary))),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+      ],
+    ),
+  );
+}
+
+Future<void> _shareCsv(String sourceName, String csv) async {
+  final file = await _writeTempFile(
+      '${_safeStem(sourceName)}_measurements.csv', utf8.encode(csv));
+  await Share.shareXFiles([XFile(file.path)], text: 'Seed measurements CSV');
+}
+
+Future<void> _sharePng(String sourceName, String base64) async {
+  final file = await _writeTempFile(
+      '${_safeStem(sourceName)}_segmentation.png', base64Decode(base64));
+  await Share.shareXFiles([XFile(file.path)], text: 'Seed segmentation PNG');
+}
+
+Future<File> _writeTempFile(String name, List<int> bytes) async {
+  final dir = await getTemporaryDirectory();
+  final file = File('${dir.path}/$name');
+  return file.writeAsBytes(bytes, flush: true);
+}
+
+String _shortId(String id) =>
+    id.length >= 8 ? id.substring(id.length - 8).toUpperCase() : id;
+
+String _safeStem(String name) {
+  final withoutExt = name.replaceFirst(RegExp(r'\.[^.]+$'), '');
+  return withoutExt.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '_');
+}
+
+String _formatMeasure(
+    double? primary, String primaryUnit, double fallback, String fallbackUnit) {
+  if (primary != null) {
+    return '${primary.toStringAsFixed(primaryUnit == 'mm2' ? 3 : 2)} $primaryUnit';
+  }
+  return '${fallback.toStringAsFixed(1)} $fallbackUnit';
 }
 
 String _formatDate(DateTime? value) {
