@@ -27,12 +27,22 @@ export default function DashboardPage() {
   const [progressPhase, setProgressPhase] = useState('');
   const progressTimerRef = useRef(null);
 
+  useEffect(() => {
+    if (!imageFile) {
+      setPreviewUrl('');
+      return undefined;
+    }
+
+    const nextPreviewUrl = URL.createObjectURL(imageFile);
+    setPreviewUrl(nextPreviewUrl);
+    return () => URL.revokeObjectURL(nextPreviewUrl);
+  }, [imageFile]);
+
   useEffect(() => () => {
     if (videoRef.current?.srcObject) {
       videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
     }
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
+  }, []);
 
   const resetRunState = () => {
     setResult(null);
@@ -46,8 +56,6 @@ export default function DashboardPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) videoRef.current.srcObject = stream;
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setPreviewUrl('');
       setImageFile(null);
       setFileName('camera-frame.png');
       setCameraActive(true);
@@ -60,13 +68,12 @@ export default function DashboardPage() {
   const handleFile = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(URL.createObjectURL(file));
     setImageFile(file);
     setFileName(file.name);
     setCameraActive(false);
     setProcessError('');
     resetRunState();
+    event.target.value = '';
   };
 
   const getCalibrationPoint = (event) => {
