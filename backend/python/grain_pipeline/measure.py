@@ -9,6 +9,9 @@ import numpy as np
 from .config import CSV_COLUMNS, float_param, int_param
 from .yolo_segment import InstanceMask
 
+SEED_CLASS_IDS = {0}
+SEED_CLASS_NAMES = {"seed"}
+
 
 def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float) -> tuple[np.ndarray, list[dict]]:
     min_area = int_param(params, "minArea")
@@ -26,6 +29,8 @@ def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float
     measurements: list[dict] = []
 
     for instance in sorted(instances, key=lambda item: item.confidence, reverse=True):
+        if not is_seed_instance(instance):
+            continue
         available = np.logical_and(instance.mask, labels == 0)
         metrics = mask_metrics(available)
         if metrics is None:
@@ -52,6 +57,10 @@ def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float
         measurements.append(measurement)
 
     return labels, measurements
+
+
+def is_seed_instance(instance: InstanceMask) -> bool:
+    return instance.class_id in SEED_CLASS_IDS or str(instance.class_name).strip().lower() in SEED_CLASS_NAMES
 
 
 def mask_metrics(mask: np.ndarray) -> dict | None:

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -13,29 +14,47 @@ import '../../../core/theme/app_theme.dart';
 import '../../grain/providers/grain_runs_provider.dart';
 import '../../grain/services/grain_analysis_api.dart';
 
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  GrainAnalysisResult? _sessionResult;
+
+  @override
+  Widget build(BuildContext context) {
     final runsState = ref.watch(grainRunsProvider);
 
     return runsState.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (error, _) => _DashboardContent(
-        stats: const _DashboardStats.empty(),
         historyError: error.toString(),
+        sessionResult: _sessionResult,
+        onSessionResultChanged: (result) =>
+            setState(() => _sessionResult = result),
       ),
-      data: (runs) => _DashboardContent(stats: _DashboardStats.fromRuns(runs)),
+      data: (_) => _DashboardContent(
+        sessionResult: _sessionResult,
+        onSessionResultChanged: (result) =>
+            setState(() => _sessionResult = result),
+      ),
     );
   }
 }
 
 class _DashboardContent extends StatelessWidget {
-  final _DashboardStats stats;
   final String? historyError;
+  final GrainAnalysisResult? sessionResult;
+  final ValueChanged<GrainAnalysisResult?> onSessionResultChanged;
 
-  const _DashboardContent({required this.stats, this.historyError});
+  const _DashboardContent({
+    this.historyError,
+    required this.sessionResult,
+    required this.onSessionResultChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -43,13 +62,8 @@ class _DashboardContent extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       children: [
         const Text(
-          'Phan tich hat',
+          'Phân tích hạt',
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Mobile dung chung pipeline backend voi web: SAM/FastSAM, GridFree color features, watershed, measurement va export.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         if (historyError != null) ...[
           const SizedBox(height: 14),
@@ -60,11 +74,17 @@ class _DashboardContent extends StatelessWidget {
           children: [
             Expanded(
                 child: _StatTile(
-                    label: 'Luot thang nay', value: '${stats.thisMonthRuns}')),
+                    label: 'Số hạt đo được',
+                    value: _formatCountStat(sessionResult?.count))),
             const SizedBox(width: 12),
             Expanded(
-                child:
-                    _StatTile(label: 'Tong luot', value: '${stats.totalRuns}')),
+                child: _StatTile(
+                    label: 'Chiều dài trung bình',
+                    value: _formatMeasureStat(
+                        sessionResult?.meanLengthMm,
+                        'mm',
+                        sessionResult?.meanLengthPx,
+                        'px'))),
           ],
         ),
         const SizedBox(height: 12),
@@ -72,65 +92,46 @@ class _DashboardContent extends StatelessWidget {
           children: [
             Expanded(
                 child: _StatTile(
-                    label: 'Hat da do', value: '${stats.totalSeeds}')),
+                    label: 'Chiều rộng trung bình',
+                    value: _formatMeasureStat(
+                        sessionResult?.meanWidthMm,
+                        'mm',
+                        sessionResult?.meanWidthPx,
+                        'px'))),
             const SizedBox(width: 12),
             Expanded(
                 child: _StatTile(
-                    label: 'Dai TB',
-                    value: '${stats.meanLengthPx.toStringAsFixed(1)} px')),
+                    label: 'Diện tích trung bình',
+                    value: _formatMeasureStat(
+                        sessionResult?.meanAreaMm2,
+                        'mm2',
+                        sessionResult?.meanAreaPx,
+                        'px2'))),
           ],
         ),
         const SizedBox(height: 18),
-        const _BackendAnalysisCard(),
+        _BackendAnalysisCard(onResultChanged: onSessionResultChanged),
       ],
     );
   }
 }
 
-class _DashboardStats {
-  final int totalRuns;
-  final int thisMonthRuns;
-  final int totalSeeds;
-  final double meanLengthPx;
-
-  const _DashboardStats({
-    required this.totalRuns,
-    required this.thisMonthRuns,
-    required this.totalSeeds,
-    required this.meanLengthPx,
-  });
-
-  const _DashboardStats.empty()
-      : totalRuns = 0,
-        thisMonthRuns = 0,
-        totalSeeds = 0,
-        meanLengthPx = 0;
-
-  factory _DashboardStats.fromRuns(List<GrainRun> runs) {
-    final now = DateTime.now();
-    final thisMonthRuns = runs.where((run) {
-      final createdAt = run.createdAt;
-      return createdAt != null &&
-          createdAt.year == now.year &&
-          createdAt.month == now.month;
-    }).length;
-    final totalSeeds = runs.fold<int>(0, (sum, run) => sum + run.count);
-    final lengthSum = runs.fold<double>(
-      0,
-      (sum, run) => sum + (run.meanLengthPx * run.count),
-    );
-
-    return _DashboardStats(
-      totalRuns: runs.length,
-      thisMonthRuns: thisMonthRuns,
-      totalSeeds: totalSeeds,
-      meanLengthPx: totalSeeds == 0 ? 0 : lengthSum / totalSeeds,
-    );
+String _formatMeasureStat(double? primary, String primaryUnit, double? fallback, String fallbackUnit) {
+  if (primary != null && primary > 0) {
+    return '${primary.toStringAsFixed(primaryUnit == 'mm2' ? 3 : 2)} $primaryUnit';
   }
+  if (fallback != null) {
+    return '${fallback.toStringAsFixed(1)} $fallbackUnit';
+  }
+  return '_';
 }
 
+String _formatCountStat(int? value) => value == null ? '_' : '$value';
+
 class _BackendAnalysisCard extends ConsumerStatefulWidget {
-  const _BackendAnalysisCard();
+  final ValueChanged<GrainAnalysisResult?> onResultChanged;
+
+  const _BackendAnalysisCard({required this.onResultChanged});
 
   @override
   ConsumerState<_BackendAnalysisCard> createState() =>
@@ -147,14 +148,49 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   String _fileName = 'camera-frame.png';
   GrainAnalysisResult? _result;
   String? _error;
-  String _previewMode = 'overlay';
+  String _previewMode = 'samMask';
   bool _busy = false;
+  double _progress = 0;
+  String _progressPhase = '';
+  Timer? _progressTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onResultChanged(null);
+    });
+  }
 
   @override
   void dispose() {
+    _progressTimer?.cancel();
     _referencePixels.dispose();
     _referenceMm.dispose();
     super.dispose();
+  }
+
+  void _setProgress(double value, String phase) {
+    setState(() {
+      _progress = value.clamp(0, 100);
+      _progressPhase = phase;
+    });
+  }
+
+  void _startProgressDrift() {
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
+      if (!mounted) return;
+      setState(() {
+        if (_progress < 90) _progress = (_progress + 2).clamp(0, 90);
+      });
+    });
+  }
+
+  void _stopProgress() {
+    _progressTimer?.cancel();
+    _progressTimer = null;
   }
 
   Future<void> _pick(ImageSource source) async {
@@ -171,14 +207,14 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       _fileName = file.name;
       _result = null;
       _error = null;
-      _previewMode = 'overlay';
+      _previewMode = 'samMask';
     });
   }
 
   Future<void> _analyze() async {
     final bytes = _selectedBytes;
     if (bytes == null) {
-      setState(() => _error = 'Chon anh hoac chup anh truoc khi xu ly.');
+      setState(() => _error = 'Chọn ảnh hoặc chụp ảnh trước khi xử lý.');
       return;
     }
 
@@ -186,21 +222,48 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       _busy = true;
       _error = null;
     });
+    _setProgress(5, 'Chuẩn bị ảnh');
     try {
+      _setProgress(
+        20,
+        'Xác thực phiên',
+      );
+      _setProgress(
+        50,
+        'Phân tích ảnh bằng YOLO',
+      );
+      _startProgressDrift();
+      final referencePixels = double.tryParse(_referencePixels.text.trim());
+      final referenceMm = double.tryParse(_referenceMm.text.trim());
       final result = await _api.analyzeImage(
         bytes: bytes,
         fileName: _fileName,
-        referencePixels: double.tryParse(_referencePixels.text.trim()),
-        referenceMm: double.tryParse(_referenceMm.text.trim()),
+        referencePixels: referencePixels,
+        referenceMm: referenceMm,
       );
+      _stopProgress();
+      _setProgress(96, 'Lưu kết quả');
       if (!mounted) return;
       setState(() => _result = result);
+      widget.onResultChanged(result);
+      _setProgress(100, 'Hoàn tất');
       ref.invalidate(grainRunsProvider);
     } catch (error) {
+      _stopProgress();
       if (!mounted) return;
       setState(() => _error = _friendlyError(error));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _stopProgress();
+      if (mounted) {
+        setState(() => _busy = false);
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!mounted) return;
+          setState(() {
+            _progress = 0;
+            _progressPhase = '';
+          });
+        });
+      }
     }
   }
 
@@ -213,7 +276,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   }
 
   Future<void> _sharePng() async {
-    final base64 = _result?.previewBase64('overlay');
+    final base64 = _result?.previewBase64('samMask').isNotEmpty == true
+        ? _result?.previewBase64('samMask')
+        : _result?.previewBase64('overlay');
     if (base64 == null || base64.isEmpty) return;
     final file = await _writeTempFile(
         '${_safeStem(_fileName)}_segmentation.png', base64Decode(base64));
@@ -223,7 +288,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   @override
   Widget build(BuildContext context) {
     final result = _result;
-    final previewBase64 = result?.previewBase64(_previewMode) ?? '';
+    final previewBase64 = result?.previewWithFallback(_previewMode) ?? '';
 
     return Card(
       child: Padding(
@@ -232,7 +297,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Xu ly anh',
+              'Xử lý ảnh',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 12),
@@ -243,7 +308,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 OutlinedButton.icon(
                   onPressed: _busy ? null : () => _pick(ImageSource.gallery),
                   icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Chon anh'),
+                  label: const Text('Chọn ảnh'),
                 ),
                 OutlinedButton.icon(
                   onPressed: _busy ? null : () => _pick(ImageSource.camera),
@@ -259,7 +324,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.auto_awesome_motion_outlined),
-                  label: Text(_busy ? 'Dang xu ly' : 'Chay pipeline'),
+                  label: Text(_busy ? 'Đang xử lý' : 'Xử lý'),
                 ),
               ],
             ),
@@ -283,7 +348,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
-                        labelText: 'Vat moc (px)',
+                        labelText: 'Vật mốc (px)',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
@@ -296,7 +361,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
-                        labelText: 'Vat moc (mm)',
+                        labelText: 'Vật mốc (mm)',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
@@ -309,17 +374,39 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
               const SizedBox(height: 12),
               Text(_error!, style: TextStyle(color: Colors.red.shade700)),
             ],
+            if (_busy) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _progressPhase.isEmpty ? 'Đang xử lý' : _progressPhase,
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${_progress.round()}%',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(value: (_progress / 100).clamp(0, 1)),
+            ],
             if (result != null) ...[
               const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
                       child: _ResultTile(
-                          label: 'So hat', value: '${result.count}')),
+                          label: 'Tổng số hạt đo được', value: '${result.count}')),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _ResultTile(
-                      label: 'Dien tich TB',
+                      label: 'Diện tích trung bình',
                       value: result.meanAreaMm2 == null
                           ? '${result.meanAreaPx.toStringAsFixed(1)} px2'
                           : '${result.meanAreaMm2!.toStringAsFixed(3)} mm2',
@@ -332,7 +419,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 children: [
                   Expanded(
                     child: _ResultTile(
-                      label: 'Dai TB',
+                      label: 'Chiều dài trung bình',
                       value: result.meanLengthMm == null
                           ? '${result.meanLengthPx.toStringAsFixed(1)} px'
                           : '${result.meanLengthMm!.toStringAsFixed(2)} mm',
@@ -341,7 +428,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _ResultTile(
-                      label: 'Rong TB',
+                      label: 'Chiều rộng trung bình',
                       value: result.meanWidthMm == null
                           ? '${result.meanWidthPx.toStringAsFixed(1)} px'
                           : '${result.meanWidthMm!.toStringAsFixed(2)} mm',
@@ -354,12 +441,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _previewChip(mode: 'overlay', label: 'Overlay'),
-                  _previewChip(mode: 'labels', label: 'Labels'),
-                  _previewChip(mode: 'mask', label: 'Mask'),
-                  _previewChip(mode: 'seedMask', label: 'Seed'),
-                  _previewChip(mode: 'kmeansMask', label: 'KMeans'),
-                  _previewChip(mode: 'clusters', label: 'Clusters'),
+                  _previewChip(mode: 'samMask', label: 'Hình dạng'),
+                  _previewChip(mode: 'labels', label: 'Đánh số'),
+                  _previewChip(mode: 'overlay', label: 'Đánh dấu'),
+                  _previewChip(mode: 'mask', label: 'Mặt nạ'),
                 ],
               ),
               const SizedBox(height: 12),
@@ -403,37 +488,69 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   }
 }
 
-class _SegmentationFacts extends StatelessWidget {
+class _SegmentationFacts extends ConsumerStatefulWidget {
   final GrainAnalysisResult result;
 
   const _SegmentationFacts({required this.result});
 
   @override
+  ConsumerState<_SegmentationFacts> createState() => _SegmentationFactsState();
+}
+
+class _SegmentationFactsState extends ConsumerState<_SegmentationFacts> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    final segmentation = result.segmentation;
-    final calibration = result.calibration;
-    return Column(
-      children: [
-        _FactRow(
-            label: 'Watershed',
-            value: segmentation['watershed_mode']?.toString() ?? '-'),
-        _FactRow(
-            label: 'Markers',
-            value: segmentation['marker_count']?.toString() ?? '-'),
-        _FactRow(
-            label: 'Segments truoc loc',
-            value:
-                segmentation['segment_count_before_filter']?.toString() ?? '-'),
-        _FactRow(
-            label: 'Mask source',
-            value: segmentation['mask_source']?.toString() ?? '-'),
-        _FactRow(
-          label: 'Ty le mm',
-          value: calibration['enabled'] == true
-              ? '${_asDouble(calibration['mm_per_pixel']).toStringAsFixed(5)} mm/px'
-              : 'chua co',
+    final segmentation = widget.result.segmentation;
+    final calibration = widget.result.calibration;
+    final confidence = _asDouble(segmentation['confidence']);
+    final iou = _asDouble(segmentation['iou']);
+
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        title: Text(
+          _expanded ? 'Ẩn thông số kỹ thuật' : 'Hiển thị thông số kỹ thuật',
+          style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
         ),
-      ],
+        onExpansionChanged: (val) => setState(() => _expanded = val),
+        children: [
+          Container(
+            padding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+            decoration: const BoxDecoration(
+              border: Border(left: BorderSide(color: AppTheme.border, width: 2)),
+            ),
+            child: Column(
+              children: [
+                const _FactRow(
+                    label: 'Phương thức phân tích',
+                    value: 'YOLO segmentation'),
+                if (confidence > 0)
+                  _FactRow(
+                      label: 'Độ tin cậy nhận dạng',
+                      value: '${(confidence * 100).toStringAsFixed(0)}%'),
+                if (iou > 0)
+                  _FactRow(
+                      label: 'Độ khớp mặt nạ (IoU)',
+                      value: '${(iou * 100).toStringAsFixed(0)}%'),
+                _FactRow(
+                    label: 'Quét phân mảnh (Tiled)',
+                    value: segmentation['tiled_inference'] == true
+                        ? 'Đang bật'
+                        : 'Đang tắt'),
+                _FactRow(
+                  label: 'Tỷ lệ thước đo',
+                  value: calibration['enabled'] == true
+                      ? '${_asDouble(calibration['mm_per_pixel']).toStringAsFixed(5)} mm/px'
+                      : 'Chưa thiết lập',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -539,10 +656,10 @@ String _friendlyError(Object error) {
     if (error.type == DioExceptionType.connectionTimeout ||
         error.type == DioExceptionType.receiveTimeout ||
         error.type == DioExceptionType.connectionError) {
-      return 'Khong ket noi duoc backend hoac worker xu ly qua lau. Kiem tra BASE_URL, server va Python dependencies.';
+      return 'Không kết nối được backend hoặc worker xử lý quá lâu. Kiểm tra server, Wi-Fi và Python dependencies.';
     }
   }
-  return 'Xu ly anh that bai. Kiem tra backend, MongoDB va Python worker.';
+  return 'Xử lý ảnh thất bại. Kiểm tra backend, MongoDB và Python worker.';
 }
 
 double _asDouble(dynamic value) {

@@ -21,6 +21,11 @@ import numpy as np
 
 from .config import bool_param, float_param, int_param, model_path
 
+CLASS_NAMES = {
+    0: "seed",
+    1: "Ref",
+}
+
 
 # ---------------------------------------------------------------------------
 # Data class
@@ -240,12 +245,16 @@ def _decode_yolo_seg(
                 mask=binary,
                 confidence=float(class_scores[i]),
                 class_id=int(class_ids[i]),
-                class_name=str(int(class_ids[i])),
+                class_name=class_name_for_id(int(class_ids[i])),
                 source=source,
             )
         )
 
     return instances
+
+
+def class_name_for_id(class_id: int) -> str:
+    return CLASS_NAMES.get(int(class_id), str(int(class_id)))
 
 
 # ---------------------------------------------------------------------------

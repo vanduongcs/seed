@@ -8,7 +8,7 @@ from .config import PIPELINE_NAME, bool_param, float_param, int_param, model_pat
 from .fastsam_refine import refine_instances_with_fastsam
 from .io import png_base64, read_image
 from .mask_refine import refine_instances_post
-from .measure import filter_and_measure, measurements_csv, summary_for
+from .measure import filter_and_measure, is_seed_instance, measurements_csv, summary_for
 from .mobile_sam_refine import is_mobile_sam_model, refine_instances_with_mobile_sam
 from .preprocess import apply_light_preprocessing
 from .render import instance_mask_rgb, label_rgb, mask_rgb, overlay_rgb
@@ -47,6 +47,8 @@ def analyze_image(image_path: Path, params: dict) -> dict:
 
     # ── Stage 4: filter & measure ────────────────────────────────────────────
     labels, measurements = filter_and_measure(instances, params, prepared.scale)
+    seed_candidate_count = sum(1 for item in instances if is_seed_instance(item))
+    ref_candidate_count = len(instances) - seed_candidate_count
 
     if labels.shape[:2] != segment_input.shape[:2]:
         labels = np.zeros(segment_input.shape[:2], dtype=np.int32)
@@ -110,6 +112,8 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "edge_margin_ratio":       float_param(params, "edgeMarginRatio"),
             "candidate_count":         len(yolo_instances),
             "refined_candidate_count": len(instances),
+            "seed_candidate_count":    seed_candidate_count,
+            "ref_candidate_count":     ref_candidate_count,
             "segment_count_before_filter": len(instances),
             "segment_count":           len(measurements),
             "marker_count":            len(measurements),
@@ -118,6 +122,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "mask_filter": {
                 "component_count_before": len(instances),
                 "component_count_after":  len(measurements),
+                "ignored_ref_count":      ref_candidate_count,
             },
             "effective_thresholds": {
                 "minArea":                int_param(params, "minArea"),

@@ -142,7 +142,7 @@ class _RunCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '${run.count} hạt - ${run.meanLengthPx.toStringAsFixed(1)} x ${run.meanWidthPx.toStringAsFixed(1)} px',
+                      '${run.count} hạt - ${_formatMeasure(run.meanLengthMm, 'mm', run.meanLengthPx, 'px')} x ${_formatMeasure(run.meanWidthMm, 'mm', run.meanWidthPx, 'px')}',
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -182,7 +182,7 @@ Future<void> _openRunDetail(BuildContext context, String runId) async {
     if (!context.mounted) return;
     Navigator.of(context).pop();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Khong tai duoc chi tiet: $error')),
+      SnackBar(content: Text('Không tải được chi tiết: $error')),
     );
   }
 }
@@ -198,12 +198,13 @@ class _RunDetailDialog extends StatefulWidget {
 
 class _RunDetailDialogState extends State<_RunDetailDialog> {
   String _previewMode = 'overlay';
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final result = widget.detail.result;
     final run = widget.detail.run;
-    final preview = result.previewBase64(_previewMode);
+    final preview = result.previewWithFallback(_previewMode);
     final name = run['sourceFileName']?.toString() ?? 'seed-image';
 
     return AlertDialog(
@@ -221,12 +222,11 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _chip('overlay', 'Overlay'),
-                  _chip('labels', 'Labels'),
-                  _chip('mask', 'Mask'),
-                  _chip('seedMask', 'Seed'),
-                  _chip('kmeansMask', 'KMeans'),
-                  _chip('clusters', 'Clusters'),
+                  _chip('original', 'Ảnh gốc'),
+                  _chip('overlay', 'Đánh dấu'),
+                  _chip('samMask', 'Hình dạng'),
+                  _chip('labels', 'Đánh số'),
+                  _chip('mask', 'Mặt nạ'),
                 ],
               ),
               const SizedBox(height: 12),
@@ -236,23 +236,55 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
                   child: Image.memory(base64Decode(preview)),
                 ),
               const SizedBox(height: 12),
-              _detailRow('So hat', '${result.count}'),
+              _detailRow('Tổng số hạt đo được', '${result.count}'),
               _detailRow(
-                  'Dai TB',
+                  'Chiều dài trung bình',
                   _formatMeasure(
                       result.meanLengthMm, 'mm', result.meanLengthPx, 'px')),
               _detailRow(
-                  'Rong TB',
+                  'Chiều rộng trung bình',
                   _formatMeasure(
                       result.meanWidthMm, 'mm', result.meanWidthPx, 'px')),
               _detailRow(
-                  'Dien tich TB',
+                  'Diện tích trung bình',
                   _formatMeasure(
                       result.meanAreaMm2, 'mm2', result.meanAreaPx, 'px2')),
-              _detailRow('Watershed',
-                  result.segmentation['watershed_mode']?.toString() ?? '-'),
-              _detailRow('Markers',
-                  result.segmentation['marker_count']?.toString() ?? '-'),
+              _detailRow(
+                  'Tỷ lệ thước đo',
+                  result.calibration['enabled'] == true
+                      ? '${_asDouble(result.calibration['mm_per_pixel']).toStringAsFixed(5)} mm/px'
+                      : 'Chưa thiết lập'),
+              const Divider(),
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: Text(
+                    _expanded ? 'Ẩn thông số kỹ thuật' : 'Hiển thị thông số kỹ thuật',
+                    style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+                  ),
+                  onExpansionChanged: (val) => setState(() => _expanded = val),
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+                      decoration: const BoxDecoration(
+                        border: Border(left: BorderSide(color: AppTheme.border, width: 2)),
+                      ),
+                      child: Column(
+                        children: [
+                          _detailRow('Phương thức phân tích', 'YOLO segmentation'),
+                          if (_asDouble(result.segmentation['confidence']) > 0)
+                            _detailRow('Độ tin cậy nhận dạng',
+                                '${(_asDouble(result.segmentation['confidence']) * 100).toStringAsFixed(0)}%'),
+                          if (_asDouble(result.segmentation['iou']) > 0)
+                            _detailRow('Độ khớp mặt nạ (IoU)',
+                                '${(_asDouble(result.segmentation['iou']) * 100).toStringAsFixed(0)}%'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -260,20 +292,20 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Dong'),
+          child: const Text('Đóng'),
         ),
         TextButton.icon(
           onPressed:
               result.csv.isEmpty ? null : () => _shareCsv(name, result.csv),
           icon: const Icon(Icons.table_view_outlined),
-          label: const Text('CSV'),
+          label: const Text('Xuất CSV'),
         ),
         TextButton.icon(
-          onPressed: result.previewBase64('overlay').isEmpty
+          onPressed: _segmentationPng(result).isEmpty
               ? null
-              : () => _sharePng(name, result.previewBase64('overlay')),
+              : () => _sharePng(name, _segmentationPng(result)),
           icon: const Icon(Icons.image_outlined),
-          label: const Text('PNG'),
+          label: const Text('Xuất ảnh kết quả'),
         ),
       ],
     );
@@ -306,6 +338,14 @@ Future<void> _shareCsv(String sourceName, String csv) async {
   final file = await _writeTempFile(
       '${_safeStem(sourceName)}_measurements.csv', utf8.encode(csv));
   await Share.shareXFiles([XFile(file.path)], text: 'Seed measurements CSV');
+}
+
+String _segmentationPng(GrainAnalysisResult result) {
+  final segment = result.previewBase64('samMask');
+  if (segment.isNotEmpty) return segment;
+  final labels = result.previewBase64('labels');
+  if (labels.isNotEmpty) return labels;
+  return result.previewBase64('overlay');
 }
 
 Future<void> _sharePng(String sourceName, String base64) async {
@@ -343,4 +383,10 @@ String _formatDate(DateTime? value) {
       '${value.year} '
       '${value.hour.toString().padLeft(2, '0')}:'
       '${value.minute.toString().padLeft(2, '0')}';
+}
+
+double _asDouble(dynamic value) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '') ?? 0;
 }
