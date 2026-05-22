@@ -1,164 +1,20 @@
-const baseGrainDefaults = {
-  maxSide: 1400,
-  pcIndex: 0,
-  k: 5,
-  rgbIndexWeight: 0.65,
-  minArea: 12,
-  maxArea: 4000,
-  minLength: 3,
-  maxLength: 180,
-  splitSensitivity: 10,
-  openingRadius: 1,
-  closingRadius: 1,
-  noiseSize: 18,
-  holeSize: 2500,
-  seednessThreshold: 0.24,
-  maskMinArea: 12,
-  maxSegmentAspectRatio: 20,
-  minSegmentSolidity: 0.20,
-  minSegmentExtent: 0.06,
-  dynamicThresholds: true,
-  markerShrinkFactor: 0.5,
-  denseMarkerMinDistance: 5,
-  densePeakPercentile: 44,
-  denseMaskPercentile: 22,
-  denseSmoothSigma: 1.15,
-  denseElevationSmoothSigma: 0.0,
-  denseRoiBackgroundDistance: 8,
-  denseGradientWeight: 0.48,
-  denseValleyWeight: 0.22,
-  denseCenterWeight: 0.18,
-  denseColorEdgeWeight: 0.12,
-  autoImageProfile: true,
-  autoSurfaceTune: true,
-  denseAutoMarkerDistances: [8, 10, 12, 14],
-  denseAutoPeakPercentiles: [56, 62, 68],
-  denseAutoMaskPercentiles: [24, 28, 34],
-  denseAutoTargetCount: 320,
-  denseAutoMaxCount: 850,
-  edgeSnap: false,
-  edgeSnapRadius: 4,
-  edgeSnapMarkerErode: 2,
-  edgeSnapSeednessScale: 0.55,
-  fillContourMasks: true,
-  contourFillClosingRadius: 2,
-  fillSegmentHoles: true,
-  segmentHoleSize: 2500,
-  segmentClosingRadius: 1,
-  clusterSpace: 'pca3',
-  pcaMethod: 'correlation',
-  watershedMode: 'dense',
-  segmentationMode: 'auto',
-  maskSource: 'hybrid',
-  samModelType: 'fast_sam',
-  useSamInstances: false,
-};
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const grainProfiles = {
-  surface_quality: {
-    maxSide: 2200,
-    minArea: 12,
-    maxArea: 9000,
-    maxLength: 320,
-    splitSensitivity: 7,
-    noiseSize: 18,
-    maskMinArea: 12,
-    maxSegmentAspectRatio: 22,
-    minSegmentSolidity: 0.14,
-    minSegmentExtent: 0.035,
-    minSegmentSeednessMean: 0.035,
-    rejectNonSeedObjects: false,
-    denseMarkerMinDistance: 8,
-    densePeakPercentile: 58,
-    denseAutoMarkerDistances: [7, 9, 11, 13],
-    denseAutoPeakPercentiles: [54, 60, 66],
-    denseAutoMaskPercentiles: [24, 28, 34],
-    denseAutoTargetCount: 420,
-    denseAutoMaxCount: 900,
-    denseMaskPercentile: 28,
-    denseMaskClosingRadius: 1,
-    denseMaskMinArea: 12,
-    denseSmoothSigma: 1.45,
-    denseElevationSmoothSigma: 1.0,
-    denseRoiBackgroundDistance: 7,
-    denseGradientWeight: 0.34,
-    denseValleyWeight: 0.28,
-    denseCenterWeight: 0.28,
-    denseColorEdgeWeight: 0.10,
-    edgeSnap: true,
-    edgeSnapRadius: 3,
-    edgeSnapMarkerErode: 1,
-    edgeSnapSeednessScale: 0.45,
-    fillSegmentHoles: false,
-    segmentClosingRadius: 0,
-    segmentationMode: 'auto',
-    maskSource: 'hybrid',
-    useSamInstances: false,
-  },
-  surface_pile: {
-    maxSide: 1200,
-    minArea: 18,
-    maxArea: 5500,
-    maxLength: 210,
-    splitSensitivity: 6,
-    noiseSize: 35,
-    maskMinArea: 18,
-    maxSegmentAspectRatio: 20,
-    minSegmentSolidity: 0.18,
-    minSegmentExtent: 0.05,
-    minSegmentSeednessMean: 0.06,
-    rejectNonSeedObjects: false,
-    denseMarkerMinDistance: 12,
-    densePeakPercentile: 68,
-    denseMaskPercentile: 32,
-    denseMaskClosingRadius: 1,
-    denseMaskMinArea: 18,
-    denseSmoothSigma: 1.8,
-    denseElevationSmoothSigma: 1.6,
-    denseGradientWeight: 0.30,
-    denseValleyWeight: 0.30,
-    denseCenterWeight: 0.32,
-    denseColorEdgeWeight: 0.08,
-    fillSegmentHoles: false,
-    segmentClosingRadius: 0,
-    segmentationMode: 'dense_pile',
-    maskSource: 'hybrid',
-    useSamInstances: false,
-  },
-  dense_fast: {
-    maxSide: 1000,
-    splitSensitivity: 10,
-    denseMarkerMinDistance: 4,
-    densePeakPercentile: 40,
-    denseMaskPercentile: 20,
-    segmentationMode: 'dense_pile',
-    maskSource: 'hybrid',
-    useSamInstances: false,
-  },
-  seed_fast: {
-    maxSide: 1000,
-    splitSensitivity: 10,
-    denseMarkerMinDistance: 4,
-    densePeakPercentile: 40,
-    denseMaskPercentile: 20,
-    segmentationMode: 'dense_pile',
-    maskSource: 'seed',
-    useSamInstances: false,
-  },
-  balanced: {},
-  sam_instances: {
-    maxSide: 1400,
-    splitSensitivity: 8,
-    segmentationMode: 'auto',
-    maskSource: 'sam',
-    useSamInstances: true,
-  },
-};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const settingsPath = path.resolve(__dirname, '..', '..', 'config', 'grain.settings.json');
 
-const selectedProfile = () => {
-  const name = (process.env.GRAIN_PROCESS_PROFILE || 'surface_quality').trim();
-  return grainProfiles[name] || grainProfiles.balanced;
-};
+export const grainSettings = Object.freeze(JSON.parse(fs.readFileSync(settingsPath, 'utf8')));
+export const grainParamDefinitions = Object.freeze(grainSettings.params || {});
+
+const baseGrainDefaults = Object.fromEntries(
+  Object.entries(grainParamDefinitions).map(([key, definition]) => [
+    key,
+    definition.env ? (process.env[definition.env] || definition.default) : definition.default,
+  ])
+);
 
 const parseEnvDefaults = () => {
   const raw = process.env.GRAIN_DEFAULT_PARAMS_JSON;
@@ -177,6 +33,23 @@ const parseEnvDefaults = () => {
 
 export const grainDefaultParams = Object.freeze({
   ...baseGrainDefaults,
-  ...selectedProfile(),
   ...parseEnvDefaults(),
+});
+
+export const grainParamFields = Object.freeze({
+  numeric: Object.freeze(new Set(
+    Object.entries(grainParamDefinitions)
+      .filter(([, definition]) => definition.type === 'number')
+      .map(([key]) => key)
+  )),
+  boolean: Object.freeze(new Set(
+    Object.entries(grainParamDefinitions)
+      .filter(([, definition]) => definition.type === 'boolean')
+      .map(([key]) => key)
+  )),
+  string: Object.freeze(new Set(
+    Object.entries(grainParamDefinitions)
+      .filter(([, definition]) => definition.type === 'string')
+      .map(([key]) => key)
+  )),
 });

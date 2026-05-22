@@ -36,10 +36,6 @@ const grainAnalysisRunSchema = new mongoose.Schema(
       type: mixed,
       default: {},
     },
-    kmeans: {
-      type: mixed,
-      default: {},
-    },
     features: {
       type: mixed,
       default: {},
@@ -48,6 +44,10 @@ const grainAnalysisRunSchema = new mongoose.Schema(
       type: String,
       default: '',
       select: false,
+    },
+    artifactMeta: {
+      type: mixed,
+      default: {},
     },
   },
   {

@@ -1,32 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  CircularProgress,
-  Divider,
-  Grid,
-  Stack,
-  TextField,
-  Typography,
-} from '@mui/material';
+import { Box, Grid } from '@mui/material';
 
 import { api, ensureFreshAccessToken } from '@/api/axios.js';
+import { DashboardPreviewPanel } from '@/components/grain/DashboardPreviewPanel.jsx';
+import { DashboardResultPanel } from '@/components/grain/DashboardResultPanel.jsx';
+import { formatMeasure, safeStem } from '@/components/grain/format.js';
+import { StatCard } from '@/components/grain/StatCard.jsx';
 
-const StatCard = ({ label, value, note }) => (
-  <Card sx={{ height: '100%' }}>
-    <CardContent sx={{ p: 2.25 }}>
-      <Box sx={{ mb: 1.25 }}>
-        <Typography variant="body2" color="text.secondary">{label}</Typography>
-      </Box>
-      <Typography variant="h5" fontWeight={700}>{value}</Typography>
-      <Typography variant="caption" color="text.secondary">{note}</Typography>
-    </CardContent>
-  </Card>
-);
+const emptyCalibration = { start: null, end: null, referenceMm: '' };
 
 export default function DashboardPage() {
   const videoRef = useRef(null);
@@ -40,8 +21,11 @@ export default function DashboardPage() {
   const [processError, setProcessError] = useState('');
   const [result, setResult] = useState(null);
   const [previewMode, setPreviewMode] = useState('overlay');
-  const [calibration, setCalibration] = useState({ start: null, end: null, referenceMm: '' });
+  const [calibration, setCalibration] = useState(emptyCalibration);
   const [drawingCalibration, setDrawingCalibration] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [progressPhase, setProgressPhase] = useState('');
+  const progressTimerRef = useRef(null);
 
   useEffect(() => () => {
     if (videoRef.current?.srcObject) {
@@ -49,6 +33,12 @@ export default function DashboardPage() {
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
+
+  const resetRunState = () => {
+    setResult(null);
+    setPreviewMode('overlay');
+    setCalibration(emptyCalibration);
+  };
 
   const handleCamera = async () => {
     setCameraError('');
@@ -60,9 +50,8 @@ export default function DashboardPage() {
       setPreviewUrl('');
       setImageFile(null);
       setFileName('camera-frame.png');
-      setResult(null);
-      setCalibration({ start: null, end: null, referenceMm: '' });
       setCameraActive(true);
+      resetRunState();
     } catch {
       setCameraError('Không thể kết nối camera. Kiểm tra quyền truy cập hoặc thiết bị.');
     }
@@ -77,9 +66,7 @@ export default function DashboardPage() {
     setFileName(file.name);
     setCameraActive(false);
     setProcessError('');
-    setResult(null);
-    setPreviewMode('overlay');
-    setCalibration({ start: null, end: null, referenceMm: '' });
+    resetRunState();
   };
 
   const getCalibrationPoint = (event) => {
@@ -144,14 +131,31 @@ export default function DashboardPage() {
   const handleProcess = async () => {
     setProcessing(true);
     setProcessError('');
+    setProgress(5);
+    setProgressPhase('Chuẩn bị ảnh');
+
+    const startProgressDrift = () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      progressTimerRef.current = setInterval(() => {
+        setProgress((prev) => {
+          if (prev < 90) return Math.min(90, prev + 2);
+          return prev;
+        });
+      }, 700);
+    };
 
     try {
       const file = await getImageForProcessing();
       if (!file) {
         setProcessError('Vui lòng import ảnh hoặc bật camera trước khi xử lý.');
+        setProgress(0);
+        setProgressPhase('');
+        setProcessing(false);
         return;
       }
 
+      setProgress(20);
+      setProgressPhase('Xác thực phiên');
       await ensureFreshAccessToken(true);
 
       const formData = new FormData();
@@ -166,14 +170,34 @@ export default function DashboardPage() {
         formData.append('referenceY2', String(calibration.end.y));
       }
 
+      setProgress(50);
+      setProgressPhase('Phân tích ảnh bằng YOLO ONNX');
+      startProgressDrift();
+
       const { data } = await api.post('/grain/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
       });
+
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      setProgress(96);
+      setProgressPhase('Lưu kết quả');
       setResult(data.data);
+      setPreviewMode('overlay');
+      setProgress(100);
+      setProgressPhase('Hoàn tất');
     } catch (err) {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      setProgress(0);
+      setProgressPhase('');
       setProcessError(resolveProcessError(err));
     } finally {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
       setProcessing(false);
+      setTimeout(() => {
+        setProgress(0);
+        setProgressPhase('');
+      }, 500);
     }
   };
 
@@ -193,11 +217,9 @@ export default function DashboardPage() {
   const summary = result?.summary;
   const previewImages = {
     overlay: result?.overlay_png_base64,
-    clusters: result?.cluster_png_base64,
     mask: result?.mask_png_base64,
-    seedMask: result?.seed_mask_png_base64,
-    kmeansMask: result?.kmeans_mask_png_base64,
     labels: result?.labels_png_base64,
+    preprocessed: result?.preprocessed_png_base64,
   };
   const activePreview = previewImages[previewMode] || result?.overlay_png_base64;
   const displayImage = activePreview ? `data:image/png;base64,${activePreview}` : previewUrl;
@@ -210,19 +232,19 @@ export default function DashboardPage() {
       note: result ? 'Theo lần xử lý hiện tại' : 'Chưa có kết quả',
     },
     {
-      label: 'Diện tích TB',
-      value: summary ? formatMeasure(summary.mean_area_mm2, 'mm²', summary.mean_area_px, 'px') : '-',
+      label: 'Diện tích trung bình',
+      value: summary ? formatMeasure(summary.mean_area_mm2, 'mm2', summary.mean_area_px, 'px') : '-',
       note: 'Từ contour từng hạt',
     },
     {
-      label: 'Chiều dài TB',
+      label: 'Chiều dài trung bình',
       value: summary ? formatMeasure(summary.mean_length_mm, 'mm', summary.mean_length_px, 'px') : '-',
-      note: 'Theo trục ellipse chính',
+      note: 'Theo trục chính',
     },
     {
-      label: 'Chiều rộng TB',
+      label: 'Chiều rộng trung bình',
       value: summary ? formatMeasure(summary.mean_width_mm, 'mm', summary.mean_width_px, 'px') : '-',
-      note: 'Theo trục ellipse phụ',
+      note: 'Theo trục phụ',
     },
   ];
 
@@ -238,272 +260,50 @@ export default function DashboardPage() {
 
       <Grid container spacing={2}>
         <Grid item xs={12} lg={7}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent sx={{ p: 2.5 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
-                <Box>
-                  <Typography variant="h6" fontWeight={700}>Ảnh đầu vào và overlay</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Sau khi xử lý, vùng này hiển thị contour và ID từng hạt.
-                  </Typography>
-                </Box>
-                <Chip
-                  label={result ? 'Đã xử lý' : 'Sẵn sàng'}
-                  color={result ? 'primary' : 'success'}
-                  variant="outlined"
-                  size="small"
-                />
-              </Box>
-
-              {result && (
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
-                  {[
-                    ['overlay', 'Overlay'],
-                    ['clusters', 'Clusters'],
-                    ['mask', 'Mask'],
-                    ['seedMask', 'Seed mask'],
-                    ['kmeansMask', 'KMeans mask'],
-                    ['labels', 'Labels'],
-                  ].map(([key, label]) => (
-                    <Button
-                      key={key}
-                      size="small"
-                      variant={previewMode === key ? 'contained' : 'outlined'}
-                      onClick={() => setPreviewMode(key)}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </Stack>
-              )}
-
-              <Box sx={{
-                minHeight: 360,
-                border: '1px dashed',
-                borderColor: 'divider',
-                borderRadius: 1,
-                bgcolor: '#FBFCFA',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-                mb: 2,
-                position: 'relative',
-              }}>
-                {displayImage ? (
-                  <Box
-                    sx={{ position: 'relative', width: '100%', height: 360, display: 'grid', placeItems: 'center', touchAction: calibrationImage ? 'none' : 'auto' }}
-                    onPointerDown={(event) => {
-                      if (!calibrationImage || processing) return;
-                      const point = getCalibrationPoint(event);
-                      if (!point) return;
-                      setDrawingCalibration(true);
-                      setCalibration((current) => ({ ...current, start: point, end: point }));
-                    }}
-                    onPointerMove={(event) => {
-                      if (!drawingCalibration) return;
-                      const point = getCalibrationPoint(event);
-                      if (point) setCalibration((current) => ({ ...current, end: point }));
-                    }}
-                    onPointerUp={() => setDrawingCalibration(false)}
-                    onPointerLeave={() => setDrawingCalibration(false)}
-                  >
-                    <Box component="span" sx={{ position: 'relative', display: 'inline-flex', maxWidth: '100%', maxHeight: 360 }}>
-                      <Box
-                        component="img"
-                        ref={imageRef}
-                        src={displayImage}
-                        alt={fileName}
-                        draggable={false}
-                        sx={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain', userSelect: 'none' }}
-                      />
-                      {calibrationImage && renderCalibrationOverlay()}
-                    </Box>
-                  </Box>
-                ) : (
-                  <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', maxHeight: 360, display: cameraActive ? 'block' : 'none' }} />
-                )}
-                {!displayImage && !cameraActive && (
-                  <Stack alignItems="center" spacing={1.25} sx={{ color: 'text.secondary', textAlign: 'center', px: 2 }}>
-                    <Typography fontWeight={650} color="text.primary">Chưa có ảnh đầu vào</Typography>
-                  </Stack>
-                )}
-                {processing && (
-                  <Box sx={{
-                    position: 'absolute',
-                    inset: 0,
-                    bgcolor: 'rgba(255,255,255,0.72)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}>
-                    <Stack alignItems="center" spacing={1}>
-                      <CircularProgress size={32} />
-                      <Typography variant="body2" fontWeight={650}>Đang xử lý...</Typography>
-                    </Stack>
-                  </Box>
-                )}
-              </Box>
-
-              {fileName && (
-                <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>{fileName}</Typography>
-              )}
-              {previewUrl && (
-                <Box sx={{ mb: 1.5 }}>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                    <TextField
-                      label="Kích thước vật mốc (mm)"
-                      type="number"
-                      size="small"
-                      value={calibration.referenceMm}
-                      onChange={(event) => setCalibration((current) => ({ ...current, referenceMm: event.target.value }))}
-                      inputProps={{ min: 0, step: 0.01 }}
-                      sx={{ maxWidth: { sm: 220 } }}
-                    />
-                    <Chip
-                      size="small"
-                      color={calibrationReady ? 'primary' : 'default'}
-                      variant="outlined"
-                      label={calibrationPixels > 1 ? `${calibrationPixels.toFixed(1)} px` : 'Kéo 1 đoạn trên vật mốc'}
-                    />
-                    <Button
-                      size="small"
-                      variant="text"
-                      onClick={() => setCalibration({ start: null, end: null, referenceMm: '' })}
-                    >
-                      Xóa vật mốc
-                    </Button>
-                  </Stack>
-                </Box>
-              )}
-              {cameraError && <Alert severity="error" sx={{ mb: 1.5 }}>{cameraError}</Alert>}
-              {processError && <Alert severity="error" sx={{ mb: 1.5 }}>{processError}</Alert>}
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <Button variant="contained" onClick={handleCamera}>
-                  Kết nối camera
-                </Button>
-                <Button variant="outlined" component="label">
-                  Import ảnh
-                  <input hidden type="file" accept="image/jpeg,image/png" onChange={handleFile} />
-                </Button>
-                <Button
-                  variant="outlined"
-                  disabled={processing || (!imageFile && !cameraActive)}
-                  onClick={handleProcess}
-                >
-                  {processing ? 'Đang xử lý...' : (result ? 'Chạy lại' : 'Chạy xử lý')}
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
+          <DashboardPreviewPanel
+            cameraActive={cameraActive}
+            cameraError={cameraError}
+            calibration={calibration}
+            calibrationImage={calibrationImage}
+            calibrationPixels={calibrationPixels}
+            calibrationReady={calibrationReady}
+            displayImage={displayImage}
+            drawingCalibration={drawingCalibration}
+            fileName={fileName}
+            imageRef={imageRef}
+            previewMode={previewMode}
+            previewUrl={previewUrl}
+            processError={processError}
+            processing={processing}
+            result={result}
+            videoRef={videoRef}
+            onCamera={handleCamera}
+            onFile={handleFile}
+            onProcess={handleProcess}
+            onCalibrationChange={setCalibration}
+            onDrawingCalibrationChange={setDrawingCalibration}
+            onPreviewModeChange={setPreviewMode}
+            getCalibrationPoint={getCalibrationPoint}
+            renderCalibrationOverlay={renderCalibrationOverlay}
+            progress={progress}
+            progressPhase={progressPhase}
+          />
         </Grid>
 
         <Grid item xs={12} lg={5}>
-          <Stack spacing={2}>
-            <Card>
-              <CardContent sx={{ p: 2.5 }}>
-                <Typography variant="h6" fontWeight={700} mb={0.5}>Cài đặt đo lường</Typography>
-                <Box mb={2} />
-
-                <Stack spacing={1.25}>
-                  <ResultRow label="Nhận dạng" value="Tự động" />
-                  <ResultRow label="Đơn vị" value={calibrationReady ? 'mm' : 'px'} />
-                  <ResultRow
-                    label="Vật mốc"
-                    value={calibrationReady ? `${calibrationPixels.toFixed(1)} px = ${calibrationMm} mm` : 'Chưa chọn'}
-                  />
-                </Stack>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent sx={{ p: 2.5 }}>
-                <Typography variant="h6" fontWeight={700} mb={0.5}>Kết quả và export</Typography>
-                <Box mb={2} />
-
-                {result ? (
-                  <Stack spacing={1.2}>
-                    <ResultRow
-                      label="Tỷ lệ mm"
-                      value={result.calibration?.enabled ? `${formatNumber(result.calibration.mm_per_pixel, 5)} mm/px` : 'chưa có'}
-                    />
-                    <ResultRow
-                      label="Dài TB thật"
-                      value={result.calibration?.enabled ? `${formatNumber(result.summary?.mean_length_mm, 3)} mm` : '-'}
-                    />
-                    <ResultRow
-                      label="Rộng TB thật"
-                      value={result.calibration?.enabled ? `${formatNumber(result.summary?.mean_width_mm, 3)} mm` : '-'}
-                    />
-                    <ResultRow label="Mã xử lý" value={result.run?.id ? result.run.id.slice(-8).toUpperCase() : '-'} />
-                    <ResultRow label="Segments trước lọc" value={result.segmentation.segment_count_before_filter} />
-                    <ResultRow label="Watershed markers" value={result.segmentation.marker_count} />
-                    <ResultRow
-                      label="Edge snap"
-                      value={result.segmentation.edge_snap?.enabled ? `${result.segmentation.edge_snap.input_segments} -> ${result.segmentation.edge_snap.output_segments}` : 'off'}
-                    />
-                    <ResultRow
-                      label="Fill holes"
-                      value={result.segmentation.label_fill?.enabled ? `${result.segmentation.label_fill.filled_pixels} px` : 'off'}
-                    />
-                    <ResultRow label="Mask pixels raw" value={result.segmentation.raw_mask_pixels ?? result.segmentation.mask_pixels} />
-                    <ResultRow label="Mask pixels" value={result.segmentation.mask_pixels} />
-                    <ResultRow
-                      label="Mask components"
-                      value={`${result.segmentation.mask_filter?.component_count_before ?? '-'} -> ${result.segmentation.mask_filter?.component_count_after ?? '-'}`}
-                    />
-                    <ResultRow
-                      label="Auto candidates"
-                      value={result.segmentation.dynamic_thresholds?.candidate_count ?? '-'}
-                    />
-                    <ResultRow
-                      label="Effective area"
-                      value={`${result.segmentation.effective_thresholds?.minArea ?? '-'} -> ${result.segmentation.effective_thresholds?.maxArea ?? '-'}`}
-                    />
-                    <ResultRow label="PCA variance PC" value={`${(result.features.pca_explained_variance[result.features.pc_index] * 100).toFixed(1)}%`} />
-                    <Divider />
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                      <Button variant="contained" onClick={downloadCsv}>
-                        Export CSV
-                      </Button>
-                      <Button variant="outlined" onClick={downloadPng}>
-                        Export PNG
-                      </Button>
-                    </Stack>
-                  </Stack>
-                ) : (
-                  <Alert severity="info">Chưa có kết quả. Import ảnh và bấm Chạy xử lý.</Alert>
-                )}
-              </CardContent>
-            </Card>
-          </Stack>
+          <DashboardResultPanel
+            calibrationMm={calibrationMm}
+            calibrationPixels={calibrationPixels}
+            calibrationReady={calibrationReady}
+            result={result}
+            onDownloadCsv={downloadCsv}
+            onDownloadPng={downloadPng}
+          />
         </Grid>
       </Grid>
     </Box>
   );
 }
-
-const ResultRow = ({ label, value }) => (
-  <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-    <Typography variant="body2" color="text.secondary">{label}</Typography>
-    <Typography variant="body2" fontWeight={650}>{value}</Typography>
-  </Box>
-);
-
-const formatNumber = (value, digits = 2) => (
-  Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-'
-);
-
-const formatMeasure = (primary, primaryUnit, fallback, fallbackUnit) => (
-  Number.isFinite(Number(primary))
-    ? `${formatNumber(primary, primaryUnit === 'mm²' ? 3 : 2)} ${primaryUnit}`
-    : `${formatNumber(fallback)} ${fallbackUnit}`
-);
-
-const safeStem = (name = 'seed-image') => (
-  name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_') || 'seed-image'
-);
 
 const resolveProcessError = (err) => {
   if (err.response?.status === 401) {
@@ -512,6 +312,9 @@ const resolveProcessError = (err) => {
 
   const message = err.response?.data?.message;
   if (message) return message;
+  if (err.code === 'ECONNABORTED') {
+    return 'Xử lý quá lâu (quá 300 giây). Hãy thử ảnh nhỏ hơn hoặc kiểm tra backend/Python worker.';
+  }
   if (err.response?.status === 503 || (err.response?.status === 500 && typeof err.response?.data === 'string')) {
     return 'Backend API chưa chạy hoặc Vite không proxy được tới http://localhost:3000. Hãy chạy backend rồi thử lại.';
   }

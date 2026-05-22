@@ -7,8 +7,10 @@ import {
   normalizeGrainParams,
 } from '../services/grainProcessing.service.js';
 import {
+  checksumGrainRunArtifact,
   deleteGrainRunArtifact,
   readGrainRunArtifact,
+  statGrainRunArtifact,
   writeGrainRunArtifact,
 } from '../services/grainRunArtifact.service.js';
 import { sendSuccess, sendError } from '../utils/response.util.js';
@@ -39,25 +41,29 @@ export const analyzeGrainImage = async (req, res) => {
       summary: result.summary,
       segmentation: result.segmentation,
       calibration: result.calibration,
-      kmeans: {
-        k: result.kmeans?.k,
-        cluster_space: result.kmeans?.cluster_space,
-        counts: result.kmeans?.counts,
-        selected_clusters: result.kmeans?.selected_clusters,
-      },
       features: result.features,
     });
-    run.artifactPath = await writeGrainRunArtifact({
+    const artifactPath = await writeGrainRunArtifact({
       userId: req.user.userId,
       runId: run._id.toString(),
       result,
     });
+    const [artifactStat, artifactChecksum] = await Promise.all([
+      statGrainRunArtifact(artifactPath).catch(() => null),
+      checksumGrainRunArtifact(artifactPath).catch(() => ''),
+    ]);
+    run.artifactPath = artifactPath;
+    run.artifactMeta = {
+      schemaVersion: 2,
+      checksumSha256: artifactChecksum || '',
+      sizeBytes: artifactStat?.sizeBytes || 0,
+    };
     await run.save();
 
     return sendSuccess(
       res,
       {
-        ...result,
+        ...compactAnalyzeResponse(result),
         run: serializeRunSummary(run),
       },
       'Phân tích ảnh thành công'
@@ -74,14 +80,30 @@ export const analyzeGrainImage = async (req, res) => {
 export const listGrainRuns = async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 100));
-    const runs = await GrainAnalysisRun.find({ userId: req.user.userId })
-      .sort({ createdAt: -1 })
+    const before = parseBeforeCursor(req.query.before);
+    const filter = { userId: req.user.userId };
+    if (before) {
+      filter.$or = [
+        { createdAt: { $lt: before.createdAt } },
+        { createdAt: before.createdAt, _id: { $lt: before.id } },
+      ];
+    }
+    const runs = await GrainAnalysisRun.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
       .limit(limit)
       .lean({ virtuals: true });
+    const total = await GrainAnalysisRun.countDocuments({ userId: req.user.userId });
+    const last = runs[runs.length - 1];
+    const nextBefore = last ? encodeBeforeCursor(last.createdAt, last._id) : null;
 
     return sendSuccess(res, {
       items: runs.map(serializeLeanRunSummary),
-      total: runs.length,
+      total,
+      page: {
+        limit,
+        hasMore: runs.length === limit,
+        nextBefore,
+      },
     });
   } catch (err) {
     return sendError(res, 'Lấy lịch sử phân tích thất bại', 500, String(err));
@@ -140,8 +162,8 @@ const serializeLeanRunSummary = (run) => ({
   summary: run.summary || {},
   segmentation: run.segmentation || {},
   calibration: run.calibration || {},
-  kmeans: run.kmeans || {},
   features: run.features || {},
+  artifactMeta: run.artifactMeta || {},
   createdAt: run.createdAt,
   updatedAt: run.updatedAt,
 });
@@ -149,24 +171,72 @@ const serializeLeanRunSummary = (run) => ({
 const serializeRunResult = (run) => ({
   image: run.image || {},
   features: run.features || {},
-  kmeans: run.kmeans || {},
   segmentation: run.segmentation || {},
   calibration: run.calibration || {},
   summary: run.summary || {},
   measurements: [],
   csv: '',
+  original_png_base64: '',
+  preprocessed_png_base64: '',
   overlay_png_base64: '',
-  cluster_png_base64: '',
+  sam_mask_png_base64: '',
   mask_png_base64: '',
-  seed_mask_png_base64: '',
-  kmeans_mask_png_base64: '',
   labels_png_base64: '',
+  stages: {
+    input: 'original_png_base64',
+    preprocessed: 'preprocessed_png_base64',
+    original: 'original_png_base64',
+    labels_final: 'labels_png_base64',
+    overlay_final: 'overlay_png_base64',
+    mask: 'mask_png_base64',
+  },
 });
 
 const loadRunResult = async (run) => {
   try {
-    return await readGrainRunArtifact(run.artifactPath);
+    const artifact = await readGrainRunArtifact(run.artifactPath);
+    return {
+      ...serializeRunResult(run),
+      ...artifact,
+    };
   } catch {
     return serializeRunResult(run);
   }
+};
+
+const compactAnalyzeResponse = (result) => ({
+  image: result.image || {},
+  features: result.features || {},
+  segmentation: result.segmentation || {},
+  calibration: result.calibration || {},
+  summary: result.summary || {},
+  measurements: result.measurements || [],
+  csv: result.csv || '',
+  overlay_png_base64: result.overlay_png_base64 || '',
+  sam_mask_png_base64: result.sam_mask_png_base64 || '',
+  preprocessed_png_base64: result.preprocessed_png_base64 || '',
+  mask_png_base64: result.mask_png_base64 || '',
+  labels_png_base64: result.labels_png_base64 || '',
+});
+
+const parseBeforeCursor = (value) => {
+  if (!value) return null;
+  try {
+    const raw = Buffer.from(String(value), 'base64url').toString('utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed?.createdAt || !parsed?.id || !mongoose.isValidObjectId(parsed.id)) return null;
+    const createdAt = new Date(parsed.createdAt);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    return { createdAt, id: parsed.id };
+  } catch {
+    return null;
+  }
+};
+
+const encodeBeforeCursor = (createdAt, id) => {
+  const payload = JSON.stringify({
+    createdAt: new Date(createdAt).toISOString(),
+    id: id.toString(),
+  });
+  return Buffer.from(payload, 'utf8').toString('base64url');
 };

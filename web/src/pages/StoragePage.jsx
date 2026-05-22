@@ -7,12 +7,14 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
   Grid,
+  IconButton,
   Stack,
   Table,
   TableBody,
@@ -25,11 +27,14 @@ import {
 import {
   DeleteOutline,
   DownloadOutlined,
+  ExpandLess,
+  ExpandMore,
   RefreshOutlined,
   VisibilityOutlined,
 } from '@mui/icons-material';
 
 import { api } from '@/api/axios.js';
+import { formatMeasure, safeStem } from '@/components/grain/format.js';
 
 export default function StoragePage() {
   const [runs, setRuns] = useState([]);
@@ -38,6 +43,7 @@ export default function StoragePage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [detailPreviewMode, setDetailPreviewMode] = useState('overlay');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const loadRuns = async () => {
     setLoading(true);
@@ -86,27 +92,23 @@ export default function StoragePage() {
   const detailResult = selected?.result;
   const detailRun = selected?.run;
   const detailPreviewImages = {
+    original: detailResult?.original_png_base64,
+    preprocessed: detailResult?.preprocessed_png_base64,
     overlay: detailResult?.overlay_png_base64,
-    clusters: detailResult?.cluster_png_base64,
     mask: detailResult?.mask_png_base64,
-    seedMask: detailResult?.seed_mask_png_base64,
-    kmeansMask: detailResult?.kmeans_mask_png_base64,
     labels: detailResult?.labels_png_base64,
   };
   const detailPreviewImage = detailPreviewImages[detailPreviewMode] || detailResult?.overlay_png_base64;
 
   return (
-    <Box sx={{ maxWidth: 1200 }}>
+    <Box sx={{ maxWidth: 1200, minWidth: 0 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mb: 2.5, flexWrap: 'wrap' }}>
         <Box>
           <Typography variant="h5" fontWeight={700} mb={0.75}>Lưu trữ</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Lịch sử được tạo trực tiếp từ pipeline phân tích ảnh: upload, worker Python, lưu run và export.
-          </Typography>
         </Box>
-        <Button variant="outlined" startIcon={<RefreshOutlined />} onClick={loadRuns} disabled={loading}>
-          Làm mới
-        </Button>
+        <IconButton color="primary" onClick={loadRuns} disabled={loading} aria-label="Làm mới">
+          <RefreshOutlined />
+        </IconButton>
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -115,16 +117,16 @@ export default function StoragePage() {
         <Grid item xs={12}>
           <Card>
             <CardContent sx={{ p: 0 }}>
-              <TableContainer>
-                <Table>
+              <TableContainer sx={{ overflowX: 'auto' }}>
+                <Table sx={{ minWidth: 920 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell>Mã xử lý</TableCell>
                       <TableCell>Ảnh đầu vào</TableCell>
                       <TableCell>Thời gian</TableCell>
                       <TableCell align="right">Số hạt</TableCell>
-                      <TableCell align="right">Dài TB</TableCell>
-                      <TableCell align="right">Rộng TB</TableCell>
+                      <TableCell align="right">Dài trung bình</TableCell>
+                      <TableCell align="right">Rộng trung bình</TableCell>
                       <TableCell>Trạng thái</TableCell>
                       <TableCell align="right">Thao tác</TableCell>
                     </TableRow>
@@ -140,7 +142,7 @@ export default function StoragePage() {
                       <TableRow key={run.id} hover>
                         <TableCell>{shortRunId(run.id)}</TableCell>
                         <TableCell>
-                          <Typography variant="body2" fontWeight={650}>{run.sourceFileName}</Typography>
+                          <Typography variant="body2" fontWeight={650} sx={{ maxWidth: 220 }} noWrap>{run.sourceFileName}</Typography>
                           <Typography variant="caption" color="text.secondary">
                             {run.image?.width || '-'} x {run.image?.height || '-'} px
                           </Typography>
@@ -190,20 +192,23 @@ export default function StoragePage() {
         </Grid>
       </Grid>
 
-      <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="md" fullWidth>
+      <Dialog open={Boolean(selected)} onClose={() => { setSelected(null); setShowAdvanced(false); }} maxWidth="lg" fullWidth>
         <DialogTitle>Chi tiết xử lý {detailRun ? shortRunId(detailRun.id) : ''}</DialogTitle>
         <DialogContent dividers>
           {detailResult && (
             <Grid container spacing={2}>
               <Grid item xs={12} md={7}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
+                <Box sx={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 1,
+                  mb: 1.5,
+                }}>
                   {[
-                    ['overlay', 'Overlay'],
-                    ['clusters', 'Clusters'],
-                    ['mask', 'Mask'],
-                    ['seedMask', 'Seed mask'],
-                    ['kmeansMask', 'KMeans mask'],
-                    ['labels', 'Labels'],
+                    ['original', 'Ảnh gốc'],
+                    ['overlay', 'Đánh dấu'],
+                    ['mask', 'Hình dạng'],
+                    ['labels', 'Đánh số'],
                   ].map(([key, label]) => (
                     <Button
                       key={key}
@@ -211,17 +216,24 @@ export default function StoragePage() {
                       variant={detailPreviewMode === key ? 'contained' : 'outlined'}
                       disabled={!detailPreviewImages[key]}
                       onClick={() => setDetailPreviewMode(key)}
+                      sx={{
+                        flex: '0 1 auto',
+                        minWidth: 0,
+                        maxWidth: '100%',
+                        whiteSpace: 'nowrap',
+                      }}
                     >
                       {label}
                     </Button>
                   ))}
-                </Stack>
+                </Box>
                 <Box sx={{
                   border: '1px solid',
                   borderColor: 'divider',
                   borderRadius: 1,
                   bgcolor: '#FBFCFA',
                   minHeight: 320,
+                  width: '100%',
                   display: 'grid',
                   placeItems: 'center',
                   overflow: 'hidden',
@@ -231,7 +243,7 @@ export default function StoragePage() {
                       component="img"
                       src={`data:image/png;base64,${detailPreviewImage}`}
                       alt={detailRun?.sourceFileName || 'overlay'}
-                      sx={{ width: '100%', maxHeight: 420, objectFit: 'contain' }}
+                      sx={{ width: '100%', maxHeight: 420, objectFit: 'contain', display: 'block' }}
                     />
                   ) : (
                     <Typography variant="body2" color="text.secondary">Không có overlay</Typography>
@@ -240,23 +252,46 @@ export default function StoragePage() {
               </Grid>
               <Grid item xs={12} md={5}>
                 <Stack spacing={1.2}>
-                  <ResultRow label="Ảnh" value={detailRun?.sourceFileName || '-'} />
-                  <ResultRow label="Thời gian" value={formatDate(detailRun?.createdAt)} />
-                  <ResultRow label="Số hạt" value={detailResult.summary?.count ?? 0} />
-                  <ResultRow label="Dài TB" value={formatMeasure(detailResult.summary?.mean_length_mm, 'mm', detailResult.summary?.mean_length_px, 'px')} />
-                  <ResultRow label="Rộng TB" value={formatMeasure(detailResult.summary?.mean_width_mm, 'mm', detailResult.summary?.mean_width_px, 'px')} />
-                  <ResultRow label="Tỷ lệ mm" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'chưa có'} />
-                  <ResultRow label="Markers" value={detailResult.segmentation?.marker_count ?? '-'} />
-                  <ResultRow label="Segments trước lọc" value={detailResult.segmentation?.segment_count_before_filter ?? '-'} />
+                  <ResultRow label="Tên tệp ảnh" value={detailRun?.sourceFileName || '-'} />
+                  <ResultRow label="Thời gian quét" value={formatDate(detailRun?.createdAt)} />
+                  <ResultRow label="Tổng số hạt đo được" value={detailResult.summary?.count ?? 0} />
+                  <ResultRow label="Chiều dài trung bình" value={formatMeasure(detailResult.summary?.mean_length_mm, 'mm', detailResult.summary?.mean_length_px, 'px')} />
+                  <ResultRow label="Chiều rộng trung bình" value={formatMeasure(detailResult.summary?.mean_width_mm, 'mm', detailResult.summary?.mean_width_px, 'px')} />
+                  <ResultRow label="Tỷ lệ thước đo" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'Chưa thiết lập'} />
+                  
+                  <Divider sx={{ my: 1 }} />
+                  
+                  <Button
+                    size="small"
+                    variant="text"
+                    endIcon={showAdvanced ? <ExpandLess /> : <ExpandMore />}
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    sx={{ alignSelf: 'flex-start', mb: 0.5, textTransform: 'none', color: 'text.secondary', p: 0 }}
+                  >
+                    {showAdvanced ? 'Ẩn thông số kỹ thuật' : 'Hiển thị thông số kỹ thuật'}
+                  </Button>
+
+                  <Collapse in={showAdvanced}>
+                    <Stack spacing={1.2} sx={{ pl: 1.5, borderLeft: '2px solid', borderColor: 'divider', my: 1 }}>
+                      <ResultRow label="Phương thức phân tích" value="Phân đoạn instance YOLO ONNX trên server" />
+                      {detailResult.segmentation?.confidence && (
+                        <ResultRow label="Độ tin cậy nhận dạng" value={`${(Number(detailResult.segmentation.confidence) * 100).toFixed(0)}%`} />
+                      )}
+                      {detailResult.segmentation?.iou && (
+                        <ResultRow label="Độ khớp mặt nạ (IoU)" value={`${(Number(detailResult.segmentation.iou) * 100).toFixed(0)}%`} />
+                      )}
+                    </Stack>
+                  </Collapse>
+
                   <Divider />
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap" pt={1}>
                     <Button
                       variant="contained"
                       startIcon={<DownloadOutlined />}
                       disabled={!detailResult.csv}
                       onClick={() => downloadBlob(`${safeStem(detailRun?.sourceFileName)}_measurements.csv`, detailResult.csv, 'text/csv;charset=utf-8')}
                     >
-                      Export CSV
+                      Xuất CSV
                     </Button>
                     <Button
                       variant="outlined"
@@ -264,7 +299,7 @@ export default function StoragePage() {
                       disabled={!detailResult.overlay_png_base64}
                       onClick={() => downloadPng(detailRun?.sourceFileName, detailResult.overlay_png_base64)}
                     >
-                      Export PNG
+                      Xuất ảnh kết quả
                     </Button>
                   </Stack>
                 </Stack>
@@ -281,9 +316,21 @@ export default function StoragePage() {
 }
 
 const ResultRow = ({ label, value }) => (
-  <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
-    <Typography variant="body2" color="text.secondary">{label}</Typography>
-    <Typography variant="body2" fontWeight={650} textAlign="right">{value}</Typography>
+  <Box sx={{
+    display: 'grid',
+    gridTemplateColumns: 'minmax(92px, max-content) minmax(0, 1fr)',
+    alignItems: 'start',
+    gap: 2,
+  }}>
+    <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>{label}</Typography>
+    <Typography
+      variant="body2"
+      fontWeight={650}
+      textAlign="right"
+      sx={{ minWidth: 0, overflowWrap: 'anywhere' }}
+    >
+      {value}
+    </Typography>
   </Box>
 );
 
@@ -297,19 +344,7 @@ const formatDate = (value) => {
   }).format(new Date(value));
 };
 
-const formatNumber = (value, digits = 2) => (
-  Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-'
-);
 
-const formatMeasure = (primary, primaryUnit, fallback, fallbackUnit) => (
-  Number.isFinite(Number(primary))
-    ? `${formatNumber(primary, primaryUnit === 'mm²' ? 3 : 2)} ${primaryUnit}`
-    : `${formatNumber(fallback)} ${fallbackUnit}`
-);
-
-const safeStem = (name = 'seed-image') => (
-  name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_') || 'seed-image'
-);
 
 const downloadBlob = (fileName, content, mimeType) => {
   const blob = new Blob([content], { type: mimeType });

@@ -4,6 +4,8 @@ const primary = '#2F6B4F';
 const primaryDark = '#244F3C';
 const secondary = '#657A3A';
 const line = '#DDE5DA';
+const defaultFontFamily = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const appFontFamily = (import.meta.env.VITE_APP_FONT_FAMILY || defaultFontFamily).trim() || defaultFontFamily;
 
 export const theme = createTheme({
   palette: {
@@ -34,7 +36,7 @@ export const theme = createTheme({
     warning: { main: '#A15C07' },
   },
   typography: {
-    fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
+    fontFamily: appFontFamily,
     h1: { fontWeight: 700, letterSpacing: 0 },
     h2: { fontWeight: 700, letterSpacing: 0 },
     h3: { fontWeight: 700, letterSpacing: 0 },

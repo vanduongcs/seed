@@ -1,156 +1,23 @@
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { grainDefaultParams } from '../config/grain.defaults.js';
+import { grainDefaultParams, grainParamFields } from '../config/grain.defaults.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.resolve(__dirname, '..', '..');
 const workerScript = path.join(backendRoot, 'python', 'analyze_grains.py');
 
-const PYTHON_TIMEOUT_MS = parseInt(process.env.GRAIN_PROCESS_TIMEOUT_MS || '180000', 10);
-
-const numericFields = new Set([
-  'maxSide',
-  'pcIndex',
-  'k',
-  'rgbIndexWeight',
-  'minArea',
-  'maxArea',
-  'minLength',
-  'maxLength',
-  'splitSensitivity',
-  'openingRadius',
-  'closingRadius',
-  'noiseSize',
-  'holeSize',
-  'referencePixels',
-  'referenceMm',
-  'referenceX1',
-  'referenceY1',
-  'referenceX2',
-  'referenceY2',
-  'referenceExcludePadding',
-  'referenceExcludeOverlapRatio',
-  'maskMinArea',
-  'maxForegroundAreaRatio',
-  'borderMargin',
-  'maxAspectRatio',
-  'minSolidity',
-  'minExtent',
-  'maxClusterExtent',
-  'maxClusterSolidity',
-  'clusterBlockAreaMultiplier',
-  'minComponentSeednessMean',
-  'minComponentSeednessP80',
-  'contrastRingRadius',
-  'minLabContrast',
-  'minSeednessContrast',
-  'minWidth',
-  'maxWidth',
-  'maxSegmentAspectRatio',
-  'minSegmentSolidity',
-  'minSegmentExtent',
-  'minSegmentSeednessMean',
-  'seedHueCenter',
-  'seedHueWidth',
-  'seednessThreshold',
-  'minSeedSaturation',
-  'seedMaxValue',
-  'seedBrightSoftness',
-  'backgroundBorderWidth',
-  'backgroundDistanceMin',
-  'backgroundDistanceSoftness',
-  'backgroundGateStrength',
-  'maxSeedMaskRatio',
-  'markerShrinkFactor',
-  'denseMarkerMinDistance',
-  'densePeakPercentile',
-  'denseMaskPercentile',
-  'denseMaskClosingRadius',
-  'denseMaskMinArea',
-  'denseRoiBackgroundDistance',
-  'edgeSnapRadius',
-  'edgeSnapMarkerErode',
-  'edgeSnapSeednessScale',
-  'edgeSnapMaxExtraRatio',
-  'edgeSnapMinMarkerFraction',
-  'edgeSnapGradientWeight',
-  'edgeSnapValleyWeight',
-  'edgeSnapColorWeight',
-  'edgeSnapSeednessWeight',
-  'segmentHoleSize',
-  'segmentClosingRadius',
-  'contourFillMinArea',
-  'contourFillMaxArea',
-  'contourFillClosingRadius',
-  'samMinAreaRatio',
-  'samMaxAreaRatio',
-  'samMaxOverlapRatio',
-  'samMinNewAreaRatio',
-  'samConf',
-  'samIou',
-  'samMaxDet',
-  'samTileSize',
-  'samTileOverlap',
-  'seedColorModelSeednessFloor',
-  'maxSeedColorDistance',
-  'minNonSeedObjectSeedness',
-  'largeNonSeedAreaMultiplier',
-  'hardMaxObjectAreaRatio',
-  'riceMarkerMinDistance',
-  'riceMaskPercentile',
-  'ricePeakPercentile',
-  'denseAutoTargetCount',
-  'denseAutoMaxCount',
-  'denseAutoMaskPercentiles',
-]);
-
-const booleanFields = new Set([
-  'includeIntermediate',
-  'rejectBorderComponents',
-  'rejectSuspiciousBorderComponents',
-  'rejectBorderSegments',
-  'dynamicThresholds',
-  'dynamicAreaThresholds',
-  'dynamicDiagonalThresholds',
-  'dynamicMarkerSearch',
-  'edgeSnap',
-  'fillSegmentHoles',
-  'fillContourMasks',
-  'useSamInstances',
-  'showMeasurementAxes',
-  'samUseTiling',
-  'rejectNonSeedObjects',
-  'autoImageProfile',
-  'autoSurfaceTune',
-]);
+const PYTHON_TIMEOUT_MS = parseInt(process.env.GRAIN_PROCESS_TIMEOUT_MS || '300000', 10);
 
 const requestOverrideFields = new Set([
-  'referencePixels',
-  'referenceMm',
-  'referencePixelSpace',
-  'referenceX1',
-  'referenceY1',
-  'referenceX2',
-  'referenceY2',
-  'referenceExcludePadding',
-  'referenceExcludeOverlapRatio',
-]);
-
-// String fields that pass through without numeric/boolean coercion
-const passthroughFields = new Set([
-  'maskSource',
-  'samModelType',
-  'samCheckpoint',
-  'clusterSpace',
-  'watershedMode',
-  'pcaMethod',
-  'referencePixelSpace',
-  'segmentationMode',
+  ...Object.keys(grainDefaultParams),
+  ...grainParamFields.numeric,
+  ...grainParamFields.boolean,
+  ...grainParamFields.string,
 ]);
 
 export const analyzeGrainImageBuffer = async ({ buffer, originalName, params }) => {
@@ -166,7 +33,8 @@ export const analyzeGrainImageBuffer = async ({ buffer, originalName, params }) 
 
   try {
     await fs.promises.writeFile(imagePath, buffer);
-    const payload = await runPythonWorker(imagePath, normalizeGrainParams(params));
+    const normalized = normalizeGrainParams(params);
+    const payload = await runPythonWorker(imagePath, normalized);
     if (!payload.ok) {
       const error = new Error(payload.error || 'Phân tích ảnh thất bại');
       error.statusCode = 422;
@@ -257,23 +125,20 @@ export const normalizeGrainParams = (params = {}) => {
     if (value === undefined || value === null || value === '') continue;
     if (!requestOverrideFields.has(key)) continue;
 
-    if (numericFields.has(key)) {
+    if (grainParamFields.numeric.has(key)) {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) normalized[key] = parsed;
       continue;
     }
 
-    if (booleanFields.has(key)) {
+    if (grainParamFields.boolean.has(key)) {
       normalized[key] = value === true || value === 'true' || value === '1' || value === 1;
       continue;
     }
 
-    if (passthroughFields.has(key)) {
+    if (grainParamFields.string.has(key)) {
       normalized[key] = String(value).trim();
-      continue;
     }
-
-    normalized[key] = value;
   }
   return normalized;
 };
@@ -289,7 +154,17 @@ const resolvePythonExecutable = () => {
 
   const winVenv = path.join(backendRoot, '.venv', 'Scripts', 'python.exe');
   const posixVenv = path.join(backendRoot, '.venv', 'bin', 'python');
-  if (fs.existsSync(winVenv)) return winVenv;
-  if (fs.existsSync(posixVenv)) return posixVenv;
+  if (isUsablePython(winVenv)) return winVenv;
+  if (isUsablePython(posixVenv)) return posixVenv;
   return process.platform === 'win32' ? 'python' : 'python3';
+};
+
+const isUsablePython = (candidate) => {
+  if (!fs.existsSync(candidate)) return false;
+  const result = spawnSync(candidate, ['--version'], {
+    windowsHide: true,
+    timeout: 3000,
+    stdio: 'ignore',
+  });
+  return result.status === 0;
 };

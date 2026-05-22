@@ -1,22 +1,5 @@
-numpy>=1.26
-pandas>=2.2
+numpy>=1.26,<2
 Pillow>=10.0
 opencv-python-headless>=4.9
-scikit-image>=0.26
-scikit-learn>=1.4
-scipy>=1.12
-
-# SAM/FastSAM support used by the default web/mobile pipeline.
-torch>=2.4
-ultralytics>=8.2
-segment-anything>=1.0
-
-# Optional alternatives for other samModelType values.
-# mobile-sam
-# segment-anything-2
-
-# TFLite export (only needed when exporting to mobile)
-# onnx>=1.16
-# onnxruntime>=1.19
-# onnx_tf>=1.10
-# tensorflow-cpu>=2.16
+onnxruntime>=1.18
+protobuf>=3.20.3,<6

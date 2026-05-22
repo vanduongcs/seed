@@ -4,6 +4,10 @@ export const env = {
   PORT: parseInt(process.env.PORT || '3000', 10),
   NODE_ENV: process.env.NODE_ENV || 'development',
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/seed_db',
+  DNS_SERVERS: (process.env.DNS_SERVERS || '')
+    .split(',')
+    .map((server) => server.trim())
+    .filter(Boolean),
   JWT: {
     ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || 'access_secret_dev',
     REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || 'refresh_secret_dev',
