@@ -13,7 +13,7 @@ SEED_CLASS_IDS = {0}
 SEED_CLASS_NAMES = {"seed"}
 
 
-def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float) -> tuple[np.ndarray, list[dict]]:
+def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float) -> tuple[np.ndarray, list[dict], int]:
     min_area = int_param(params, "minArea")
     max_area = int_param(params, "maxArea")
     max_aspect = float_param(params, "maxSegmentAspectRatio")
@@ -22,14 +22,19 @@ def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float
     pixel_to_mm = calibration_factor(params, scale)
 
     if not instances:
-        return np.zeros((1, 1), dtype=np.int32), []
+        return np.zeros((1, 1), dtype=np.int32), [], 0
 
     height, width = instances[0].mask.shape[:2]
     labels = np.zeros((height, width), dtype=np.int32)
     measurements: list[dict] = []
+    reference_line = reference_line_points(params, scale, width, height)
+    excluded_reference_object_count = 0
 
     for instance in sorted(instances, key=lambda item: item.confidence, reverse=True):
         if not is_seed_instance(instance):
+            continue
+        if reference_line is not None and is_reference_object(instance.mask, reference_line):
+            excluded_reference_object_count += 1
             continue
         available = np.logical_and(instance.mask, labels == 0)
         metrics = mask_metrics(available)
@@ -56,7 +61,7 @@ def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float
         }
         measurements.append(measurement)
 
-    return labels, measurements
+    return labels, measurements, excluded_reference_object_count
 
 
 def is_seed_instance(instance: InstanceMask) -> bool:
@@ -104,6 +109,39 @@ def calibration_factor(params: dict, scale: float) -> float:
     pixel_space = str(params.get("referencePixelSpace") or "original").strip().lower()
     processed_pixels = reference_pixels * scale if pixel_space != "processed" else reference_pixels
     return reference_mm / max(processed_pixels, 1e-6)
+
+
+def reference_line_points(params: dict, scale: float, width: int, height: int) -> tuple[int, int, int, int] | None:
+    points = [
+        float_param(params, "referenceX1"),
+        float_param(params, "referenceY1"),
+        float_param(params, "referenceX2"),
+        float_param(params, "referenceY2"),
+    ]
+    if min(points) < 0:
+        return None
+    pixel_space = str(params.get("referencePixelSpace") or "original").strip().lower()
+    coordinate_scale = scale if pixel_space != "processed" else 1.0
+    x1, y1, x2, y2 = [int(round(value * coordinate_scale)) for value in points]
+    if x1 == x2 and y1 == y2:
+        return None
+    return (
+        max(0, min(width - 1, x1)),
+        max(0, min(height - 1, y1)),
+        max(0, min(width - 1, x2)),
+        max(0, min(height - 1, y2)),
+    )
+
+
+def is_reference_object(mask: np.ndarray, line: tuple[int, int, int, int]) -> bool:
+    x1, y1, x2, y2 = line
+    distance = float(np.hypot(x2 - x1, y2 - y1))
+    sample_count = max(2, int(np.ceil(distance)) + 1)
+    xs = np.rint(np.linspace(x1, x2, sample_count)).astype(np.int32)
+    ys = np.rint(np.linspace(y1, y2, sample_count)).astype(np.int32)
+    line_coverage = float(np.count_nonzero(mask[ys, xs])) / float(sample_count)
+    midpoint_inside = bool(mask[int(round((y1 + y2) / 2)), int(round((x1 + x2) / 2))])
+    return midpoint_inside and line_coverage >= 0.55
 
 
 def measurements_csv(measurements: list[dict]) -> str:

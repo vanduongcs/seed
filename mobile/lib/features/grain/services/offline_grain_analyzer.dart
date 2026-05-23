@@ -37,6 +37,10 @@ class OfflineGrainAnalyzer {
     Uint8List imageBytes, {
     double? referencePixels,
     double? referenceMm,
+    double? referenceX1,
+    double? referenceY1,
+    double? referenceX2,
+    double? referenceY2,
   }) async {
     final interpreter =
         _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
@@ -110,6 +114,10 @@ class OfflineGrainAnalyzer {
       scale: scale,
       referencePixels: referencePixels,
       referenceMm: referenceMm,
+      referenceX1: referenceX1,
+      referenceY1: referenceY1,
+      referenceX2: referenceX2,
+      referenceY2: referenceY2,
     );
     final overlay = _renderOverlay(processed, filtered);
     final mask = _renderMask(filtered);
@@ -135,6 +143,12 @@ class OfflineGrainAnalyzer {
         'referencePixelSpace': 'original',
         'enabled': filtered.mmPerPixel > 0,
         'mm_per_pixel': filtered.mmPerPixel,
+        'referenceX1': referenceX1 ?? -1,
+        'referenceY1': referenceY1 ?? -1,
+        'referenceX2': referenceX2 ?? -1,
+        'referenceY2': referenceY2 ?? -1,
+        'excluded_reference_object_count':
+            filtered.excludedReferenceObjectCount,
       },
       segmentation: {
         'pipeline': 'yolo_sam_onnx',
@@ -156,6 +170,8 @@ class OfflineGrainAnalyzer {
           'component_count_before': instances.length,
           'component_count_after': filtered.measurements.length,
           'ignored_ref_count': refCandidateCount,
+          'excluded_reference_object_count':
+              filtered.excludedReferenceObjectCount,
         },
         'effective_thresholds': {
           'minArea': _minArea,
@@ -249,6 +265,10 @@ class OfflineGrainAnalyzer {
     required double scale,
     required double? referencePixels,
     required double? referenceMm,
+    required double? referenceX1,
+    required double? referenceY1,
+    required double? referenceX2,
+    required double? referenceY2,
   }) {
     final labels = Int32List(width * height);
     final measurements = <Map<String, dynamic>>[];
@@ -258,9 +278,32 @@ class OfflineGrainAnalyzer {
             referenceMm > 0)
         ? referenceMm / (referencePixels * scale)
         : 0.0;
+    var excludedReferenceObjectCount = 0;
+    final hasReferenceLine = referenceX1 != null &&
+        referenceY1 != null &&
+        referenceX2 != null &&
+        referenceY2 != null &&
+        (referenceX1 != referenceX2 || referenceY1 != referenceY2);
+    final processedLine = hasReferenceLine
+        ? (
+            _Point(referenceX1! * scale, referenceY1! * scale),
+            _Point(referenceX2! * scale, referenceY2! * scale),
+          )
+        : null;
     instances.sort((a, b) => b.confidence.compareTo(a.confidence));
     for (final instance in instances) {
       if (instance.classId != 0) continue;
+      if (processedLine != null &&
+          _isReferenceObjectMask(
+            instance.mask,
+            width,
+            height,
+            processedLine.$1,
+            processedLine.$2,
+          )) {
+        excludedReferenceObjectCount++;
+        continue;
+      }
       final available = Uint8List(width * height);
       for (var i = 0; i < available.length; i++) {
         if (instance.mask[i] != 0 && labels[i] == 0) available[i] = 1;
@@ -302,6 +345,7 @@ class OfflineGrainAnalyzer {
       mmPerPixel: mmPerPixel,
       width: width,
       height: height,
+      excludedReferenceObjectCount: excludedReferenceObjectCount,
     );
   }
 
@@ -518,6 +562,31 @@ double _cross(_Point origin, _Point a, _Point b) =>
 double _sigmoid(double value) =>
     1 / (1 + math.exp(-value.clamp(-88.0, 88.0)));
 
+bool _isReferenceObjectMask(
+  Uint8List mask,
+  int width,
+  int height,
+  _Point start,
+  _Point end,
+) {
+  final dx = end.x - start.x;
+  final dy = end.y - start.y;
+  final length = math.sqrt(dx * dx + dy * dy);
+  if (length <= 0) return false;
+  final samples = math.max(2, length.ceil() + 1);
+  var covered = 0;
+  for (var i = 0; i < samples; i++) {
+    final ratio = i / (samples - 1);
+    final x = (start.x + dx * ratio).round().clamp(0, width - 1).toInt();
+    final y = (start.y + dy * ratio).round().clamp(0, height - 1).toInt();
+    if (mask[y * width + x] != 0) covered++;
+  }
+  final midX = ((start.x + end.x) / 2).round().clamp(0, width - 1).toInt();
+  final midY = ((start.y + end.y) / 2).round().clamp(0, height - 1).toInt();
+  final midpointInside = mask[midY * width + midX] != 0;
+  return midpointInside && covered / samples >= 0.55;
+}
+
 double _round(num value, int decimals) {
   final factor = math.pow(10, decimals).toDouble();
   return (value * factor).round() / factor;
@@ -622,6 +691,7 @@ class _FilteredResult {
   final double mmPerPixel;
   final int width;
   final int height;
+  final int excludedReferenceObjectCount;
 
   const _FilteredResult({
     required this.labels,
@@ -629,6 +699,7 @@ class _FilteredResult {
     required this.mmPerPixel,
     required this.width,
     required this.height,
+    required this.excludedReferenceObjectCount,
   });
 }
 

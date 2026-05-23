@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -145,6 +147,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   final _referenceMm = TextEditingController();
 
   Uint8List? _selectedBytes;
+  Size? _selectedImageSize;
+  Offset? _referenceStart;
+  Offset? _referenceEnd;
   String _fileName = 'camera-frame.png';
   GrainAnalysisResult? _result;
   String? _error;
@@ -202,8 +207,15 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
     );
     if (file == null) return;
     final bytes = await file.readAsBytes();
+    final decoded = img.decodeImage(bytes);
     setState(() {
       _selectedBytes = bytes;
+      _selectedImageSize = decoded == null
+          ? null
+          : Size(decoded.width.toDouble(), decoded.height.toDouble());
+      _referenceStart = null;
+      _referenceEnd = null;
+      _referencePixels.clear();
       _fileName = file.name;
       _result = null;
       _error = null;
@@ -240,6 +252,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
         fileName: _fileName,
         referencePixels: referencePixels,
         referenceMm: referenceMm,
+        referenceX1: _referenceStart?.dx,
+        referenceY1: _referenceStart?.dy,
+        referenceX2: _referenceEnd?.dx,
+        referenceY2: _referenceEnd?.dy,
       );
       _stopProgress();
       _setProgress(96, 'Lưu kết quả');
@@ -330,14 +346,20 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
             ),
             if (_selectedBytes != null) ...[
               const SizedBox(height: 14),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.memory(
-                  _selectedBytes!,
-                  height: 180,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
+              _ReferenceImageSelector(
+                bytes: _selectedBytes!,
+                imageSize: _selectedImageSize,
+                start: _referenceStart,
+                end: _referenceEnd,
+                enabled: !_busy,
+                onChanged: (start, end) {
+                  setState(() {
+                    _referenceStart = start;
+                    _referenceEnd = end;
+                    _referencePixels.text =
+                        (end - start).distance.toStringAsFixed(1);
+                  });
+                },
               ),
               const SizedBox(height: 12),
               Row(
@@ -345,6 +367,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   Expanded(
                     child: TextField(
                       controller: _referencePixels,
+                      readOnly: true,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
@@ -368,6 +391,22 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                     ),
                   ),
                 ],
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () {
+                          setState(() {
+                            _referenceStart = null;
+                            _referenceEnd = null;
+                            _referencePixels.clear();
+                          });
+                        },
+                  icon: const Icon(Icons.clear),
+                  label: const Text('Xóa đường vật mốc'),
+                ),
               ),
             ],
             if (_error != null) ...[
@@ -546,6 +585,11 @@ class _SegmentationFactsState extends ConsumerState<_SegmentationFacts> {
                       ? '${_asDouble(calibration['mm_per_pixel']).toStringAsFixed(5)} mm/px'
                       : 'Chưa thiết lập',
                 ),
+                _FactRow(
+                  label: 'Vật mốc đã loại khỏi thống kê',
+                  value:
+                      '${calibration['excluded_reference_object_count'] ?? 0}',
+                ),
               ],
             ),
           ),
@@ -553,6 +597,142 @@ class _SegmentationFactsState extends ConsumerState<_SegmentationFacts> {
       ),
     );
   }
+}
+
+class _ReferenceImageSelector extends StatelessWidget {
+  final Uint8List bytes;
+  final Size? imageSize;
+  final Offset? start;
+  final Offset? end;
+  final bool enabled;
+  final void Function(Offset start, Offset end) onChanged;
+
+  const _ReferenceImageSelector({
+    required this.bytes,
+    required this.imageSize,
+    required this.start,
+    required this.end,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceSize = imageSize;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        height: 240,
+        width: double.infinity,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final canvasSize = Size(constraints.maxWidth, 240);
+            final fittedRect = sourceSize == null
+                ? Offset.zero & canvasSize
+                : _containedRect(canvasSize, sourceSize);
+
+            Offset? imagePoint(Offset localPoint) {
+              if (sourceSize == null || !fittedRect.contains(localPoint)) {
+                return null;
+              }
+              return Offset(
+                (localPoint.dx - fittedRect.left) /
+                    fittedRect.width *
+                    sourceSize.width,
+                (localPoint.dy - fittedRect.top) /
+                    fittedRect.height *
+                    sourceSize.height,
+              );
+            }
+
+            return GestureDetector(
+              onPanStart: enabled
+                  ? (details) {
+                      final point = imagePoint(details.localPosition);
+                      if (point != null) onChanged(point, point);
+                    }
+                  : null,
+              onPanUpdate: enabled
+                  ? (details) {
+                      if (start == null) return;
+                      final point = imagePoint(details.localPosition);
+                      if (point != null) onChanged(start!, point);
+                    }
+                  : null,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ColoredBox(
+                    color: const Color(0xFFF8FAF7),
+                    child: Image.memory(bytes, fit: BoxFit.contain),
+                  ),
+                  CustomPaint(
+                    painter: _ReferenceLinePainter(
+                      fittedRect: fittedRect,
+                      imageSize: sourceSize,
+                      start: start,
+                      end: end,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+Rect _containedRect(Size target, Size source) {
+  final scale = math.min(target.width / source.width, target.height / source.height);
+  final fitted = Size(source.width * scale, source.height * scale);
+  return Rect.fromLTWH(
+    (target.width - fitted.width) / 2,
+    (target.height - fitted.height) / 2,
+    fitted.width,
+    fitted.height,
+  );
+}
+
+class _ReferenceLinePainter extends CustomPainter {
+  final Rect fittedRect;
+  final Size? imageSize;
+  final Offset? start;
+  final Offset? end;
+
+  const _ReferenceLinePainter({
+    required this.fittedRect,
+    required this.imageSize,
+    required this.start,
+    required this.end,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sourceSize = imageSize;
+    if (sourceSize == null || start == null || end == null) return;
+    Offset displayPoint(Offset point) => Offset(
+          fittedRect.left + point.dx / sourceSize.width * fittedRect.width,
+          fittedRect.top + point.dy / sourceSize.height * fittedRect.height,
+        );
+    final a = displayPoint(start!);
+    final b = displayPoint(end!);
+    final paint = Paint()
+      ..color = const Color(0xFF2563EB)
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(a, b, paint);
+    canvas.drawCircle(a, 5, paint);
+    canvas.drawCircle(b, 5, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReferenceLinePainter oldDelegate) =>
+      fittedRect != oldDelegate.fittedRect ||
+      imageSize != oldDelegate.imageSize ||
+      start != oldDelegate.start ||
+      end != oldDelegate.end;
 }
 
 class _StatTile extends StatelessWidget {

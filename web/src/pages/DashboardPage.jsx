@@ -98,7 +98,8 @@ export default function DashboardPage() {
     ? Math.hypot(calibration.end.x - calibration.start.x, calibration.end.y - calibration.start.y)
     : 0;
   const calibrationMm = Number(calibration.referenceMm);
-  const calibrationReady = calibrationPixels > 1 && Number.isFinite(calibrationMm) && calibrationMm > 0;
+  const calibrationLineReady = calibrationPixels > 1;
+  const calibrationReady = calibrationLineReady && Number.isFinite(calibrationMm) && calibrationMm > 0;
 
   const renderCalibrationOverlay = () => {
     const image = imageRef.current;
@@ -173,14 +174,16 @@ export default function DashboardPage() {
 
       const formData = new FormData();
       formData.append('image', file);
-      if (calibrationReady) {
+      if (calibrationLineReady) {
         formData.append('referencePixels', String(calibrationPixels));
-        formData.append('referenceMm', String(calibrationMm));
         formData.append('referencePixelSpace', 'original');
         formData.append('referenceX1', String(calibration.start.x));
         formData.append('referenceY1', String(calibration.start.y));
         formData.append('referenceX2', String(calibration.end.x));
         formData.append('referenceY2', String(calibration.end.y));
+        if (calibrationReady) {
+          formData.append('referenceMm', String(calibrationMm));
+        }
       }
 
       setProgress(50);

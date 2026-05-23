@@ -21,6 +21,10 @@ class GrainAnalysisApi {
     required String fileName,
     double? referencePixels,
     double? referenceMm,
+    double? referenceX1,
+    double? referenceY1,
+    double? referenceX2,
+    double? referenceY2,
   }) async {
     final guestMode = await isGuestMode();
     GrainAnalysisResult? localResult;
@@ -29,6 +33,10 @@ class GrainAnalysisApi {
         bytes,
         referencePixels: referencePixels,
         referenceMm: referenceMm,
+        referenceX1: referenceX1,
+        referenceY1: referenceY1,
+        referenceX2: referenceX2,
+        referenceY2: referenceY2,
       );
       localResult = GrainAnalysisResult.fromJson(offlineResult.asApiJson(fileName));
     } catch (_) {
@@ -59,6 +67,10 @@ class GrainAnalysisApi {
         'referenceMm': referenceMm.toString(),
       if (referencePixels != null && referencePixels > 0)
         'referencePixelSpace': 'original',
+      if (referenceX1 != null) 'referenceX1': referenceX1.toString(),
+      if (referenceY1 != null) 'referenceY1': referenceY1.toString(),
+      if (referenceX2 != null) 'referenceX2': referenceX2.toString(),
+      if (referenceY2 != null) 'referenceY2': referenceY2.toString(),
     });
 
     final response = await _client.post(

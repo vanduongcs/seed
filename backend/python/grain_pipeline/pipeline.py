@@ -8,7 +8,7 @@ from .config import PIPELINE_NAME, bool_param, float_param, int_param, model_pat
 from .fastsam_refine import refine_instances_with_fastsam
 from .io import png_base64, read_image
 from .mask_refine import refine_instances_post
-from .measure import filter_and_measure, is_seed_instance, measurements_csv, summary_for
+from .measure import calibration_factor, filter_and_measure, is_seed_instance, measurements_csv, summary_for
 from .mobile_sam_refine import is_mobile_sam_model, refine_instances_with_mobile_sam
 from .preprocess import apply_light_preprocessing
 from .render import instance_mask_rgb, label_rgb, mask_rgb, overlay_rgb
@@ -46,7 +46,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     instances = refine_instances_post(segment_input, instances, params)
 
     # ── Stage 4: filter & measure ────────────────────────────────────────────
-    labels, measurements = filter_and_measure(instances, params, prepared.scale)
+    labels, measurements, excluded_reference_object_count = filter_and_measure(instances, params, prepared.scale)
     seed_candidate_count = sum(1 for item in instances if is_seed_instance(item))
     ref_candidate_count = len(instances) - seed_candidate_count
 
@@ -59,6 +59,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     sam_mask_image = instance_mask_rgb(instances)
     summary       = summary_for(measurements)
     mask_pixels   = int(np.count_nonzero(labels))
+    mm_per_pixel  = calibration_factor(params, prepared.scale)
 
     return {
         "image": {
@@ -123,6 +124,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
                 "component_count_before": len(instances),
                 "component_count_after":  len(measurements),
                 "ignored_ref_count":      ref_candidate_count,
+                "excluded_reference_object_count": excluded_reference_object_count,
             },
             "effective_thresholds": {
                 "minArea":                int_param(params, "minArea"),
@@ -136,6 +138,13 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "referencePixels":    float_param(params, "referencePixels"),
             "referenceMm":        float_param(params, "referenceMm"),
             "referencePixelSpace": str(params.get("referencePixelSpace") or "original"),
+            "referenceX1":        float_param(params, "referenceX1"),
+            "referenceY1":        float_param(params, "referenceY1"),
+            "referenceX2":        float_param(params, "referenceX2"),
+            "referenceY2":        float_param(params, "referenceY2"),
+            "enabled":            mm_per_pixel > 0,
+            "mm_per_pixel":       round(mm_per_pixel, 8),
+            "excluded_reference_object_count": excluded_reference_object_count,
         },
         "summary":                 summary,
         "measurements":            measurements,

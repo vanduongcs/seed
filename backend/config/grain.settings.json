@@ -52,7 +52,11 @@
 
     "referencePixels":        { "type": "number",  "default": 0,      "min": 0,    "max": 1000000 },
     "referenceMm":            { "type": "number",  "default": 0,      "min": 0,    "max": 1000000 },
-    "referencePixelSpace":    { "type": "string",  "default": "original" }
+    "referencePixelSpace":    { "type": "string",  "default": "original" },
+    "referenceX1":            { "type": "number",  "default": -1,     "min": -1,   "max": 1000000 },
+    "referenceY1":            { "type": "number",  "default": -1,     "min": -1,   "max": 1000000 },
+    "referenceX2":            { "type": "number",  "default": -1,     "min": -1,   "max": 1000000 },
+    "referenceY2":            { "type": "number",  "default": -1,     "min": -1,   "max": 1000000 }
   },
   "csvColumns": [
     "id", "area_px", "length_px", "width_px",

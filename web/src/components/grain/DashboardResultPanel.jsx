@@ -73,6 +73,10 @@ export const DashboardResultPanel = ({
                       value={`${result.segmentation?.tile_size ?? '-'} px / ${formatPercent(result.segmentation?.tile_overlap)}`}
                     />
                   )}
+                  <ResultRow
+                    label="Vật mốc đã loại khỏi thống kê"
+                    value={String(result.segmentation?.mask_filter?.excluded_reference_object_count ?? 0)}
+                  />
                 </Stack>
               </Collapse>
 
