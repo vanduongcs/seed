@@ -7,6 +7,13 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+// Guest inference must never run through token refresh/logout interceptors.
+export const publicApi = axios.create({
+  baseURL: '/api',
+  headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
+});
+
 let isRefreshing = false;
 let failedQueue = [];
 

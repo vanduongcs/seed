@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, Grid } from '@mui/material';
 
-import { api, ensureFreshAccessToken } from '@/api/axios.js';
+import { api, ensureFreshAccessToken, publicApi } from '@/api/axios.js';
 import { useAuthStore } from '@/store/auth.store.js';
 import { DashboardPreviewPanel } from '@/components/grain/DashboardPreviewPanel.jsx';
 import { DashboardResultPanel } from '@/components/grain/DashboardResultPanel.jsx';
@@ -190,7 +190,9 @@ export default function DashboardPage() {
       setProgressPhase('Phân tích ảnh bằng YOLO ONNX');
       startProgressDrift();
 
-      const { data } = await api.post(isGuest ? '/grain/analyze-public' : '/grain/analyze', formData, {
+      const analysisApi = isGuest ? publicApi : api;
+      const analysisPath = isGuest ? '/grain/analyze-public' : '/grain/analyze';
+      const { data } = await analysisApi.post(analysisPath, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 300000,
       });
