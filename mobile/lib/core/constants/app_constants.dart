@@ -1,7 +1,7 @@
 const String configuredBaseUrl = String.fromEnvironment('BASE_URL');
 
 const String defaultBaseUrl =
-    'https://seed-vanb2207577-aybrd9fwhnf3hqe.eastasia-01.azurewebsites.net/api';
+    'https://seed-vanb2207577-aybrd9fwhnf3hqeq.eastasia-01.azurewebsites.net/api';
 const String baseUrl =
     configuredBaseUrl == '' ? defaultBaseUrl : configuredBaseUrl;
 

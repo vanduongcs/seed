@@ -39,6 +39,8 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       await _trySyncPendingRuns();
       _ref.invalidate(authStateProvider);
       _ref.invalidate(guestModeProvider);
+      await _ref.read(authStateProvider.future);
+      await _ref.read(guestModeProvider.future);
       state = const AsyncValue.data(null);
     } on DioException catch (e, st) {
       state = AsyncValue.error(AuthException.fromDio(e), st);
@@ -56,6 +58,8 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       await _trySyncPendingRuns();
       _ref.invalidate(authStateProvider);
       _ref.invalidate(guestModeProvider);
+      await _ref.read(authStateProvider.future);
+      await _ref.read(guestModeProvider.future);
       state = const AsyncValue.data(null);
     } on DioException catch (e, st) {
       state = AsyncValue.error(AuthException.fromDio(e), st);
@@ -76,6 +80,8 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     await _storage.delete(key: guestModeKey);
     _ref.invalidate(authStateProvider);
     _ref.invalidate(guestModeProvider);
+    await _ref.read(authStateProvider.future);
+    await _ref.read(guestModeProvider.future);
   }
 
   Future<void> continueWithoutLogin() async {
@@ -85,6 +91,8 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     await _storage.write(key: guestModeKey, value: 'true');
     _ref.invalidate(authStateProvider);
     _ref.invalidate(guestModeProvider);
+    await _ref.read(authStateProvider.future);
+    await _ref.read(guestModeProvider.future);
   }
 
   Future<void> _saveTokens(Map<String, dynamic> data) async {
