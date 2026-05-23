@@ -1,374 +1,302 @@
-import 'dart:collection';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
+import 'package:tflite_flutter/tflite_flutter.dart';
 
 class OfflineGrainAnalyzer {
-  Future<OfflineGrainResult> analyze(
-    Uint8List imageBytes, {
-    double? referencePixels,
-    double? referenceMm,
-  }) async {
-    final startedAt = DateTime.now();
-    final source = img.decodeImage(imageBytes);
-    if (source == null) {
-      throw const OfflineGrainException('Khong doc duoc anh dau vao.');
-    }
+  static const modelAssetPath = 'assets/models/best_float16.tflite';
+  static const _inputSize = 640;
+  static const _protoSize = 160;
+  static const _confidence = 0.25;
+  static const _iou = 0.60;
+  static const _maxDetections = 300;
 
-    final working = img.copyResize(
-      source,
-      width: math.min(source.width, 768),
-      interpolation: img.Interpolation.linear,
-    );
-    final mask = _segmentSeeds(working);
-    final components = _measureComponents(
-      mask,
-      sourceWidth: source.width,
-      sourceHeight: source.height,
-    );
-    final overlay = _buildOverlay(source, mask, components);
-    final elapsed = DateTime.now().difference(startedAt).inMilliseconds;
+  Interpreter? _interpreter;
 
-    return OfflineGrainResult(
-      imageWidth: source.width,
-      imageHeight: source.height,
-      maskWidth: mask.width,
-      maskHeight: mask.height,
-      modelInputWidth: working.width,
-      modelInputHeight: working.height,
-      elapsedMs: elapsed,
-      measurements: components,
-      overlayPngBytes: overlay,
-      referencePixels: referencePixels,
-      referenceMm: referenceMm,
+  Future<OfflineModelInfo> loadModelInfo() async {
+    final interpreter = _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
+    return OfflineModelInfo(
+      modelAssetPath: modelAssetPath,
+      inputTensors: interpreter.getInputTensors().map(_tensorInfo).toList(),
+      outputTensors: interpreter.getOutputTensors().map(_tensorInfo).toList(),
     );
   }
 
-  _Mask _segmentSeeds(img.Image image) {
-    final gray = Uint8List(image.width * image.height);
-    final histogram = List<int>.filled(256, 0);
-    var offset = 0;
+  Future<OfflineAnalyzeResult> analyze(Uint8List imageBytes) async {
+    final interpreter = _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
+    final original = img.decodeImage(imageBytes);
+    if (original == null) throw StateError('Cannot decode selected image.');
 
-    for (var y = 0; y < image.height; y++) {
-      for (var x = 0; x < image.width; x++) {
-        final p = image.getPixel(x, y);
-        final value =
-            (0.299 * p.r + 0.587 * p.g + 0.114 * p.b).round().clamp(0, 255);
-        gray[offset++] = value;
-        histogram[value]++;
+    final side = math.max(original.width, original.height);
+    final square = img.Image(width: side, height: side, numChannels: 3);
+    img.compositeImage(square, original, dstX: 0, dstY: 0);
+    final resized = img.copyResize(square, width: _inputSize, height: _inputSize);
+    final input = List.generate(
+      1,
+      (_) => List.generate(
+        _inputSize,
+        (y) => List.generate(_inputSize, (x) {
+          final pixel = resized.getPixel(x, y);
+          return [pixel.r / 255.0, pixel.g / 255.0, pixel.b / 255.0];
+        }),
+      ),
+    );
+    final predictions = List.generate(1, (_) => List.generate(38, (_) => List.filled(8400, 0.0)));
+    final protos = List.generate(
+      1,
+      (_) => List.generate(
+        _protoSize,
+        (_) => List.generate(_protoSize, (_) => List.filled(32, 0.0)),
+      ),
+    );
+    interpreter.runForMultipleInputs([input], {0: predictions, 1: protos});
+
+    final selected = _decodePredictions(predictions[0]);
+    final overlay = img.Image.from(original);
+    final measurements = <Map<String, dynamic>>[];
+    var totalArea = 0.0;
+    var totalLength = 0.0;
+    var totalWidth = 0.0;
+
+    for (var index = 0; index < selected.length; index++) {
+      final detection = selected[index];
+      final measured = _renderMask(
+        overlay,
+        protos[0],
+        detection,
+        originalWidth: original.width,
+        originalHeight: original.height,
+        paddedSide: side,
+        labelIndex: index + 1,
+      );
+      if (measured == null) continue;
+      measurements.add(measured);
+      totalArea += measured['area_px'] as double;
+      totalLength += measured['length_px'] as double;
+      totalWidth += measured['width_px'] as double;
+    }
+
+    final count = measurements.length;
+    return OfflineAnalyzeResult(
+      count: count,
+      overlayPng: Uint8List.fromList(img.encodePng(overlay)),
+      imageWidth: original.width,
+      imageHeight: original.height,
+      measurements: measurements,
+      summary: {
+        'count': count,
+        'mean_area_px': count == 0 ? 0 : totalArea / count,
+        'mean_length_px': count == 0 ? 0 : totalLength / count,
+        'mean_width_px': count == 0 ? 0 : totalWidth / count,
+      },
+      segmentation: {
+        'pipeline': 'tflite_yolo_seg_mobile',
+        'confidence': _confidence,
+        'iou': _iou,
+        'max_det': _maxDetections,
+        'candidate_count': selected.length,
+        'seed_candidate_count': selected.length,
+        'ref_candidate_count': 0,
+        'offline': true,
+      },
+    );
+  }
+
+  List<_Detection> _decodePredictions(List<List<double>> prediction) {
+    final candidates = <_Detection>[];
+    for (var i = 0; i < 8400; i++) {
+      final seedScore = prediction[4][i];
+      final refScore = prediction[5][i];
+      if (seedScore < _confidence || refScore > seedScore) continue;
+      final cx = prediction[0][i];
+      final cy = prediction[1][i];
+      final width = prediction[2][i];
+      final height = prediction[3][i];
+      candidates.add(
+        _Detection(
+          score: seedScore,
+          x1: cx - width / 2,
+          y1: cy - height / 2,
+          x2: cx + width / 2,
+          y2: cy + height / 2,
+          coefficients: List.generate(32, (c) => prediction[6 + c][i]),
+        ),
+      );
+    }
+    candidates.sort((a, b) => b.score.compareTo(a.score));
+    final kept = <_Detection>[];
+    for (final candidate in candidates) {
+      if (kept.every((other) => _boxIou(candidate, other) < _iou)) {
+        kept.add(candidate);
+        if (kept.length >= _maxDetections) break;
       }
     }
-
-    final threshold = _otsuThreshold(histogram, gray.length);
-    final brightPixels = gray.where((value) => value > threshold).length;
-    final detectBrightSeeds = brightPixels < gray.length / 2;
-    final mask = Uint8List(gray.length);
-
-    for (var i = 0; i < gray.length; i++) {
-      mask[i] = detectBrightSeeds
-          ? (gray[i] > threshold ? 1 : 0)
-          : (gray[i] < threshold ? 1 : 0);
-    }
-
-    return _Mask(width: image.width, height: image.height, data: mask);
+    return kept;
   }
 
-  int _otsuThreshold(List<int> histogram, int total) {
-    var sum = 0;
-    for (var i = 0; i < histogram.length; i++) {
-      sum += i * histogram[i];
-    }
-
-    var sumBackground = 0;
-    var weightBackground = 0;
-    var bestVariance = -1.0;
-    var bestThreshold = 128;
-
-    for (var threshold = 0; threshold < histogram.length; threshold++) {
-      weightBackground += histogram[threshold];
-      if (weightBackground == 0) continue;
-
-      final weightForeground = total - weightBackground;
-      if (weightForeground == 0) break;
-
-      sumBackground += threshold * histogram[threshold];
-      final meanBackground = sumBackground / weightBackground;
-      final meanForeground = (sum - sumBackground) / weightForeground;
-      final variance = weightBackground *
-          weightForeground *
-          math.pow(meanBackground - meanForeground, 2);
-
-      if (variance > bestVariance) {
-        bestVariance = variance.toDouble();
-        bestThreshold = threshold;
-      }
-    }
-
-    return bestThreshold;
-  }
-
-  List<OfflineGrainMeasurement> _measureComponents(
-    _Mask mask, {
-    required int sourceWidth,
-    required int sourceHeight,
+  Map<String, dynamic>? _renderMask(
+    img.Image overlay,
+    List<List<List<double>>> protos,
+    _Detection detection, {
+    required int originalWidth,
+    required int originalHeight,
+    required int paddedSide,
+    required int labelIndex,
   }) {
-    final visited = Uint8List(mask.data.length);
-    final queue = Queue<int>();
-    final minArea = math.max(12, (mask.data.length * 0.000035).round());
-    final maxArea = math.max(minArea + 1, (mask.data.length * 0.030).round());
-    final scaleX = sourceWidth / mask.width;
-    final scaleY = sourceHeight / mask.height;
-    final measurements = <OfflineGrainMeasurement>[];
+    final scale = paddedSide / _inputSize;
+    final x1 = (detection.x1 * scale).floor().clamp(0, originalWidth);
+    final y1 = (detection.y1 * scale).floor().clamp(0, originalHeight);
+    final x2 = (detection.x2 * scale).ceil().clamp(0, originalWidth);
+    final y2 = (detection.y2 * scale).ceil().clamp(0, originalHeight);
+    if (x2 <= x1 || y2 <= y1) return null;
 
-    for (var start = 0; start < mask.data.length; start++) {
-      if (visited[start] == 1 || mask.data[start] == 0) continue;
-
-      var area = 0;
-      var minX = mask.width;
-      var minY = mask.height;
-      var maxX = 0;
-      var maxY = 0;
-      var sumX = 0;
-      var sumY = 0;
-      visited[start] = 1;
-      queue.add(start);
-
-      while (queue.isNotEmpty) {
-        final idx = queue.removeFirst();
-        final x = idx % mask.width;
-        final y = idx ~/ mask.width;
-        area++;
-        sumX += x;
-        sumY += y;
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-
-        for (final next in _neighbors(idx, x, y, mask.width, mask.height)) {
-          if (visited[next] == 1 || mask.data[next] == 0) continue;
-          visited[next] = 1;
-          queue.add(next);
+    var area = 0;
+    var minX = originalWidth;
+    var minY = originalHeight;
+    var maxX = 0;
+    var maxY = 0;
+    for (var y = y1; y < y2; y++) {
+      final py = ((y / paddedSide) * _protoSize).floor().clamp(0, _protoSize - 1);
+      for (var x = x1; x < x2; x++) {
+        final px = ((x / paddedSide) * _protoSize).floor().clamp(0, _protoSize - 1);
+        var logit = 0.0;
+        for (var c = 0; c < 32; c++) {
+          logit += detection.coefficients[c] * protos[py][px][c];
         }
-      }
-
-      if (area < minArea || area > maxArea) continue;
-      final width = (maxX - minX + 1) * scaleX;
-      final height = (maxY - minY + 1) * scaleY;
-      measurements.add(OfflineGrainMeasurement(
-        id: measurements.length + 1,
-        areaPx: area * scaleX * scaleY,
-        lengthPx: math.max(width, height),
-        widthPx: math.min(width, height),
-        centroidX: (sumX / area) * scaleX,
-        centroidY: (sumY / area) * scaleY,
-        bboxX: minX * scaleX,
-        bboxY: minY * scaleY,
-        bboxW: width,
-        bboxH: height,
-      ));
-    }
-    return measurements;
-  }
-
-  Iterable<int> _neighbors(int idx, int x, int y, int width, int height) sync* {
-    if (x > 0) yield idx - 1;
-    if (x < width - 1) yield idx + 1;
-    if (y > 0) yield idx - width;
-    if (y < height - 1) yield idx + width;
-  }
-
-  Uint8List _buildOverlay(
-    img.Image source,
-    _Mask mask,
-    List<OfflineGrainMeasurement> measurements,
-  ) {
-    const maxSide = 900;
-    final scale =
-        math.min(1.0, maxSide / math.max(source.width, source.height));
-    final preview = img.copyResize(
-      source,
-      width: math.max(1, (source.width * scale).round()),
-      height: math.max(1, (source.height * scale).round()),
-    );
-
-    for (var y = 0; y < preview.height; y++) {
-      for (var x = 0; x < preview.width; x++) {
-        final mx =
-            (x / preview.width * mask.width).floor().clamp(0, mask.width - 1);
-        final my = (y / preview.height * mask.height)
-            .floor()
-            .clamp(0, mask.height - 1);
-        if (mask.data[my * mask.width + mx] == 0) continue;
-        final p = preview.getPixel(x, y);
-        preview.setPixelRgb(
+        if (_sigmoid(logit) <= 0.5) continue;
+        area++;
+        minX = math.min(minX, x);
+        minY = math.min(minY, y);
+        maxX = math.max(maxX, x);
+        maxY = math.max(maxY, y);
+        final source = overlay.getPixel(x, y);
+        overlay.setPixelRgb(
           x,
           y,
-          (p.r * 0.58 + 46 * 0.42).round(),
-          (p.g * 0.58 + 137 * 0.42).round(),
-          (p.b * 0.58 + 87 * 0.42).round(),
+          (source.r * 0.55 + 36 * 0.45).round(),
+          (source.g * 0.55 + 160 * 0.45).round(),
+          (source.b * 0.55 + 92 * 0.45).round(),
         );
       }
     }
-
-    final lineColor = img.ColorRgb8(28, 87, 57);
-    _drawMaskContour(preview, mask, lineColor);
-    for (final item in measurements) {
-      img.drawRect(
-        preview,
-        x1: (item.bboxX * scale).round().clamp(0, preview.width - 1),
-        y1: (item.bboxY * scale).round().clamp(0, preview.height - 1),
-        x2: ((item.bboxX + item.bboxW) * scale).round().clamp(
-              0,
-              preview.width - 1,
-            ),
-        y2: ((item.bboxY + item.bboxH) * scale).round().clamp(
-              0,
-              preview.height - 1,
-            ),
-        color: lineColor,
-        thickness: 1,
-      );
-    }
-    return Uint8List.fromList(img.encodePng(preview));
+    if (area == 0) return null;
+    final width = (maxX - minX + 1).toDouble();
+    final height = (maxY - minY + 1).toDouble();
+    return {
+      'id': labelIndex,
+      'class_id': 0,
+      'class_name': 'seed',
+      'confidence': detection.score,
+      'area_px': area.toDouble(),
+      'length_px': math.max(width, height),
+      'width_px': math.min(width, height),
+      'bbox': {'x1': minX, 'y1': minY, 'x2': maxX, 'y2': maxY},
+    };
   }
 
-  void _drawMaskContour(img.Image preview, _Mask mask, img.Color color) {
-    for (var y = 1; y < preview.height - 1; y++) {
-      for (var x = 1; x < preview.width - 1; x++) {
-        final mx =
-            (x / preview.width * mask.width).floor().clamp(0, mask.width - 1);
-        final my = (y / preview.height * mask.height)
-            .floor()
-            .clamp(0, mask.height - 1);
-        if (mask.data[my * mask.width + mx] == 0) continue;
-
-        final left =
-            mask.data[my * mask.width + (mx - 1).clamp(0, mask.width - 1)];
-        final right =
-            mask.data[my * mask.width + (mx + 1).clamp(0, mask.width - 1)];
-        final up =
-            mask.data[(my - 1).clamp(0, mask.height - 1) * mask.width + mx];
-        final down =
-            mask.data[(my + 1).clamp(0, mask.height - 1) * mask.width + mx];
-        if (left == 0 || right == 0 || up == 0 || down == 0) {
-          preview.setPixel(x, y, color);
-        }
-      }
-    }
+  void close() {
+    _interpreter?.close();
+    _interpreter = null;
   }
 }
 
-class OfflineGrainResult {
+double _boxIou(_Detection a, _Detection b) {
+  final x1 = math.max(a.x1, b.x1);
+  final y1 = math.max(a.y1, b.y1);
+  final x2 = math.min(a.x2, b.x2);
+  final y2 = math.min(a.y2, b.y2);
+  final intersection = math.max(0.0, x2 - x1) * math.max(0.0, y2 - y1);
+  final aArea = math.max(0.0, a.x2 - a.x1) * math.max(0.0, a.y2 - a.y1);
+  final bArea = math.max(0.0, b.x2 - b.x1) * math.max(0.0, b.y2 - b.y1);
+  final union = aArea + bArea - intersection;
+  return union == 0 ? 0 : intersection / union;
+}
+
+double _sigmoid(double value) => 1 / (1 + math.exp(-value.clamp(-88.0, 88.0)));
+
+OfflineTensorInfo _tensorInfo(Tensor tensor) => OfflineTensorInfo(
+      name: tensor.name,
+      shape: List<int>.from(tensor.shape),
+      type: tensor.type.toString(),
+    );
+
+class _Detection {
+  final double score;
+  final double x1;
+  final double y1;
+  final double x2;
+  final double y2;
+  final List<double> coefficients;
+
+  const _Detection({
+    required this.score,
+    required this.x1,
+    required this.y1,
+    required this.x2,
+    required this.y2,
+    required this.coefficients,
+  });
+}
+
+class OfflineModelInfo {
+  final String modelAssetPath;
+  final List<OfflineTensorInfo> inputTensors;
+  final List<OfflineTensorInfo> outputTensors;
+
+  const OfflineModelInfo({
+    required this.modelAssetPath,
+    required this.inputTensors,
+    required this.outputTensors,
+  });
+}
+
+class OfflineTensorInfo {
+  final String name;
+  final List<int> shape;
+  final String type;
+
+  const OfflineTensorInfo({required this.name, required this.shape, required this.type});
+}
+
+class OfflineAnalyzeResult {
+  final int count;
+  final Uint8List overlayPng;
   final int imageWidth;
   final int imageHeight;
-  final int maskWidth;
-  final int maskHeight;
-  final int modelInputWidth;
-  final int modelInputHeight;
-  final int elapsedMs;
-  final List<OfflineGrainMeasurement> measurements;
-  final Uint8List overlayPngBytes;
-  final double? referencePixels;
-  final double? referenceMm;
+  final List<Map<String, dynamic>> measurements;
+  final Map<String, dynamic> summary;
+  final Map<String, dynamic> segmentation;
 
-  const OfflineGrainResult({
+  const OfflineAnalyzeResult({
+    required this.count,
+    required this.overlayPng,
     required this.imageWidth,
     required this.imageHeight,
-    required this.maskWidth,
-    required this.maskHeight,
-    required this.modelInputWidth,
-    required this.modelInputHeight,
-    required this.elapsedMs,
     required this.measurements,
-    required this.overlayPngBytes,
-    this.referencePixels,
-    this.referenceMm,
+    required this.summary,
+    required this.segmentation,
   });
 
-  int get count => measurements.length;
-
-  double? get mmPerPixel {
-    final px = referencePixels;
-    final mm = referenceMm;
-    if (px == null || mm == null || px <= 0 || mm <= 0) return null;
-    return mm / px;
-  }
-
-  double get meanAreaPx => measurements.isEmpty
-      ? 0
-      : measurements.fold<double>(0, (sum, item) => sum + item.areaPx) /
-          measurements.length;
-
-  double get meanLengthPx => measurements.isEmpty
-      ? 0
-      : measurements.fold<double>(0, (sum, item) => sum + item.lengthPx) /
-          measurements.length;
-
-  double get meanWidthPx => measurements.isEmpty
-      ? 0
-      : measurements.fold<double>(0, (sum, item) => sum + item.widthPx) /
-          measurements.length;
-
-  double? get meanAreaMm2 {
-    final scale = mmPerPixel;
-    if (scale == null) return null;
-    return meanAreaPx * scale * scale;
-  }
-
-  double? get meanLengthMm {
-    final scale = mmPerPixel;
-    if (scale == null) return null;
-    return meanLengthPx * scale;
-  }
-
-  double? get meanWidthMm {
-    final scale = mmPerPixel;
-    if (scale == null) return null;
-    return meanWidthPx * scale;
-  }
-}
-
-class OfflineGrainMeasurement {
-  final int id;
-  final double areaPx;
-  final double lengthPx;
-  final double widthPx;
-  final double centroidX;
-  final double centroidY;
-  final double bboxX;
-  final double bboxY;
-  final double bboxW;
-  final double bboxH;
-
-  const OfflineGrainMeasurement({
-    required this.id,
-    required this.areaPx,
-    required this.lengthPx,
-    required this.widthPx,
-    required this.centroidX,
-    required this.centroidY,
-    required this.bboxX,
-    required this.bboxY,
-    required this.bboxW,
-    required this.bboxH,
-  });
-}
-
-class OfflineGrainException implements Exception {
-  final String message;
-
-  const OfflineGrainException(this.message);
-
-  @override
-  String toString() => message;
-}
-
-class _Mask {
-  final int width;
-  final int height;
-  final Uint8List data;
-
-  const _Mask({required this.width, required this.height, required this.data});
+  Map<String, dynamic> asApiJson(String fileName) => {
+        'run': {
+          'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
+          'sourceFileName': fileName,
+          'localOnly': true,
+          'offline': true,
+          'createdAt': DateTime.now().toIso8601String(),
+        },
+        'image': {'width': imageWidth, 'height': imageHeight},
+        'summary': summary,
+        'segmentation': segmentation,
+        'calibration': {'enabled': false},
+        'features': {'source': 'mobile_tflite'},
+        'measurements': measurements,
+        'csv': '',
+        'overlay_png_base64': base64Encode(overlayPng),
+        'sam_mask_png_base64': '',
+        'labels_png_base64': '',
+        'mask_png_base64': '',
+      };
 }

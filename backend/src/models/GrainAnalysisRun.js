@@ -10,6 +10,10 @@ const grainAnalysisRunSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    clientRunId: {
+      type: String,
+      trim: true,
+    },
     sourceFileName: {
       type: String,
       required: true,
@@ -65,5 +69,9 @@ const grainAnalysisRunSchema = new mongoose.Schema(
 );
 
 grainAnalysisRunSchema.index({ userId: 1, createdAt: -1 });
+grainAnalysisRunSchema.index(
+  { userId: 1, clientRunId: 1 },
+  { unique: true, partialFilterExpression: { clientRunId: { $type: 'string' } } }
+);
 
 export const GrainAnalysisRun = mongoose.model('GrainAnalysisRun', grainAnalysisRunSchema);

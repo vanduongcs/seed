@@ -7,15 +7,18 @@ import '../../features/auth/providers/auth_provider.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
+  final guestMode = ref.watch(guestModeProvider);
 
   return GoRouter(
     initialLocation: '/login',
     redirect: (context, state) {
       final isAuthenticated = authState.value ?? false;
+      final isGuest = guestMode.value ?? false;
+      final hasAccess = isAuthenticated || isGuest;
       final isAuthRoute = state.matchedLocation == '/login' ||
           state.matchedLocation == '/register';
 
-      if (!isAuthenticated && !isAuthRoute) return '/login';
+      if (!hasAccess && !isAuthRoute) return '/login';
       if (isAuthenticated && isAuthRoute) return '/dashboard';
       return null;
     },

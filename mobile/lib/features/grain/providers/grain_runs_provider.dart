@@ -5,9 +5,35 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_client.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../services/local_grain_run_store.dart';
 
 final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
   try {
+    const storage = FlutterSecureStorage();
+    if (await storage.read(key: guestModeKey) == 'true') {
+      final localRuns = await LocalGrainRunStore().readAll();
+      return localRuns.map((item) {
+        final result = Map<String, dynamic>.from(item['result'] as Map? ?? {});
+        final run = Map<String, dynamic>.from(result['run'] as Map? ?? {});
+        return GrainRun.fromJson({
+          ...run,
+          'sourceFileName': item['sourceFileName'] ?? run['sourceFileName'],
+          'createdAt': item['createdAt'] ?? run['createdAt'],
+          'summary': result['summary'],
+          'image': result['image'],
+        });
+      }).toList();
+    }
+    final localStore = LocalGrainRunStore();
+    final pending = await localStore.readAll();
+    if (pending.isNotEmpty) {
+      try {
+        await ApiClient().post('/grain/runs/import', data: {'items': pending});
+        await localStore.clear();
+      } catch (_) {
+        // Keep pending local runs and retry next time storage refreshes.
+      }
+    }
     final response =
         await ApiClient().get('/grain/runs', params: {'limit': 100});
     final data = response.data['data'] as Map<String, dynamic>? ?? {};
@@ -24,7 +50,7 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
       await storage.delete(key: userKey);
       ref.invalidate(authStateProvider);
       throw const GrainRunsException(
-        'Phien dang nhap da het han. Vui long dang nhap lai.',
+        'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
       );
     }
     throw GrainRunsException(_friendlyDioMessage(error));
@@ -36,10 +62,10 @@ String _friendlyDioMessage(DioException error) {
     DioExceptionType.connectionTimeout ||
     DioExceptionType.receiveTimeout ||
     DioExceptionType.sendTimeout =>
-      'Khong ket noi duoc backend. Kiem tra server va BASE_URL.',
+      'Không kết nối được backend. Kiểm tra server và kết nối Wi-Fi.',
     DioExceptionType.connectionError =>
-      'Khong ket noi duoc backend. Hay dam bao server dang chay.',
-    _ => 'Khong tai duoc thong ke tu backend.',
+      'Không kết nối được backend. Hãy đảm bảo server đang chạy và điện thoại dùng cùng mạng Wi-Fi.',
+    _ => 'Không tải được thống kê từ backend.',
   };
 }
 
@@ -59,6 +85,10 @@ class GrainRun {
   final int count;
   final double meanLengthPx;
   final double meanWidthPx;
+  final double meanAreaPx;
+  final double? meanLengthMm;
+  final double? meanWidthMm;
+  final double? meanAreaMm2;
   final int imageWidth;
   final int imageHeight;
 
@@ -69,6 +99,10 @@ class GrainRun {
     required this.count,
     required this.meanLengthPx,
     required this.meanWidthPx,
+    required this.meanAreaPx,
+    this.meanLengthMm,
+    this.meanWidthMm,
+    this.meanAreaMm2,
     required this.imageWidth,
     required this.imageHeight,
   });
@@ -83,6 +117,10 @@ class GrainRun {
       count: _asInt(summary['count']),
       meanLengthPx: _asDouble(summary['mean_length_px']),
       meanWidthPx: _asDouble(summary['mean_width_px']),
+      meanAreaPx: _asDouble(summary['mean_area_px']),
+      meanLengthMm: _nullableDouble(summary['mean_length_mm']),
+      meanWidthMm: _nullableDouble(summary['mean_width_mm']),
+      meanAreaMm2: _nullableDouble(summary['mean_area_mm2']),
       imageWidth: _asInt(image['width']),
       imageHeight: _asInt(image['height']),
     );
@@ -99,4 +137,10 @@ double _asDouble(dynamic value) {
   if (value is double) return value;
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+double? _nullableDouble(dynamic value) {
+  if (value == null) return null;
+  final parsed = _asDouble(value);
+  return parsed.isFinite ? parsed : null;
 }

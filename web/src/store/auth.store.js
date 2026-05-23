@@ -18,7 +18,7 @@ export const useAuthStore = create(
     }),
     {
       name: 'seed-auth',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         user: s.user,
         accessToken: s.accessToken,

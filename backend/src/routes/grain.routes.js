@@ -3,9 +3,11 @@ import multer from 'multer';
 
 import {
   analyzeGrainImage,
+  analyzeGrainImagePublic,
   deleteGrainRun,
   getGrainHealth,
   getGrainRun,
+  importOfflineGrainRuns,
   listGrainRuns,
 } from '../controllers/grain.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -29,7 +31,9 @@ const upload = multer({
 });
 
 router.get('/health', getGrainHealth);
+router.post('/analyze-public', upload.single('image'), analyzeGrainImagePublic);
 router.get('/runs', authenticate, listGrainRuns);
+router.post('/runs/import', authenticate, importOfflineGrainRuns);
 router.get('/runs/:id', authenticate, getGrainRun);
 router.delete('/runs/:id', authenticate, deleteGrainRun);
 router.post('/analyze', authenticate, upload.single('image'), analyzeGrainImage);

@@ -77,6 +77,106 @@ export const analyzeGrainImage = async (req, res) => {
   }
 };
 
+export const analyzeGrainImagePublic = async (req, res) => {
+  try {
+    if (!req.file) {
+      return sendError(res, 'Image upload is required with field name image', 400);
+    }
+
+    const params = normalizeGrainParams(req.body);
+    const result = await analyzeGrainImageBuffer({
+      buffer: req.file.buffer,
+      originalName: req.file.originalname,
+      params,
+    });
+
+    return sendSuccess(
+      res,
+      {
+        ...compactAnalyzeResponse(result),
+        run: {
+          id: `local-${Date.now()}`,
+          sourceFileName: req.file.originalname || 'image.png',
+          params,
+          image: result.image || {},
+          summary: result.summary || {},
+          segmentation: result.segmentation || {},
+          calibration: result.calibration || {},
+          features: result.features || {},
+          localOnly: true,
+          createdAt: new Date().toISOString(),
+        },
+      },
+      'Analysis completed without server storage'
+    );
+  } catch (err) {
+    return sendError(res, err.message || 'Image analysis failed', err.statusCode || 500);
+  }
+};
+
+export const importOfflineGrainRuns = async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) {
+      return sendError(res, 'No local runs to import', 400);
+    }
+    if (items.length > 25) {
+      return sendError(res, 'Import limit is 25 runs per request', 400);
+    }
+
+    const imported = [];
+    for (const item of items) {
+      const result = sanitizeImportedResult(item.result || item);
+      const clientRunId = String(item.clientRunId || result.run?.id || '').trim();
+      if (clientRunId) {
+        const existing = await GrainAnalysisRun.findOne({
+          userId: req.user.userId,
+          clientRunId,
+        });
+        if (existing) {
+          imported.push(serializeRunSummary(existing));
+          continue;
+        }
+      }
+      const run = await GrainAnalysisRun.create({
+        userId: req.user.userId,
+        ...(clientRunId ? { clientRunId } : {}),
+        sourceFileName: String(item.sourceFileName || result.run?.sourceFileName || 'image.png'),
+        params: result.run?.params || item.params || {},
+        image: result.image || item.image || {},
+        summary: result.summary || item.summary || {},
+        segmentation: result.segmentation || item.segmentation || {},
+        calibration: result.calibration || item.calibration || {},
+        features: result.features || item.features || {},
+        createdAt: item.createdAt ? new Date(item.createdAt) : undefined,
+      });
+
+      const artifactPath = await writeGrainRunArtifact({
+        userId: req.user.userId,
+        runId: run._id.toString(),
+        result,
+      });
+      const [artifactStat, artifactChecksum] = await Promise.all([
+        statGrainRunArtifact(artifactPath).catch(() => null),
+        checksumGrainRunArtifact(artifactPath).catch(() => ''),
+      ]);
+      run.artifactPath = artifactPath;
+      run.artifactMeta = {
+        schemaVersion: 2,
+        checksumSha256: artifactChecksum || '',
+        sizeBytes: artifactStat?.sizeBytes || 0,
+        importedFromMobile: true,
+      };
+      await run.save();
+      imported.push(serializeRunSummary(run));
+    }
+
+    return sendSuccess(res, { items: imported, total: imported.length }, 'Local runs imported');
+  } catch (err) {
+    return sendError(res, err.message || 'Import local runs failed', err.statusCode || 500);
+  }
+};
+
 export const listGrainRuns = async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 100));
@@ -156,6 +256,7 @@ const serializeRunSummary = (run) => serializeLeanRunSummary(run.toJSON ? run.to
 
 const serializeLeanRunSummary = (run) => ({
   id: run.id || run._id?.toString(),
+  clientRunId: run.clientRunId || '',
   sourceFileName: run.sourceFileName,
   params: run.params || {},
   image: run.image || {},
@@ -218,6 +319,26 @@ const compactAnalyzeResponse = (result) => ({
   mask_png_base64: result.mask_png_base64 || '',
   labels_png_base64: result.labels_png_base64 || '',
 });
+
+const sanitizeImportedResult = (raw) => {
+  const result = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    run: result.run || {},
+    image: result.image || {},
+    features: result.features || {},
+    segmentation: result.segmentation || {},
+    calibration: result.calibration || {},
+    summary: result.summary || {},
+    measurements: Array.isArray(result.measurements) ? result.measurements : [],
+    csv: result.csv || '',
+    original_png_base64: result.original_png_base64 || result.previews?.original || '',
+    preprocessed_png_base64: result.preprocessed_png_base64 || result.previews?.preprocessed || '',
+    overlay_png_base64: result.overlay_png_base64 || result.previews?.overlay || '',
+    sam_mask_png_base64: result.sam_mask_png_base64 || result.previews?.samMask || '',
+    mask_png_base64: result.mask_png_base64 || result.previews?.mask || '',
+    labels_png_base64: result.labels_png_base64 || result.previews?.labels || '',
+  };
+};
 
 const parseBeforeCursor = (value) => {
   if (!value) return null;

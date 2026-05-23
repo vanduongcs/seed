@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
 
@@ -17,6 +20,7 @@ class _AccountScreenState extends State<AccountScreen> {
   final _roleCtrl = TextEditingController();
   bool _loading = true;
   bool _saving = false;
+  bool _guestMode = false;
 
   @override
   void initState() {
@@ -35,6 +39,16 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _loadProfile() async {
     setState(() => _loading = true);
     try {
+      const storage = FlutterSecureStorage();
+      if (await storage.read(key: guestModeKey) == 'true') {
+        if (mounted) {
+          setState(() {
+            _guestMode = true;
+            _loading = false;
+          });
+        }
+        return;
+      }
       final response = await _api.get('/users/me');
       final user = Map<String, dynamic>.from(response.data['data'] as Map);
       _nameCtrl.text = user['name']?.toString() ?? '';
@@ -116,6 +130,33 @@ class _AccountScreenState extends State<AccountScreen> {
   Widget build(BuildContext context) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_guestMode) {
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text(
+            'Chế độ không đăng nhập',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Các bản xử lý đang được lưu trên điện thoại này. Đăng nhập hoặc đăng ký để đồng bộ chúng lên tài khoản của bạn.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () => context.go('/login'),
+            child: const Text('Đăng nhập để đồng bộ'),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton(
+            onPressed: () => context.go('/register'),
+            child: const Text('Đăng ký tài khoản'),
+          ),
+        ],
+      );
     }
 
     return ListView(

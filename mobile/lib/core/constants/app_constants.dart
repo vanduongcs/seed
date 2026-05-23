@@ -11,4 +11,5 @@ const Duration receiveTimeout = Duration(seconds: 180);
 const String accessTokenKey = 'access_token';
 const String refreshTokenKey = 'refresh_token';
 const String userKey = 'user_data';
+const String guestModeKey = 'guest_mode';
 const String resolvedBaseUrlKey = 'resolved_base_url';

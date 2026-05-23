@@ -1,11 +1,18 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_client.dart';
+import 'local_grain_run_store.dart';
+import 'offline_grain_analyzer.dart';
 
 class GrainAnalysisApi {
   final ApiClient _client;
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final LocalGrainRunStore _localStore = LocalGrainRunStore();
+  final OfflineGrainAnalyzer _offlineAnalyzer = OfflineGrainAnalyzer();
 
   GrainAnalysisApi({ApiClient? client}) : _client = client ?? ApiClient();
 
@@ -15,6 +22,31 @@ class GrainAnalysisApi {
     double? referencePixels,
     double? referenceMm,
   }) async {
+    final guestMode = await isGuestMode();
+    GrainAnalysisResult? localResult;
+    try {
+      final offlineResult = await _offlineAnalyzer.analyze(bytes);
+      localResult = GrainAnalysisResult.fromJson(offlineResult.asApiJson(fileName));
+    } catch (_) {
+      // Fall back to server analysis if this device cannot execute TFLite.
+    }
+    if (localResult != null) {
+      await _localStore.save({
+        'clientRunId': localResult.run['id']?.toString() ?? '',
+        'sourceFileName': fileName,
+        'createdAt': DateTime.now().toIso8601String(),
+        'result': localResult.toJson(),
+      });
+      if (!guestMode) {
+        try {
+          await syncPendingRuns();
+        } catch (_) {
+          // Preserve local runs until the next successful authenticated sync.
+        }
+      }
+      return localResult;
+    }
+
     final form = FormData.fromMap({
       'image': MultipartFile.fromBytes(bytes, filename: fileName),
       if (referencePixels != null && referencePixels > 0)
@@ -25,21 +57,57 @@ class GrainAnalysisApi {
         'referencePixelSpace': 'original',
     });
 
-    final response = await _client.dio.post(
-      '/grain/analyze',
+    final response = await _client.post(
+      guestMode ? '/grain/analyze-public' : '/grain/analyze',
       data: form,
-      options: Options(contentType: 'multipart/form-data'),
+      options: Options(
+        contentType: 'multipart/form-data',
+        sendTimeout: const Duration(seconds: 300),
+        receiveTimeout: const Duration(seconds: 300),
+      ),
     );
-    return GrainAnalysisResult.fromJson(
+    final result = GrainAnalysisResult.fromJson(
       Map<String, dynamic>.from(response.data['data'] as Map),
     );
+    if (guestMode) {
+      await _localStore.save({
+        'clientRunId': result.run['id']?.toString() ?? '',
+        'sourceFileName': fileName,
+        'createdAt': DateTime.now().toIso8601String(),
+        'result': result.toJson(),
+      });
+    }
+    return result;
   }
 
   Future<GrainRunDetail> getRun(String id) async {
+    if (id.startsWith('local-')) {
+      final localRuns = await _localStore.readAll();
+      for (final localRun in localRuns) {
+        final rawResult = localRun['result'];
+        if (rawResult is! Map) continue;
+        final result = GrainAnalysisResult.fromJson(
+          Map<String, dynamic>.from(rawResult),
+        );
+        if (result.run['id']?.toString() == id) {
+          return GrainRunDetail(run: result.run, result: result);
+        }
+      }
+    }
     final response = await _client.get('/grain/runs/$id');
     return GrainRunDetail.fromJson(
       Map<String, dynamic>.from(response.data['data'] as Map),
     );
+  }
+
+  Future<bool> isGuestMode() async =>
+      await _storage.read(key: guestModeKey) == 'true';
+
+  Future<void> syncPendingRuns() async {
+    final pending = await _localStore.readAll();
+    if (pending.isEmpty) return;
+    await _client.post('/grain/runs/import', data: {'items': pending});
+    await _localStore.clear();
   }
 }
 
@@ -94,15 +162,32 @@ class GrainAnalysisResult {
           .toList(),
       csv: json['csv']?.toString() ?? '',
       previews: {
+        'original': json['original_png_base64']?.toString() ?? '',
+        'preprocessed': json['preprocessed_png_base64']?.toString() ?? '',
         'overlay': json['overlay_png_base64']?.toString() ?? '',
+        'samMask': json['sam_mask_png_base64']?.toString() ?? '',
         'labels': json['labels_png_base64']?.toString() ?? '',
         'mask': json['mask_png_base64']?.toString() ?? '',
-        'seedMask': json['seed_mask_png_base64']?.toString() ?? '',
-        'kmeansMask': json['kmeans_mask_png_base64']?.toString() ?? '',
-        'clusters': json['cluster_png_base64']?.toString() ?? '',
       },
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'run': run,
+        'image': image,
+        'summary': summary,
+        'segmentation': segmentation,
+        'calibration': calibration,
+        'features': {},
+        'measurements': measurements,
+        'csv': csv,
+        'original_png_base64': previews['original'] ?? '',
+        'preprocessed_png_base64': previews['preprocessed'] ?? '',
+        'overlay_png_base64': previews['overlay'] ?? '',
+        'sam_mask_png_base64': previews['samMask'] ?? '',
+        'labels_png_base64': previews['labels'] ?? '',
+        'mask_png_base64': previews['mask'] ?? '',
+      };
 
   int get count => _asInt(summary['count']);
   double get meanAreaPx => _asDouble(summary['mean_area_px']);
@@ -114,6 +199,18 @@ class GrainAnalysisResult {
   bool get calibrated => calibration['enabled'] == true;
 
   String previewBase64(String key) => previews[key] ?? '';
+
+  String previewWithFallback(String key) {
+    final selected = previewBase64(key);
+    if (selected.isNotEmpty) return selected;
+    if (key == 'samMask') {
+      final mask = previewBase64('mask');
+      if (mask.isNotEmpty) return mask;
+      final overlay = previewBase64('overlay');
+      if (overlay.isNotEmpty) return overlay;
+    }
+    return '';
+  }
 }
 
 int _asInt(dynamic value) {
