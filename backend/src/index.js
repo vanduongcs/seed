@@ -36,7 +36,16 @@ io.on('connection', (socket) => {
 });
 
 // ---- Middleware ----
-app.use(helmet());
+// Imported photos and inference overlays are rendered from browser-local URLs.
+// Keep CSP restrictive while permitting those image-only preview sources.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'img-src': ["'self'", 'data:', 'blob:'],
+    },
+  },
+}));
 app.use(cors({ origin: env.ALLOWED_ORIGINS, credentials: true }));
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
