@@ -7,16 +7,25 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 
 class OfflineGrainAnalyzer {
   static const modelAssetPath = 'assets/models/best_float16.tflite';
+
+  // Keep these aligned with backend/config/grain.settings.json.
   static const _inputSize = 640;
   static const _protoSize = 160;
-  static const _confidence = 0.25;
+  static const _maxSide = 1024;
+  static const _confidence = 0.03;
   static const _iou = 0.60;
-  static const _maxDetections = 300;
+  static const _maxDetections = 5000;
+  static const _minArea = 12;
+  static const _maxArea = 200000;
+  static const _maxAspectRatio = 20.0;
+  static const _minSolidity = 0.4;
+  static const _minExtent = 0.15;
 
   Interpreter? _interpreter;
 
   Future<OfflineModelInfo> loadModelInfo() async {
-    final interpreter = _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
+    final interpreter =
+        _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
     return OfflineModelInfo(
       modelAssetPath: modelAssetPath,
       inputTensors: interpreter.getInputTensors().map(_tensorInfo).toList(),
@@ -24,15 +33,40 @@ class OfflineGrainAnalyzer {
     );
   }
 
-  Future<OfflineAnalyzeResult> analyze(Uint8List imageBytes) async {
-    final interpreter = _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
+  Future<OfflineAnalyzeResult> analyze(
+    Uint8List imageBytes, {
+    double? referencePixels,
+    double? referenceMm,
+  }) async {
+    final interpreter =
+        _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
     final original = img.decodeImage(imageBytes);
     if (original == null) throw StateError('Cannot decode selected image.');
 
-    final side = math.max(original.width, original.height);
-    final square = img.Image(width: side, height: side, numChannels: 3);
-    img.compositeImage(square, original, dstX: 0, dstY: 0);
-    final resized = img.copyResize(square, width: _inputSize, height: _inputSize);
+    final originalWidth = original.width;
+    final originalHeight = original.height;
+    final longestSide = math.max(originalWidth, originalHeight);
+    final scale = longestSide > _maxSide ? _maxSide / longestSide : 1.0;
+    final processed = scale < 1.0
+        ? img.copyResize(
+            original,
+            width: (originalWidth * scale).round(),
+            height: (originalHeight * scale).round(),
+            interpolation: img.Interpolation.average,
+          )
+        : img.Image.from(original);
+
+    final squareSide = math.max(processed.width, processed.height);
+    final square = img.Image(width: squareSide, height: squareSide, numChannels: 3);
+    img.fill(square, color: img.ColorRgb8(255, 255, 255));
+    img.compositeImage(square, processed, dstX: 0, dstY: 0);
+    final resized = img.copyResize(
+      square,
+      width: _inputSize,
+      height: _inputSize,
+      interpolation: img.Interpolation.linear,
+    );
+
     final input = List.generate(
       1,
       (_) => List.generate(
@@ -43,7 +77,10 @@ class OfflineGrainAnalyzer {
         }),
       ),
     );
-    final predictions = List.generate(1, (_) => List.generate(38, (_) => List.filled(8400, 0.0)));
+    final predictions = List.generate(
+      1,
+      (_) => List.generate(38, (_) => List.filled(8400, 0.0)),
+    );
     final protos = List.generate(
       1,
       (_) => List.generate(
@@ -53,52 +90,80 @@ class OfflineGrainAnalyzer {
     );
     interpreter.runForMultipleInputs([input], {0: predictions, 1: protos});
 
-    final selected = _decodePredictions(predictions[0]);
-    final overlay = img.Image.from(original);
-    final measurements = <Map<String, dynamic>>[];
-    var totalArea = 0.0;
-    var totalLength = 0.0;
-    var totalWidth = 0.0;
+    final detections = _decodePredictions(predictions[0]);
+    final instances = detections
+        .map(
+          (detection) => _decodeMask(
+            protos[0],
+            detection,
+            width: processed.width,
+            height: processed.height,
+            paddedSide: squareSide,
+          ),
+        )
+        .whereType<_Instance>()
+        .toList();
+    final filtered = _filterAndMeasure(
+      instances,
+      width: processed.width,
+      height: processed.height,
+      scale: scale,
+      referencePixels: referencePixels,
+      referenceMm: referenceMm,
+    );
+    final overlay = _renderOverlay(processed, filtered);
+    final mask = _renderMask(filtered);
 
-    for (var index = 0; index < selected.length; index++) {
-      final detection = selected[index];
-      final measured = _renderMask(
-        overlay,
-        protos[0],
-        detection,
-        originalWidth: original.width,
-        originalHeight: original.height,
-        paddedSide: side,
-        labelIndex: index + 1,
-      );
-      if (measured == null) continue;
-      measurements.add(measured);
-      totalArea += measured['area_px'] as double;
-      totalLength += measured['length_px'] as double;
-      totalWidth += measured['width_px'] as double;
-    }
-
-    final count = measurements.length;
+    final seedCandidateCount =
+        instances.where((instance) => instance.classId == 0).length;
+    final refCandidateCount = instances.length - seedCandidateCount;
     return OfflineAnalyzeResult(
-      count: count,
       overlayPng: Uint8List.fromList(img.encodePng(overlay)),
-      imageWidth: original.width,
-      imageHeight: original.height,
-      measurements: measurements,
-      summary: {
-        'count': count,
-        'mean_area_px': count == 0 ? 0 : totalArea / count,
-        'mean_length_px': count == 0 ? 0 : totalLength / count,
-        'mean_width_px': count == 0 ? 0 : totalWidth / count,
+      maskPng: Uint8List.fromList(img.encodePng(mask)),
+      image: {
+        'width': processed.width,
+        'height': processed.height,
+        'original_width': originalWidth,
+        'original_height': originalHeight,
+        'scale': _round(scale, 6),
+      },
+      measurements: filtered.measurements,
+      summary: _summaryFor(filtered.measurements),
+      calibration: {
+        'referencePixels': referencePixels ?? 0,
+        'referenceMm': referenceMm ?? 0,
+        'referencePixelSpace': 'original',
+        'enabled': filtered.mmPerPixel > 0,
+        'mm_per_pixel': filtered.mmPerPixel,
       },
       segmentation: {
-        'pipeline': 'tflite_yolo_seg_mobile',
+        'pipeline': 'yolo_sam_onnx',
+        'model': modelAssetPath,
+        'refiner': 'disabled',
+        'refiner_applied': false,
         'confidence': _confidence,
         'iou': _iou,
         'max_det': _maxDetections,
-        'candidate_count': selected.length,
-        'seed_candidate_count': selected.length,
-        'ref_candidate_count': 0,
+        'tiled_inference': false,
+        'candidate_count': detections.length,
+        'refined_candidate_count': instances.length,
+        'seed_candidate_count': seedCandidateCount,
+        'ref_candidate_count': refCandidateCount,
+        'segment_count_before_filter': instances.length,
+        'segment_count': filtered.measurements.length,
+        'marker_count': filtered.measurements.length,
+        'mask_filter': {
+          'component_count_before': instances.length,
+          'component_count_after': filtered.measurements.length,
+          'ignored_ref_count': refCandidateCount,
+        },
+        'effective_thresholds': {
+          'minArea': _minArea,
+          'maxArea': _maxArea,
+          'maxSegmentAspectRatio': _maxAspectRatio,
+          'minSegmentSolidity': _minSolidity,
+          'minSegmentExtent': _minExtent,
+        },
         'offline': true,
       },
     );
@@ -109,14 +174,17 @@ class OfflineGrainAnalyzer {
     for (var i = 0; i < 8400; i++) {
       final seedScore = prediction[4][i];
       final refScore = prediction[5][i];
-      if (seedScore < _confidence || refScore > seedScore) continue;
+      final classId = seedScore >= refScore ? 0 : 1;
+      final score = classId == 0 ? seedScore : refScore;
+      if (score < _confidence) continue;
       final cx = prediction[0][i];
       final cy = prediction[1][i];
       final width = prediction[2][i];
       final height = prediction[3][i];
       candidates.add(
         _Detection(
-          score: seedScore,
+          score: score,
+          classId: classId,
           x1: cx - width / 2,
           y1: cy - height / 2,
           x2: cx + width / 2,
@@ -136,70 +204,223 @@ class OfflineGrainAnalyzer {
     return kept;
   }
 
-  Map<String, dynamic>? _renderMask(
-    img.Image overlay,
+  _Instance? _decodeMask(
     List<List<List<double>>> protos,
     _Detection detection, {
-    required int originalWidth,
-    required int originalHeight,
+    required int width,
+    required int height,
     required int paddedSide,
-    required int labelIndex,
   }) {
+    final pixels = Uint8List(width * height);
     final scale = paddedSide / _inputSize;
-    final x1 = (detection.x1 * scale).floor().clamp(0, originalWidth);
-    final y1 = (detection.y1 * scale).floor().clamp(0, originalHeight);
-    final x2 = (detection.x2 * scale).ceil().clamp(0, originalWidth);
-    final y2 = (detection.y2 * scale).ceil().clamp(0, originalHeight);
+    final x1 = (detection.x1 * scale).floor().clamp(0, width);
+    final y1 = (detection.y1 * scale).floor().clamp(0, height);
+    final x2 = (detection.x2 * scale).ceil().clamp(0, width);
+    final y2 = (detection.y2 * scale).ceil().clamp(0, height);
     if (x2 <= x1 || y2 <= y1) return null;
 
     var area = 0;
-    var minX = originalWidth;
-    var minY = originalHeight;
-    var maxX = 0;
-    var maxY = 0;
     for (var y = y1; y < y2; y++) {
-      final py = ((y / paddedSide) * _protoSize).floor().clamp(0, _protoSize - 1);
+      final protoY = (y / paddedSide) * _protoSize - 0.5;
       for (var x = x1; x < x2; x++) {
-        final px = ((x / paddedSide) * _protoSize).floor().clamp(0, _protoSize - 1);
+        final protoX = (x / paddedSide) * _protoSize - 0.5;
         var logit = 0.0;
         for (var c = 0; c < 32; c++) {
-          logit += detection.coefficients[c] * protos[py][px][c];
+          logit += detection.coefficients[c] *
+              _bilinearProto(protos, protoX, protoY, c);
         }
         if (_sigmoid(logit) <= 0.5) continue;
+        pixels[y * width + x] = 1;
         area++;
+      }
+    }
+    if (area == 0) return null;
+    return _Instance(
+      mask: pixels,
+      confidence: detection.score,
+      classId: detection.classId,
+    );
+  }
+
+  _FilteredResult _filterAndMeasure(
+    List<_Instance> instances, {
+    required int width,
+    required int height,
+    required double scale,
+    required double? referencePixels,
+    required double? referenceMm,
+  }) {
+    final labels = Int32List(width * height);
+    final measurements = <Map<String, dynamic>>[];
+    final mmPerPixel = (referencePixels != null &&
+            referencePixels > 0 &&
+            referenceMm != null &&
+            referenceMm > 0)
+        ? referenceMm / (referencePixels * scale)
+        : 0.0;
+    instances.sort((a, b) => b.confidence.compareTo(a.confidence));
+    for (final instance in instances) {
+      if (instance.classId != 0) continue;
+      final available = Uint8List(width * height);
+      for (var i = 0; i < available.length; i++) {
+        if (instance.mask[i] != 0 && labels[i] == 0) available[i] = 1;
+      }
+      final metrics = _maskMetrics(available, width, height);
+      if (metrics == null) continue;
+      final area = metrics['area_px'] as int;
+      final aspect = metrics['aspect_ratio'] as double;
+      final solidity = metrics['solidity'] as double;
+      final extent = metrics['extent'] as double;
+      if (area < _minArea || area > _maxArea) continue;
+      if (aspect > _maxAspectRatio) continue;
+      if (solidity < _minSolidity || extent < _minExtent) continue;
+
+      final id = measurements.length + 1;
+      for (var i = 0; i < available.length; i++) {
+        if (available[i] != 0) labels[i] = id;
+      }
+      measurements.add({
+        'id': id,
+        ...metrics,
+        'area_mm2': mmPerPixel == 0
+            ? 0.0
+            : _round(area * mmPerPixel * mmPerPixel, 6),
+        'length_mm': mmPerPixel == 0
+            ? 0.0
+            : _round((metrics['length_px'] as double) * mmPerPixel, 6),
+        'width_mm': mmPerPixel == 0
+            ? 0.0
+            : _round((metrics['width_px'] as double) * mmPerPixel, 6),
+        'confidence': _round(instance.confidence, 6),
+        'class_id': 0,
+        'class_name': 'seed',
+      });
+    }
+    return _FilteredResult(
+      labels: labels,
+      measurements: measurements,
+      mmPerPixel: mmPerPixel,
+      width: width,
+      height: height,
+    );
+  }
+
+  Map<String, dynamic>? _maskMetrics(
+    Uint8List mask,
+    int width,
+    int height,
+  ) {
+    final points = <_Point>[];
+    var sumX = 0.0;
+    var sumY = 0.0;
+    var minX = width;
+    var minY = height;
+    var maxX = -1;
+    var maxY = -1;
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        if (mask[y * width + x] == 0) continue;
+        points.add(_Point(x.toDouble(), y.toDouble()));
+        sumX += x;
+        sumY += y;
         minX = math.min(minX, x);
         minY = math.min(minY, y);
         maxX = math.max(maxX, x);
         maxY = math.max(maxY, y);
+      }
+    }
+    if (points.isEmpty) return null;
+    final hull = _convexHull(points);
+    final hullArea = math.max(_polygonArea(hull), 1.0);
+    final rectangle = _minimumBoundingRectangle(hull);
+    final bboxWidth = maxX - minX + 1;
+    final bboxHeight = maxY - minY + 1;
+    final area = points.length;
+    return {
+      'area_px': area,
+      'length_px': _round(rectangle.length, 3),
+      'width_px': _round(rectangle.width, 3),
+      'centroid_x': _round(sumX / area, 3),
+      'centroid_y': _round(sumY / area, 3),
+      'bbox_x': minX,
+      'bbox_y': minY,
+      'bbox_w': bboxWidth,
+      'bbox_h': bboxHeight,
+      'angle_deg': _round(rectangle.angleDegrees, 3),
+      'solidity': _round(area / hullArea, 6),
+      'extent': _round(area / math.max(bboxWidth * bboxHeight, 1), 6),
+      'aspect_ratio': _round(rectangle.length / rectangle.width, 6),
+    };
+  }
+
+  img.Image _renderOverlay(img.Image rgb, _FilteredResult result) {
+    final overlay = img.Image.from(rgb);
+    const palette = [
+      [45, 108, 191],
+      [219, 87, 86],
+      [73, 160, 120],
+      [235, 174, 73],
+      [132, 98, 174],
+      [77, 176, 196],
+      [201, 112, 165],
+      [122, 126, 135],
+    ];
+    for (var y = 0; y < result.height; y++) {
+      for (var x = 0; x < result.width; x++) {
+        final label = result.labels[y * result.width + x];
+        if (label <= 0) continue;
+        final color = palette[(label - 1) % palette.length];
         final source = overlay.getPixel(x, y);
         overlay.setPixelRgb(
           x,
           y,
-          (source.r * 0.55 + 36 * 0.45).round(),
-          (source.g * 0.55 + 160 * 0.45).round(),
-          (source.b * 0.55 + 92 * 0.45).round(),
+          (source.r * 0.55 + color[0] * 0.45).round(),
+          (source.g * 0.55 + color[1] * 0.45).round(),
+          (source.b * 0.55 + color[2] * 0.45).round(),
         );
       }
     }
-    if (area == 0) return null;
-    final width = (maxX - minX + 1).toDouble();
-    final height = (maxY - minY + 1).toDouble();
-    return {
-      'id': labelIndex,
-      'class_id': 0,
-      'class_name': 'seed',
-      'confidence': detection.score,
-      'area_px': area.toDouble(),
-      'length_px': math.max(width, height),
-      'width_px': math.min(width, height),
-      'bbox': {'x1': minX, 'y1': minY, 'x2': maxX, 'y2': maxY},
-    };
+    return overlay;
+  }
+
+  img.Image _renderMask(_FilteredResult result) {
+    final mask = img.Image(
+      width: result.width,
+      height: result.height,
+      numChannels: 3,
+    );
+    for (var y = 0; y < result.height; y++) {
+      for (var x = 0; x < result.width; x++) {
+        final value = result.labels[y * result.width + x] > 0 ? 255 : 0;
+        mask.setPixelRgb(x, y, value, value, value);
+      }
+    }
+    return mask;
   }
 
   void close() {
     _interpreter?.close();
     _interpreter = null;
   }
+}
+
+double _bilinearProto(
+  List<List<List<double>>> protos,
+  double x,
+  double y,
+  int channel,
+) {
+  final x0 = x.floor().clamp(0, OfflineGrainAnalyzer._protoSize - 1);
+  final y0 = y.floor().clamp(0, OfflineGrainAnalyzer._protoSize - 1);
+  final x1 = (x0 + 1).clamp(0, OfflineGrainAnalyzer._protoSize - 1);
+  final y1 = (y0 + 1).clamp(0, OfflineGrainAnalyzer._protoSize - 1);
+  final dx = (x - x0).clamp(0.0, 1.0);
+  final dy = (y - y0).clamp(0.0, 1.0);
+  final top = protos[y0][x0][channel] * (1 - dx) +
+      protos[y0][x1][channel] * dx;
+  final bottom = protos[y1][x0][channel] * (1 - dx) +
+      protos[y1][x1][channel] * dx;
+  return top * (1 - dy) + bottom * dy;
 }
 
 double _boxIou(_Detection a, _Detection b) {
@@ -214,7 +435,129 @@ double _boxIou(_Detection a, _Detection b) {
   return union == 0 ? 0 : intersection / union;
 }
 
-double _sigmoid(double value) => 1 / (1 + math.exp(-value.clamp(-88.0, 88.0)));
+List<_Point> _convexHull(List<_Point> points) {
+  final sorted = [...points]
+    ..sort((a, b) {
+      final byX = a.x.compareTo(b.x);
+      return byX != 0 ? byX : a.y.compareTo(b.y);
+    });
+  if (sorted.length <= 2) return sorted;
+  final lower = <_Point>[];
+  for (final point in sorted) {
+    while (lower.length >= 2 &&
+        _cross(lower[lower.length - 2], lower.last, point) <= 0) {
+      lower.removeLast();
+    }
+    lower.add(point);
+  }
+  final upper = <_Point>[];
+  for (final point in sorted.reversed) {
+    while (upper.length >= 2 &&
+        _cross(upper[upper.length - 2], upper.last, point) <= 0) {
+      upper.removeLast();
+    }
+    upper.add(point);
+  }
+  lower.removeLast();
+  upper.removeLast();
+  return [...lower, ...upper];
+}
+
+double _polygonArea(List<_Point> points) {
+  if (points.length < 3) return 1.0;
+  var sum = 0.0;
+  for (var i = 0; i < points.length; i++) {
+    final next = points[(i + 1) % points.length];
+    sum += points[i].x * next.y - next.x * points[i].y;
+  }
+  return sum.abs() / 2;
+}
+
+_RectangleMetrics _minimumBoundingRectangle(List<_Point> hull) {
+  if (hull.length < 2) {
+    return const _RectangleMetrics(length: 1, width: 1, angleDegrees: 0);
+  }
+  var bestArea = double.infinity;
+  var best = const _RectangleMetrics(length: 1, width: 1, angleDegrees: 0);
+  for (var i = 0; i < hull.length; i++) {
+    final next = hull[(i + 1) % hull.length];
+    final angle = math.atan2(next.y - hull[i].y, next.x - hull[i].x);
+    final cosA = math.cos(angle);
+    final sinA = math.sin(angle);
+    var minX = double.infinity;
+    var maxX = double.negativeInfinity;
+    var minY = double.infinity;
+    var maxY = double.negativeInfinity;
+    for (final point in hull) {
+      final rx = point.x * cosA + point.y * sinA;
+      final ry = -point.x * sinA + point.y * cosA;
+      minX = math.min(minX, rx);
+      maxX = math.max(maxX, rx);
+      minY = math.min(minY, ry);
+      maxY = math.max(maxY, ry);
+    }
+    final rectWidth = math.max(maxX - minX, 1.0);
+    final rectHeight = math.max(maxY - minY, 1.0);
+    final area = rectWidth * rectHeight;
+    if (area < bestArea) {
+      bestArea = area;
+      best = _RectangleMetrics(
+        length: math.max(rectWidth, rectHeight),
+        width: math.min(rectWidth, rectHeight),
+        angleDegrees: angle * 180 / math.pi,
+      );
+    }
+  }
+  return best;
+}
+
+double _cross(_Point origin, _Point a, _Point b) =>
+    (a.x - origin.x) * (b.y - origin.y) -
+    (a.y - origin.y) * (b.x - origin.x);
+
+double _sigmoid(double value) =>
+    1 / (1 + math.exp(-value.clamp(-88.0, 88.0)));
+
+double _round(num value, int decimals) {
+  final factor = math.pow(10, decimals).toDouble();
+  return (value * factor).round() / factor;
+}
+
+Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
+  if (measurements.isEmpty) {
+    return {
+      'count': 0,
+      'total_area_px': 0,
+      'mean_area_px': 0,
+      'mean_length_px': 0,
+      'mean_width_px': 0,
+      'mean_area_mm2': 0,
+      'mean_length_mm': 0,
+      'mean_width_mm': 0,
+    };
+  }
+  double mean(String key) => _round(
+        measurements.fold<double>(
+              0,
+              (total, item) => total + ((item[key] as num?)?.toDouble() ?? 0),
+            ) /
+            measurements.length,
+        6,
+      );
+  return {
+    'count': measurements.length,
+    'total_area_px': measurements.fold<int>(
+      0,
+      (total, item) => total + ((item['area_px'] as num?)?.toInt() ?? 0),
+    ),
+    'mean_area_px': mean('area_px'),
+    'mean_length_px': mean('length_px'),
+    'mean_width_px': mean('width_px'),
+    'mean_area_mm2': mean('area_mm2'),
+    'mean_length_mm': mean('length_mm'),
+    'mean_width_mm': mean('width_mm'),
+  };
+}
 
 OfflineTensorInfo _tensorInfo(Tensor tensor) => OfflineTensorInfo(
       name: tensor.name,
@@ -224,6 +567,7 @@ OfflineTensorInfo _tensorInfo(Tensor tensor) => OfflineTensorInfo(
 
 class _Detection {
   final double score;
+  final int classId;
   final double x1;
   final double y1;
   final double x2;
@@ -232,11 +576,59 @@ class _Detection {
 
   const _Detection({
     required this.score,
+    required this.classId,
     required this.x1,
     required this.y1,
     required this.x2,
     required this.y2,
     required this.coefficients,
+  });
+}
+
+class _Instance {
+  final Uint8List mask;
+  final double confidence;
+  final int classId;
+
+  const _Instance({
+    required this.mask,
+    required this.confidence,
+    required this.classId,
+  });
+}
+
+class _Point {
+  final double x;
+  final double y;
+
+  const _Point(this.x, this.y);
+}
+
+class _RectangleMetrics {
+  final double length;
+  final double width;
+  final double angleDegrees;
+
+  const _RectangleMetrics({
+    required this.length,
+    required this.width,
+    required this.angleDegrees,
+  });
+}
+
+class _FilteredResult {
+  final Int32List labels;
+  final List<Map<String, dynamic>> measurements;
+  final double mmPerPixel;
+  final int width;
+  final int height;
+
+  const _FilteredResult({
+    required this.labels,
+    required this.measurements,
+    required this.mmPerPixel,
+    required this.width,
+    required this.height,
   });
 }
 
@@ -257,25 +649,29 @@ class OfflineTensorInfo {
   final List<int> shape;
   final String type;
 
-  const OfflineTensorInfo({required this.name, required this.shape, required this.type});
+  const OfflineTensorInfo({
+    required this.name,
+    required this.shape,
+    required this.type,
+  });
 }
 
 class OfflineAnalyzeResult {
-  final int count;
   final Uint8List overlayPng;
-  final int imageWidth;
-  final int imageHeight;
+  final Uint8List maskPng;
+  final Map<String, dynamic> image;
   final List<Map<String, dynamic>> measurements;
   final Map<String, dynamic> summary;
+  final Map<String, dynamic> calibration;
   final Map<String, dynamic> segmentation;
 
   const OfflineAnalyzeResult({
-    required this.count,
     required this.overlayPng,
-    required this.imageWidth,
-    required this.imageHeight,
+    required this.maskPng,
+    required this.image,
     required this.measurements,
     required this.summary,
+    required this.calibration,
     required this.segmentation,
   });
 
@@ -287,16 +683,20 @@ class OfflineAnalyzeResult {
           'offline': true,
           'createdAt': DateTime.now().toIso8601String(),
         },
-        'image': {'width': imageWidth, 'height': imageHeight},
+        'image': image,
         'summary': summary,
         'segmentation': segmentation,
-        'calibration': {'enabled': false},
-        'features': {'source': 'mobile_tflite'},
+        'calibration': calibration,
+        'features': {
+          'pipeline': 'yolo8_nano_segment',
+          'source': 'mobile_tflite',
+          'preprocess': {'enabled': false},
+        },
         'measurements': measurements,
         'csv': '',
         'overlay_png_base64': base64Encode(overlayPng),
-        'sam_mask_png_base64': '',
+        'sam_mask_png_base64': base64Encode(maskPng),
         'labels_png_base64': '',
-        'mask_png_base64': '',
+        'mask_png_base64': base64Encode(maskPng),
       };
 }

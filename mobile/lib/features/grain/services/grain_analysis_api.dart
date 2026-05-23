@@ -25,7 +25,11 @@ class GrainAnalysisApi {
     final guestMode = await isGuestMode();
     GrainAnalysisResult? localResult;
     try {
-      final offlineResult = await _offlineAnalyzer.analyze(bytes);
+      final offlineResult = await _offlineAnalyzer.analyze(
+        bytes,
+        referencePixels: referencePixels,
+        referenceMm: referenceMm,
+      );
       localResult = GrainAnalysisResult.fromJson(offlineResult.asApiJson(fileName));
     } catch (_) {
       // Fall back to server analysis if this device cannot execute TFLite.
