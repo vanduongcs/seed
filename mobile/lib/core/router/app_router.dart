@@ -19,7 +19,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == '/register';
 
       if (!hasAccess && !isAuthRoute) return '/login';
-      if (isAuthenticated && isAuthRoute) return '/dashboard';
+      if (hasAccess && isAuthRoute) return '/dashboard';
       return null;
     },
     routes: [
