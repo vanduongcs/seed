@@ -10,7 +10,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final guestMode = ref.watch(guestModeProvider);
 
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/dashboard',
     redirect: (context, state) {
       final isAuthenticated = authState.value ?? false;
       final isGuest = guestMode.value ?? false;
@@ -19,7 +19,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == '/register';
 
       if (!hasAccess && !isAuthRoute) return '/login';
-      if (hasAccess && isAuthRoute) return '/dashboard';
+      if (isAuthenticated && isAuthRoute) return '/dashboard';
       return null;
     },
     routes: [

@@ -71,34 +71,33 @@ class OfflineGrainAnalyzer {
       interpolation: img.Interpolation.linear,
     );
 
-    final input = List.generate(
-      1,
-      (_) => List.generate(
-        _inputSize,
-        (y) => List.generate(_inputSize, (x) {
-          final pixel = resized.getPixel(x, y);
-          return [pixel.r / 255.0, pixel.g / 255.0, pixel.b / 255.0];
-        }),
-      ),
-    );
-    final predictions = List.generate(
-      1,
-      (_) => List.generate(38, (_) => List.filled(8400, 0.0)),
-    );
-    final protos = List.generate(
-      1,
-      (_) => List.generate(
-        _protoSize,
-        (_) => List.generate(_protoSize, (_) => List.filled(32, 0.0)),
-      ),
-    );
-    interpreter.runForMultipleInputs([input], {0: predictions, 1: protos});
+    final input = Float32List(1 * _inputSize * _inputSize * 3);
+    var inputIndex = 0;
+    for (var y = 0; y < _inputSize; y++) {
+      for (var x = 0; x < _inputSize; x++) {
+        final pixel = resized.getPixel(x, y);
+        input[inputIndex++] = pixel.r / 255.0;
+        input[inputIndex++] = pixel.g / 255.0;
+        input[inputIndex++] = pixel.b / 255.0;
+      }
+    }
 
-    final detections = _decodePredictions(predictions[0]);
+    final predictions = Float32List(1 * 38 * 8400);
+    final protos = Float32List(1 * _protoSize * _protoSize * 32);
+
+    interpreter.runForMultipleInputs(
+      [input.buffer.asUint8List()],
+      {
+        0: predictions.buffer.asUint8List(),
+        1: protos.buffer.asUint8List(),
+      },
+    );
+
+    final detections = _decodePredictions(predictions);
     final instances = detections
         .map(
           (detection) => _decodeMask(
-            protos[0],
+            protos,
             detection,
             width: processed.width,
             height: processed.height,
@@ -185,18 +184,18 @@ class OfflineGrainAnalyzer {
     );
   }
 
-  List<_Detection> _decodePredictions(List<List<double>> prediction) {
+  List<_Detection> _decodePredictions(Float32List prediction) {
     final candidates = <_Detection>[];
     for (var i = 0; i < 8400; i++) {
-      final seedScore = prediction[4][i];
-      final refScore = prediction[5][i];
+      final seedScore = prediction[4 * 8400 + i];
+      final refScore = prediction[5 * 8400 + i];
       final classId = seedScore >= refScore ? 0 : 1;
       final score = classId == 0 ? seedScore : refScore;
       if (score < _confidence) continue;
-      final cx = prediction[0][i];
-      final cy = prediction[1][i];
-      final width = prediction[2][i];
-      final height = prediction[3][i];
+      final cx = prediction[0 * 8400 + i];
+      final cy = prediction[1 * 8400 + i];
+      final width = prediction[2 * 8400 + i];
+      final height = prediction[3 * 8400 + i];
       candidates.add(
         _Detection(
           score: score,
@@ -205,7 +204,7 @@ class OfflineGrainAnalyzer {
           y1: cy - height / 2,
           x2: cx + width / 2,
           y2: cy + height / 2,
-          coefficients: List.generate(32, (c) => prediction[6 + c][i]),
+          coefficients: List.generate(32, (c) => prediction[(6 + c) * 8400 + i]),
         ),
       );
     }
@@ -221,7 +220,7 @@ class OfflineGrainAnalyzer {
   }
 
   _Instance? _decodeMask(
-    List<List<List<double>>> protos,
+    Float32List protos,
     _Detection detection, {
     required int width,
     required int height,
@@ -449,21 +448,25 @@ class OfflineGrainAnalyzer {
 }
 
 double _bilinearProto(
-  List<List<List<double>>> protos,
+  Float32List protos,
   double x,
   double y,
   int channel,
 ) {
-  final x0 = x.floor().clamp(0, OfflineGrainAnalyzer._protoSize - 1);
-  final y0 = y.floor().clamp(0, OfflineGrainAnalyzer._protoSize - 1);
-  final x1 = (x0 + 1).clamp(0, OfflineGrainAnalyzer._protoSize - 1);
-  final y1 = (y0 + 1).clamp(0, OfflineGrainAnalyzer._protoSize - 1);
+  final x0 = x.floor().clamp(0, 159);
+  final y0 = y.floor().clamp(0, 159);
+  final x1 = (x0 + 1).clamp(0, 159);
+  final y1 = (y0 + 1).clamp(0, 159);
   final dx = (x - x0).clamp(0.0, 1.0);
   final dy = (y - y0).clamp(0.0, 1.0);
-  final top = protos[y0][x0][channel] * (1 - dx) +
-      protos[y0][x1][channel] * dx;
-  final bottom = protos[y1][x0][channel] * (1 - dx) +
-      protos[y1][x1][channel] * dx;
+
+  final idx00 = (y0 * 160 + x0) * 32 + channel;
+  final idx01 = (y0 * 160 + x1) * 32 + channel;
+  final idx10 = (y1 * 160 + x0) * 32 + channel;
+  final idx11 = (y1 * 160 + x1) * 32 + channel;
+
+  final top = protos[idx00] * (1 - dx) + protos[idx01] * dx;
+  final bottom = protos[idx10] * (1 - dx) + protos[idx11] * dx;
   return top * (1 - dy) + bottom * dy;
 }
 
