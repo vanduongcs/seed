@@ -30,17 +30,6 @@ export default function DashboardPage() {
   const [progressPhase, setProgressPhase] = useState('');
   const progressTimerRef = useRef(null);
 
-  useEffect(() => {
-    if (!imageFile) {
-      setPreviewUrl('');
-      return undefined;
-    }
-
-    const nextPreviewUrl = URL.createObjectURL(imageFile);
-    setPreviewUrl(nextPreviewUrl);
-    return () => URL.revokeObjectURL(nextPreviewUrl);
-  }, [imageFile]);
-
   useEffect(() => () => {
     if (videoRef.current?.srcObject) {
       videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
@@ -60,6 +49,7 @@ export default function DashboardPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) videoRef.current.srcObject = stream;
       setImageFile(null);
+      setPreviewUrl('');
       setFileName('camera-frame.png');
       setCameraActive(true);
       resetRunState();
@@ -71,11 +61,24 @@ export default function DashboardPage() {
   const handleFile = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    setPreviewUrl('');
     setImageFile(file);
     setFileName(file.name);
     setCameraActive(false);
     setProcessError('');
     resetRunState();
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPreviewUrl(typeof reader.result === 'string' ? reader.result : '');
+    };
+    reader.onerror = () => {
+      setPreviewUrl('');
+      setProcessError('Không thể đọc ảnh đã chọn. Vui lòng thử ảnh JPG hoặc PNG khác.');
+    };
+    reader.readAsDataURL(file);
+
     event.target.value = '';
   };
 
