@@ -7,6 +7,7 @@ import {
 import { Email, Lock, Person, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuthStore } from '@/store/auth.store.js';
 import { api } from '@/api/axios.js';
+import { syncGuestRuns } from '@/utils/guestRuns.js';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -41,6 +42,7 @@ export default function RegisterPage() {
     try {
       const { data } = await api.post('/auth/register', form);
       setAuth(data.data.user, data.data.accessToken, data.data.refreshToken);
+      await syncGuestRuns().catch(() => {});
       navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.message || 'Đăng ký thất bại. Vui lòng thử lại.');

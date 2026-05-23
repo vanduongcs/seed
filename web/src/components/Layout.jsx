@@ -73,9 +73,20 @@ export default function Layout() {
 
       <Divider />
       <Box sx={{ p: 2 }}>
-        <Button fullWidth size="small" variant="outlined" color="inherit" onClick={handleLogout}>
-          Đăng xuất
-        </Button>
+        {isGuest ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Button fullWidth size="small" variant="contained" onClick={() => navigate('/login')}>
+              Đăng nhập để đồng bộ
+            </Button>
+            <Button fullWidth size="small" variant="outlined" onClick={() => navigate('/register')}>
+              Đăng ký
+            </Button>
+          </Box>
+        ) : (
+          <Button fullWidth size="small" variant="outlined" color="inherit" onClick={handleLogout}>
+            Đăng xuất
+          </Button>
+        )}
       </Box>
     </Box>
   );

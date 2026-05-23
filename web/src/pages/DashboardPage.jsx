@@ -7,6 +7,7 @@ import { DashboardPreviewPanel } from '@/components/grain/DashboardPreviewPanel.
 import { DashboardResultPanel } from '@/components/grain/DashboardResultPanel.jsx';
 import { formatMeasure, safeStem } from '@/components/grain/format.js';
 import { StatCard } from '@/components/grain/StatCard.jsx';
+import { saveGuestRun } from '@/utils/guestRuns.js';
 
 const emptyCalibration = { start: null, end: null, referenceMm: '' };
 
@@ -192,6 +193,9 @@ export default function DashboardPage() {
       setProgress(96);
       setProgressPhase('Lưu kết quả');
       setResult(data.data);
+      if (isGuest) {
+        saveGuestRun({ result: data.data, sourceFileName: file.name });
+      }
       setPreviewMode('overlay');
       setProgress(100);
       setProgressPhase('Hoàn tất');

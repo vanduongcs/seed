@@ -16,6 +16,7 @@ class MainShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isGuest = ref.watch(guestModeProvider).value ?? false;
     const pages = [
       DashboardScreen(),
       StorageScreen(),
@@ -25,15 +26,27 @@ class MainShell extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(_titles[initialIndex]),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await ref.read(authProvider.notifier).logout();
-              if (context.mounted) context.go('/login');
-            },
-          ),
-        ],
+        actions: isGuest
+            ? [
+                TextButton(
+                  onPressed: () => context.go('/login'),
+                  child: const Text('Đăng nhập'),
+                ),
+                TextButton(
+                  onPressed: () => context.go('/register'),
+                  child: const Text('Đăng ký'),
+                ),
+              ]
+            : [
+                IconButton(
+                  tooltip: 'Đăng xuất',
+                  icon: const Icon(Icons.logout),
+                  onPressed: () async {
+                    await ref.read(authProvider.notifier).logout();
+                    if (context.mounted) context.go('/login');
+                  },
+                ),
+              ],
       ),
       body: pages[initialIndex],
       bottomNavigationBar: BottomNavigationBar(
