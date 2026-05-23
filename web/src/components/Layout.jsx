@@ -22,7 +22,7 @@ export default function Layout() {
   const { user, isGuest, logout } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const navItems = isGuest ? accountNavItems.slice(0, 1) : accountNavItems;
+  const navItems = isGuest ? accountNavItems.slice(0, 2) : accountNavItems;
 
   const handleLogout = async () => {
     try {

@@ -37,7 +37,7 @@ export default function App() {
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="storage" element={<AuthenticatedRoute><StoragePage /></AuthenticatedRoute>} />
+        <Route path="storage" element={<StoragePage />} />
         <Route path="account" element={<AuthenticatedRoute><AccountPage /></AuthenticatedRoute>} />
         <Route path="chat" element={<Navigate to="/dashboard" replace />} />
         <Route path="chat/:id" element={<Navigate to="/dashboard" replace />} />

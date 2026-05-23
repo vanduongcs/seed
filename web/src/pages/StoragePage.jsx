@@ -35,8 +35,11 @@ import {
 
 import { api } from '@/api/axios.js';
 import { formatMeasure, safeStem } from '@/components/grain/format.js';
+import { useAuthStore } from '@/store/auth.store.js';
+import { deleteGuestRun, readGuestRuns } from '@/utils/guestRuns.js';
 
 export default function StoragePage() {
+  const isGuest = useAuthStore((state) => state.isGuest);
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -49,6 +52,18 @@ export default function StoragePage() {
     setLoading(true);
     setError('');
     try {
+      if (isGuest) {
+        setRuns(readGuestRuns().map((item) => ({
+          ...(item.result?.run || {}),
+          id: item.clientRunId,
+          sourceFileName: item.sourceFileName,
+          createdAt: item.createdAt,
+          image: item.result?.image || {},
+          summary: item.result?.summary || {},
+          localOnly: true,
+        })));
+        return;
+      }
       const { data } = await api.get('/grain/runs', { params: { limit: 100 } });
       setRuns(data.data.items || []);
     } catch (err) {
@@ -60,12 +75,27 @@ export default function StoragePage() {
 
   useEffect(() => {
     loadRuns();
-  }, []);
+  }, [isGuest]);
 
   const openDetail = async (runId) => {
     setDetailLoading(true);
     setError('');
     try {
+      if (isGuest) {
+        const local = readGuestRuns().find((item) => item.clientRunId === runId);
+        if (!local) throw new Error('Không tìm thấy bản xử lý local');
+        setSelected({
+          run: {
+            ...(local.result?.run || {}),
+            id: local.clientRunId,
+            sourceFileName: local.sourceFileName,
+            createdAt: local.createdAt,
+          },
+          result: local.result,
+        });
+        setDetailPreviewMode('overlay');
+        return;
+      }
       const { data } = await api.get(`/grain/runs/${runId}`);
       setSelected(data.data);
       setDetailPreviewMode('overlay');
@@ -81,6 +111,12 @@ export default function StoragePage() {
     if (!ok) return;
 
     try {
+      if (isGuest) {
+        deleteGuestRun(run.id);
+        setRuns((current) => current.filter((item) => item.id !== run.id));
+        if (selected?.run?.id === run.id) setSelected(null);
+        return;
+      }
       await api.delete(`/grain/runs/${run.id}`);
       setRuns((current) => current.filter((item) => item.id !== run.id));
       if (selected?.run?.id === run.id) setSelected(null);
@@ -105,6 +141,11 @@ export default function StoragePage() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mb: 2.5, flexWrap: 'wrap' }}>
         <Box>
           <Typography variant="h5" fontWeight={700} mb={0.75}>Lưu trữ</Typography>
+          {isGuest && (
+            <Typography variant="body2" color="text.secondary">
+              Các bản xử lý này lưu trên trình duyệt hiện tại. Đăng nhập để đồng bộ vào tài khoản.
+            </Typography>
+          )}
         </Box>
         <IconButton color="primary" onClick={loadRuns} disabled={loading} aria-label="Làm mới">
           <RefreshOutlined />
@@ -152,7 +193,7 @@ export default function StoragePage() {
                         <TableCell align="right">{formatMeasure(run.summary?.mean_length_mm, 'mm', run.summary?.mean_length_px, 'px')}</TableCell>
                         <TableCell align="right">{formatMeasure(run.summary?.mean_width_mm, 'mm', run.summary?.mean_width_px, 'px')}</TableCell>
                         <TableCell>
-                          <Chip label="Hoàn tất" size="small" color="success" variant="outlined" />
+                          <Chip label={isGuest ? 'Lưu local' : 'Hoàn tất'} size="small" color="success" variant="outlined" />
                         </TableCell>
                         <TableCell align="right">
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">

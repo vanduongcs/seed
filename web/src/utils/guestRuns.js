@@ -21,11 +21,16 @@ export const syncGuestRuns = async () => {
   return pending.length;
 };
 
-const readGuestRuns = () => {
+export const readGuestRuns = () => {
   try {
     const value = JSON.parse(localStorage.getItem(GUEST_RUNS_KEY) || '[]');
     return Array.isArray(value) ? value : [];
   } catch {
     return [];
   }
+};
+
+export const deleteGuestRun = (clientRunId) => {
+  const next = readGuestRuns().filter((item) => item.clientRunId !== clientRunId);
+  localStorage.setItem(GUEST_RUNS_KEY, JSON.stringify(next));
 };

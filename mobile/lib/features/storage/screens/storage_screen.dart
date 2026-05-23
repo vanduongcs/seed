@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../../grain/providers/grain_runs_provider.dart';
 import '../../grain/services/grain_analysis_api.dart';
 
@@ -16,6 +17,7 @@ class StorageScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final runsState = ref.watch(grainRunsProvider);
+    final isGuest = ref.watch(guestModeProvider).value ?? false;
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -27,7 +29,7 @@ class StorageScreen extends ConsumerWidget {
         error: (error, _) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const _Header(),
+            _Header(isGuest: isGuest),
             const SizedBox(height: 18),
             Text(
               error.toString(),
@@ -38,15 +40,17 @@ class StorageScreen extends ConsumerWidget {
         data: (runs) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const _Header(),
+            _Header(isGuest: isGuest),
             const SizedBox(height: 18),
             if (runs.isEmpty)
-              const Card(
+              Card(
                 child: Padding(
-                  padding: EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
                   child: Text(
-                    'Chưa có lịch sử. Hãy chạy phân tích ảnh trên web để tạo run đầu tiên.',
-                    style: TextStyle(color: AppTheme.textSecondary),
+                    isGuest
+                        ? 'Chưa có bản xử lý local. Chọn ảnh hoặc chụp ảnh để chạy phân tích offline.'
+                        : 'Chưa có lịch sử. Hãy chạy phân tích ảnh để tạo bản đầu tiên.',
+                    style: const TextStyle(color: AppTheme.textSecondary),
                   ),
                 ),
               )
@@ -63,21 +67,25 @@ class StorageScreen extends ConsumerWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header();
+  final bool isGuest;
+
+  const _Header({required this.isGuest});
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           'Lịch sử xử lý',
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
         ),
-        SizedBox(height: 6),
+        const SizedBox(height: 6),
         Text(
-          'Các lần xử lý được lưu từ backend sau khi worker Python trả kết quả.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          isGuest
+              ? 'Các bản xử lý đang lưu trên điện thoại. Đăng nhập để đồng bộ vào tài khoản.'
+              : 'Các lần xử lý đã đồng bộ với tài khoản của bạn trên server.',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
       ],
     );
