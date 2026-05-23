@@ -4,7 +4,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_client.dart';
-import '../../auth/providers/auth_provider.dart';
 import '../services/local_grain_run_store.dart';
 
 final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {

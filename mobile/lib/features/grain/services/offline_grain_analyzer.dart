@@ -286,8 +286,8 @@ class OfflineGrainAnalyzer {
         (referenceX1 != referenceX2 || referenceY1 != referenceY2);
     final processedLine = hasReferenceLine
         ? (
-            _Point(referenceX1! * scale, referenceY1! * scale),
-            _Point(referenceX2! * scale, referenceY2! * scale),
+            _Point(referenceX1 * scale, referenceY1 * scale),
+            _Point(referenceX2 * scale, referenceY2 * scale),
           )
         : null;
     instances.sort((a, b) => b.confidence.compareTo(a.confidence));
