@@ -170,7 +170,7 @@ export default function DashboardPage() {
 
       setProgress(20);
       setProgressPhase(isGuest ? 'Chuẩn bị xử lý' : 'Xác thực phiên');
-      if (!isGuest) await ensureFreshAccessToken(true);
+      if (!isGuest) await ensureFreshAccessToken();
 
       const formData = new FormData();
       formData.append('image', file);

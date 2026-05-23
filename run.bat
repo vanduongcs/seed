@@ -54,7 +54,7 @@ start "Seed Web" /D "%~dp0" cmd /k "npm run dev:web"
 exit /b
 
 :start_mobile
-start "Seed Mobile" /D "%~dp0mobile" cmd /k "flutter pub get && flutter run"
+start "Seed Mobile" /D "%~dp0mobile" cmd /k "echo Seed Mobile will auto-discover the backend on the local network. && flutter pub get && flutter run"
 exit /b
 
 :done
@@ -76,7 +76,7 @@ for /f "tokens=5" %%a in ('netstat -ano -p tcp ^| findstr /R /C:":3000 .*LISTENI
 )
 
 if defined BACKEND_PID (
-  echo Backend API is already running on http://localhost:3000. Restarting it in this window...
+  echo Backend API is already running on port 3000. Restarting it in this window...
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process -Filter 'name = ''node.exe''' | Where-Object { $_.CommandLine -match 'dev:backend|workspace=backend|nodemon|src/index.js' } | ForEach-Object { Write-Host ('Stopping PID ' + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
   if errorlevel 1 goto backend_failed
   timeout /t 2 /nobreak >nul
@@ -90,7 +90,11 @@ if not exist backend\.venv\Scripts\python.exe (
   if errorlevel 1 goto backend_failed
 )
 
-echo Starting backend API on http://localhost:3000 ...
+echo Starting backend API on:
+echo   Local: http://localhost:3000
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } | ForEach-Object { Write-Host ('  LAN:   http://' + $_.IPAddress + ':3000') }"
+echo.
+echo Mobile auto-discovery will look for /health on port 3000.
 npm run dev:backend
 exit /b
 

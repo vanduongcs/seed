@@ -1,5 +1,11 @@
 # Dependencies
 node_modules/
+
+# Local model/cache artifacts
+yolov8n-seg.pt
+backend/python/.ultralytics/
+backend/model/*.pt
+backend/model/*.onnx
 .venv/
 **/.venv/
 __pycache__/
@@ -34,7 +40,6 @@ synthetic_seeds.png
 *.seed
 *.pid.lock
 backend/storage/
-backend/python/models/
 
 # IDE
 .vscode/settings.json
@@ -62,3 +67,11 @@ mobile/.pub-cache/
 
 # Coverage
 coverage/
+
+# APK binaries (build locally, don't commit)
+*.apk
+
+# Root large models and temporary outputs
+/*.pt
+/*.onnx
+/test_outputs/

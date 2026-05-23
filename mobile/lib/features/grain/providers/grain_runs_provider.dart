@@ -44,13 +44,12 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
         .toList();
   } on DioException catch (error) {
     if (error.response?.statusCode == 401) {
-      const storage = FlutterSecureStorage();
-      await storage.delete(key: accessTokenKey);
-      await storage.delete(key: refreshTokenKey);
-      await storage.delete(key: userKey);
-      ref.invalidate(authStateProvider);
+      // Don't clear tokens here — the ApiClient interceptor already
+      // attempted a transparent refresh. If it still failed, show an
+      // error message but keep the session alive so the user can retry
+      // or navigate to another tab without being logged out.
       throw const GrainRunsException(
-        'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+        'Phiên đăng nhập đã hết hạn hoặc server tạm thời không phản hồi. Kéo xuống để thử lại.',
       );
     }
     throw GrainRunsException(_friendlyDioMessage(error));

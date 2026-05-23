@@ -1,182 +1,90 @@
 # Seed
 
-Seed là hệ thống đa nền tảng phục vụ phân tích hình thái hạt giống từ ảnh. Ứng dụng cho phép người dùng import ảnh hoặc lấy ảnh từ camera, tự động tách vùng hạt, đo kích thước từng hạt và xuất kết quả dạng CSV/PNG để phục vụ kiểm tra mẫu trong phòng thí nghiệm.
+Seed is a monorepo for seed-grain image analysis. The app accepts a JPG/PNG image from web or mobile, runs one backend computer-vision pipeline, measures each detected grain, and returns summary data, CSV, and PNG previews.
 
-Project được tổ chức theo mô hình monorepo, gồm backend API, web dashboard, mobile app và package shared dùng chung.
-
-## Mục Tiêu
-
-Seed tập trung vào ba nhu cầu chính:
-
-- Nhận dạng và segment hạt giống từ ảnh RGB.
-- Đo các chỉ số hình thái cơ bản như số lượng, diện tích, chiều dài và chiều rộng.
-- Cung cấp giao diện web/mobile để thao tác, xem overlay và xuất dữ liệu.
-
-Pipeline xử lý ảnh được cấu hình tập trung ở backend để web/mobile luôn chạy cùng một bộ tham số khi deploy.
-
-## Kiến Trúc
+## Structure
 
 ```text
-seed/
-├─ backend/   Express API, MongoDB, JWT auth, Python image worker
-├─ web/       React + Vite + Material UI dashboard
-├─ mobile/    Flutter app
-└─ shared/    Constants và validators dùng chung
+backend/   Express API, MongoDB, JWT auth, Python image worker
+web/       React + Vite + Material UI dashboard
+mobile/    Flutter app
+shared/    Shared constants and validators
 ```
 
-Luồng xử lý chính:
+## Main Pipeline
 
-1. Web hoặc mobile gửi ảnh đến backend qua `POST /api/grain/analyze`.
-2. Backend lưu ảnh vào thư mục tạm và gọi Python worker.
-3. Python worker chạy pipeline segment/measurement và trả JSON.
-4. Backend trả kết quả gồm thống kê, measurements, CSV, overlay PNG và các ảnh debug mask/cluster.
-5. Web hiển thị overlay, mask, labels, bảng thống kê và cho phép export.
+The active image pipeline is `yolo8_nano_segment`.
 
-## Thành Phần
+1. Backend receives `POST /api/grain/analyze`.
+2. Node writes the uploaded image to a temporary folder.
+3. `backend/python/analyze_grains.py` calls the Python pipeline in `backend/python/grain_pipeline/`.
+4. YOLO segmentation predicts instance masks.
+5. The pipeline filters masks, measures geometry, applies optional calibration, and returns JSON.
+6. Backend stores run metadata and an artifact JSON for history/detail views.
 
-### Backend
+Generated preview fields:
 
-Backend dùng Node.js, Express và MongoDB. Các nhóm API chính gồm:
+- `original_png_base64`
+- `preprocessed_png_base64`
+- `overlay_png_base64`
+- `mask_png_base64`
+- `labels_png_base64`
 
-- Auth: đăng ký, đăng nhập, refresh token.
-- AI chat: hội thoại với provider được cấu hình.
-- Grain analysis: nhận ảnh, chạy Python worker và trả kết quả đo hạt.
+## Pipeline Settings
 
-Python worker nằm tại:
+All runtime image-analysis parameters are centralized in:
 
 ```text
-backend/python/analyze_grains.py
+backend/config/grain.settings.json
 ```
 
-Worker xử lý ảnh độc lập với server Node, giúp phần computer vision dễ phát triển và kiểm thử riêng.
-
-### Web
-
-Web dashboard nằm trong `web/`, dùng React, Vite, Material UI, Zustand và Axios.
-
-Dashboard phân tích hạt hỗ trợ:
-
-- Import ảnh JPG/PNG hoặc lấy frame từ camera.
-- Chạy phân tích ảnh qua backend.
-- Xem overlay, clusters, mask, seed mask, KMeans mask và labels.
-- Sử dụng cấu hình xử lý tập trung từ backend; tham số nâng cao được đặt bằng file/env khi deploy.
-- Export CSV measurements và PNG overlay.
-
-### Mobile
-
-Mobile app nằm trong `mobile/`, dùng Flutter. Ứng dụng cung cấp auth flow, dashboard phân tích ảnh, storage và account screen. Mobile dùng chung backend API với web để đảm bảo cùng một pipeline segmentation/measurement trên cả hai nền tảng.
-
-Luồng mobile chính: chọn ảnh hoặc camera trong Dashboard mobile, gửi ảnh đến `POST /api/grain/analyze`, nhận lại overlay/mask/labels/clusters, thống kê count/area/length/width, và export CSV/PNG qua share sheet của hệ điều hành. Storage mobile cũng mở được chi tiết run đã lưu và export lại artifact giống web.
-
-Pipeline nặng như SAM/FastSAM, PCA/KMeans, dynamic threshold và watershed chạy trên backend để dễ deploy, dễ cập nhật model và tránh lệch kết quả giữa web/mobile. Nếu cần offline thật trong tương lai, model TFLite nên được huấn luyện/export riêng nhưng phải giữ schema output tương thích với API hiện tại.
-
-### Shared
-
-Package `shared/` chứa constants và validators có thể tái sử dụng giữa các app.
-
-## Pipeline Xử Lý Ảnh
-
-Pipeline hiện tại mô phỏng hướng xử lý kiểu GridFree nhưng được điều chỉnh cho codebase này:
-
-1. Đọc ảnh RGB, xoay theo EXIF và resize theo `maxSide`.
-2. Tạo color feature bank gồm RGB, PAT, DIF, ROO, GLD, chroma và intensity.
-3. Chạy PCA theo correlation cho RGB PCA và index PCA.
-4. Blend RGB/index PCA bằng `rgbIndexWeight`.
-5. Chạy KMeans để tách cluster foreground/background.
-6. Tạo seedness mask dựa trên hue, saturation, LAB yellow score, texture và khoảng cách nền lấy từ viền ảnh.
-7. Kết hợp seed mask với KMeans mask ở chế độ `auto`/`hybrid`.
-8. Lọc foreground components trước watershed bằng area, border, solidity, extent, aspect ratio, seedness và local contrast.
-9. Ước lượng threshold động từ connected components hợp lệ.
-10. Chạy watershed để tách hạt dính nhau.
-11. Lọc segment sau watershed bằng area, length, width, aspect ratio, solidity, extent và mean seedness.
-12. Đo contour và xuất CSV/overlay.
-
-Các output đo chính:
-
-- `count`
-- `area_px`, `area_mm2`
-- `length_px`, `length_mm`
-- `width_px`, `width_mm`
-- centroid, bounding box, angle, solidity, extent, aspect ratio
-
-Nếu có `referencePixels` và `referenceMm`, worker sẽ tính thêm đơn vị mm. Mặc định `referencePixels` được hiểu là số pixel trên ảnh gốc; nếu client gửi số pixel theo ảnh đã resize trong worker thì dùng `referencePixelSpace=processed`.
-
-## API Phân Tích Hạt
-
-```text
-POST /api/grain/analyze
-```
-
-Route yêu cầu bearer token giống các API có xác thực khác.
-
-Multipart form:
-
-- `image`: file JPG/PNG.
-- Các field tùy chọn từ client: calibration (`referencePixels`, `referenceMm`, `referencePixelSpace`, `referenceX1`, `referenceY1`, `referenceX2`, `referenceY2`).
-
-Các tham số xử lý hiện được cấu hình tập trung, không gửi từ web/mobile:
-
-```text
-maxSide
-pcIndex
-k
-rgbIndexWeight
-pcaMethod
-minArea
-maxArea
-minLength
-maxLength
-splitSensitivity
-openingRadius
-closingRadius
-noiseSize
-holeSize
-seednessThreshold
-maskSource
-dynamicThresholds
-markerShrinkFactor
-maskMinArea
-maxSegmentAspectRatio
-minSegmentSolidity
-minSegmentExtent
-referencePixels
-referenceMm
-referencePixelSpace
-```
-
-Web/mobile không expose và backend không nhận override các tham số xử lý từ request public. Cấu hình mặc định nằm ở:
+Node reads this file through:
 
 ```text
 backend/src/config/grain.defaults.js
 ```
 
-Khi deploy có thể override bằng biến môi trường `GRAIN_DEFAULT_PARAMS_JSON`, ví dụ:
+Python reads the same file through:
 
-```env
-GRAIN_DEFAULT_PARAMS_JSON={"maskSource":"hybrid","maxSide":1800,"splitSensitivity":7}
+```text
+backend/python/grain_pipeline/config.py
 ```
 
-Để đổi nhanh theo môi trường, dùng `GRAIN_PROCESS_PROFILE`:
+`GRAIN_DEFAULT_PARAMS_JSON` can override defaults at runtime. `GRAIN_YOLO_MODEL` can override the YOLO model path.
 
-```env
-GRAIN_PROCESS_PROFILE=surface_quality # mặc định: auto mode, ảnh lớn hơn, hybrid; dense-pile sẽ tự tune khi cần
-GRAIN_PROCESS_PROFILE=surface_pile # nhanh hơn quality, ít over-seg hơn seed_fast nhưng có thể bỏ sót
-GRAIN_PROCESS_PROFILE=seed_fast    # nhanh nhất nhưng dễ over-seg texture, chỉ hợp ảnh rất sạch
-GRAIN_PROCESS_PROFILE=balanced     # hybrid mask + dense watershed, ổn hơn khi nền khó
-GRAIN_PROCESS_PROFILE=dense_fast   # ép dense-pile, giảm maxSide cho ảnh đống hạt dày
-GRAIN_PROCESS_PROFILE=sam_instances # chỉ dùng khi thật sự cần SAM instance, chậm hơn đáng kể
+## Model Placement
+
+Put the trained YOLOv8 segmentation model here:
+
+```text
+backend/model/best.onnx
 ```
 
-Profile `surface_quality` không ép một thuật toán cho mọi ảnh. Worker đo tỷ lệ foreground, số component, edge/contrast và seedness để tự phân loại bối cảnh ảnh trong `segmentation.image_profile`, rồi mới chọn foreground/dense-pile và tự chỉnh tham số. Khi vào dense-pile, nó thử nhiều tổ hợp marker/peak và chọn cấu hình có score tốt nhất trong `segmentation.dense_auto_tune`.
+or:
 
-Response trả về:
+```text
+backend/model/best.pt
+```
 
-- `summary`: thống kê tổng quan.
-- `measurements`: danh sách từng hạt.
-- `csv`: nội dung CSV.
-- `overlay_png_base64`: ảnh overlay kết quả.
-- `cluster_png_base64`, `mask_png_base64`, `seed_mask_png_base64`, `kmeans_mask_png_base64`, `labels_png_base64`: ảnh debug.
-- `segmentation`: thông tin marker, mask pixels, thresholds và số segment trước lọc.
+The worker resolves models in this order:
+
+1. `GRAIN_YOLO_MODEL`, if set.
+2. `backend/model/best.onnx`.
+3. `backend/model/best.pt`.
+4. `yolov8n-seg.pt` fallback for development.
+
+Model binaries are ignored by git; keep only [backend/model/README.md](backend/model/README.md) and `.gitkeep` committed.
+
+## API
+
+```text
+POST /api/grain/analyze
+```
+
+Multipart fields:
+
+- `image`: JPG/PNG file.
+- `referencePixels`, `referenceMm`, `referencePixelSpace`: optional calibration.
 
 Health endpoint:
 
@@ -184,57 +92,29 @@ Health endpoint:
 GET /api/grain/health
 ```
 
-## Công Nghệ
+## Local Setup
 
-- Backend: Node.js, Express, Mongoose, Socket.IO, JWT, Zod, Multer
-- Image processing: Python, OpenCV, NumPy, SciPy, scikit-image, scikit-learn, Pillow
-- Web: React, Vite, Material UI, Zustand, Axios
-- Mobile: Flutter, Riverpod, GoRouter, Dio
-- Database: MongoDB
-
-## Cấu Hình Môi Trường
-
-Các biến môi trường mẫu nằm trong `.env.example`.
-
-Các biến quan trọng:
-
-```env
-PORT=3000
-MONGODB_URI=mongodb://localhost:27017/seed_db
-JWT_ACCESS_SECRET=your_access_secret_here
-JWT_REFRESH_SECRET=your_refresh_secret_here
-ALLOWED_ORIGINS=http://localhost:5173
-GRAIN_PROCESS_TIMEOUT_MS=180000
-GRAIN_PYTHON_BIN=
-GRAIN_PROCESS_PROFILE=surface_quality
-GRAIN_DEFAULT_PARAMS_JSON=
-```
-
-Nếu `GRAIN_PYTHON_BIN` không được đặt, backend sẽ ưu tiên Python trong `backend/.venv`, sau đó fallback sang `python` hoặc `python3`.
-
-## Chạy Local
-
-Yêu cầu:
+Requirements:
 
 - Node.js >= 18
 - npm >= 9
 - MongoDB
-- Python 3.10+ cho image worker
-- Flutter SDK nếu chạy mobile
+- Python 3.10+
+- Flutter SDK for mobile
 
-Cài dependencies Node:
+Install Node dependencies:
 
 ```bash
 npm install
 ```
 
-Tạo file môi trường:
+Create local env:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Tạo Python virtual environment thủ công nếu không dùng `run.bat`:
+Install Python worker dependencies:
 
 ```powershell
 cd backend
@@ -243,35 +123,26 @@ python -m venv .venv
 cd ..
 ```
 
-Chạy backend và web:
+Run backend and web:
 
 ```bash
 npm run dev
 ```
 
-Chạy riêng:
+Run separately:
 
 ```bash
 npm run dev:backend
 npm run dev:web
 ```
 
-URL mặc định:
+Build web:
 
-- Web: `http://localhost:5173`
-- Backend: `http://localhost:3000`
-- Backend health: `http://localhost:3000/health`
-- Grain worker health: `http://localhost:3000/api/grain/health`
-
-Trên Windows có thể dùng launcher:
-
-```powershell
-.\run.bat
+```bash
+npm run build:web
 ```
 
-Launcher sẽ tự tạo `backend/.venv` và cài Python dependencies nếu virtual environment chưa tồn tại.
-
-## Chạy Mobile
+Run mobile:
 
 ```bash
 cd mobile
@@ -279,33 +150,21 @@ flutter pub get
 flutter run
 ```
 
-Android emulator dùng backend mặc định:
+The mobile app automatically discovers the backend on the local network. It first uses an explicit `BASE_URL` when provided, then tries the Android emulator URL, then scans the current LAN for the backend health check on port `3000`.
+
+Backend URLs for debugging:
 
 ```text
+http://localhost:3000
 http://10.0.2.2:3000/api
 ```
 
-Khi chạy trên thiết bị thật, truyền IP của máy đang chạy backend:
+For a physical device, keep the phone and backend computer on the same Wi-Fi network and make sure the firewall allows inbound traffic on port `3000`. `BASE_URL` is still supported for overrides:
 
 ```bash
 flutter run --dart-define=BASE_URL=http://192.168.1.x:3000/api
 ```
 
-## Scripts
+## Local Files Kept Out Of Git
 
-```bash
-npm run dev              # chạy backend + web
-npm run dev:backend      # chạy backend
-npm run dev:web          # chạy web
-npm run build:web        # build web
-npm run install:all      # cài dependencies workspace
-```
-
-## Vận Hành Và Bảo Mật
-
-- `.env` và các file môi trường local không được commit.
-- `.env.example` là contract cấu hình cho môi trường mới.
-- JWT secrets mặc định chỉ phù hợp cho development.
-- API phân tích ảnh giới hạn upload JPG/PNG và file size 25 MB.
-- Python worker chạy trong thư mục tạm và backend xóa file tạm sau khi xử lý.
-- Kết quả đo phụ thuộc chất lượng ảnh, ánh sáng, nền và tham số lọc; với nền phức tạp nên kiểm tra thêm preview `Mask`, `Clusters` và `Labels`.
+The repo ignores local runtime artifacts such as `.env`, virtualenvs, `node_modules`, build outputs, logs, Python cache, model weights, and backend storage artifacts.
