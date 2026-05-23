@@ -11,7 +11,7 @@ import { useAuthStore } from '@/store/auth.store.js';
 
 const DRAWER_WIDTH = 260;
 
-const navItems = [
+const accountNavItems = [
   { label: 'Trang chủ', path: '/dashboard' },
   { label: 'Lưu trữ', path: '/storage' },
   { label: 'Tài khoản', path: '/account' },
@@ -19,9 +19,10 @@ const navItems = [
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, logout } = useAuthStore();
+  const { user, isGuest, logout } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const navItems = isGuest ? accountNavItems.slice(0, 1) : accountNavItems;
 
   const handleLogout = async () => {
     try {
@@ -38,11 +39,11 @@ export default function Layout() {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <Avatar sx={{ width: 36, height: 36, bgcolor: 'secondary.main', fontSize: 14 }}>
-          {user?.name?.[0]?.toUpperCase() || 'U'}
+          {isGuest ? 'G' : (user?.name?.[0]?.toUpperCase() || 'U')}
         </Avatar>
         <Box flex={1} minWidth={0}>
-          <Typography variant="body2" fontWeight={650} noWrap>{user?.name}</Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>{user?.email}</Typography>
+          <Typography variant="body2" fontWeight={650} noWrap>{isGuest ? 'Khách' : user?.name}</Typography>
+          <Typography variant="caption" color="text.secondary" noWrap>{isGuest ? 'Không lưu trên server' : user?.email}</Typography>
         </Box>
       </Box>
 

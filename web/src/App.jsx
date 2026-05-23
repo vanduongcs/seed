@@ -11,6 +11,14 @@ const PrivateRoute = ({ children }) => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const accessToken = useAuthStore((s) => s.accessToken);
   const refreshToken = useAuthStore((s) => s.refreshToken);
+  const isGuest = useAuthStore((s) => s.isGuest);
+  return (isAuthenticated && (accessToken || refreshToken)) || isGuest ? children : <Navigate to="/login" replace />;
+};
+
+const AuthenticatedRoute = ({ children }) => {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const refreshToken = useAuthStore((s) => s.refreshToken);
   return isAuthenticated && (accessToken || refreshToken) ? children : <Navigate to="/login" replace />;
 };
 
@@ -29,8 +37,8 @@ export default function App() {
       <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="storage" element={<StoragePage />} />
-        <Route path="account" element={<AccountPage />} />
+        <Route path="storage" element={<AuthenticatedRoute><StoragePage /></AuthenticatedRoute>} />
+        <Route path="account" element={<AuthenticatedRoute><AccountPage /></AuthenticatedRoute>} />
         <Route path="chat" element={<Navigate to="/dashboard" replace />} />
         <Route path="chat/:id" element={<Navigate to="/dashboard" replace />} />
       </Route>

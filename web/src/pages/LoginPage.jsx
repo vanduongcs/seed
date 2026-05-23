@@ -11,6 +11,7 @@ import { api } from '@/api/axios.js';
 export default function LoginPage() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const continueAsGuest = useAuthStore((s) => s.continueAsGuest);
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPass, setShowPass] = useState(false);
@@ -41,6 +42,11 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleContinueAsGuest = () => {
+    continueAsGuest();
+    navigate('/dashboard');
   };
 
   return (
@@ -225,6 +231,16 @@ export default function LoginPage() {
             }}
           >
             {loading ? <CircularProgress size={22} sx={{ color: '#FFFFFF' }} /> : 'Đăng nhập'}
+          </Button>
+          <Button
+            type="button"
+            variant="outlined"
+            fullWidth
+            disabled={loading}
+            onClick={handleContinueAsGuest}
+            sx={{ height: '48px', borderRadius: '10px', textTransform: 'none', fontWeight: 700 }}
+          >
+            Tiếp tục không đăng nhập
           </Button>
         </Box>
 

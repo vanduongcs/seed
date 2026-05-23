@@ -8,13 +8,16 @@ export const useAuthStore = create(
       accessToken: null,
       refreshToken: null,
       isAuthenticated: false,
+      isGuest: false,
       setAuth: (user, accessToken, refreshToken) =>
-        set({ user, accessToken, refreshToken, isAuthenticated: true }),
+        set({ user, accessToken, refreshToken, isAuthenticated: true, isGuest: false }),
+      continueAsGuest: () =>
+        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false, isGuest: true }),
       setUser: (user) => set({ user }),
       setTokens: (accessToken, refreshToken) =>
         set({ accessToken, refreshToken, isAuthenticated: Boolean(accessToken || refreshToken) }),
       logout: () =>
-        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false }),
+        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false, isGuest: false }),
     }),
     {
       name: 'seed-auth',
@@ -24,6 +27,7 @@ export const useAuthStore = create(
         accessToken: s.accessToken,
         refreshToken: s.refreshToken,
         isAuthenticated: s.isAuthenticated,
+        isGuest: s.isGuest,
       }),
     }
   )

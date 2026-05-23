@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Box, Grid } from '@mui/material';
 
 import { api, ensureFreshAccessToken } from '@/api/axios.js';
+import { useAuthStore } from '@/store/auth.store.js';
 import { DashboardPreviewPanel } from '@/components/grain/DashboardPreviewPanel.jsx';
 import { DashboardResultPanel } from '@/components/grain/DashboardResultPanel.jsx';
 import { formatMeasure, safeStem } from '@/components/grain/format.js';
@@ -10,6 +11,7 @@ import { StatCard } from '@/components/grain/StatCard.jsx';
 const emptyCalibration = { start: null, end: null, referenceMm: '' };
 
 export default function DashboardPage() {
+  const isGuest = useAuthStore((state) => state.isGuest);
   const videoRef = useRef(null);
   const imageRef = useRef(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -162,8 +164,8 @@ export default function DashboardPage() {
       }
 
       setProgress(20);
-      setProgressPhase('Xác thực phiên');
-      await ensureFreshAccessToken(true);
+      setProgressPhase(isGuest ? 'Chuẩn bị xử lý' : 'Xác thực phiên');
+      if (!isGuest) await ensureFreshAccessToken(true);
 
       const formData = new FormData();
       formData.append('image', file);
@@ -181,7 +183,7 @@ export default function DashboardPage() {
       setProgressPhase('Phân tích ảnh bằng YOLO ONNX');
       startProgressDrift();
 
-      const { data } = await api.post('/grain/analyze', formData, {
+      const { data } = await api.post(isGuest ? '/grain/analyze-public' : '/grain/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 300000,
       });
