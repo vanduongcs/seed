@@ -21,6 +21,12 @@ const isAuthRequest = (url = '') => (
   url.includes('/auth/refresh')
 );
 
+const isPublicRequest = (url = '') => (
+  isAuthRequest(url) ||
+  url.includes('/grain/analyze-public') ||
+  url.includes('/grain/health')
+);
+
 const clearSession = () => {
   useAuthStore.getState().logout();
   if (window.location.pathname !== '/login') {
@@ -85,7 +91,7 @@ export const ensureFreshAccessToken = async (forceRefresh = false) => {
 };
 
 api.interceptors.request.use(async (config) => {
-  if (isAuthRequest(config.url || '')) return config;
+  if (isPublicRequest(config.url || '')) return config;
 
   const token = await ensureFreshAccessToken();
   if (token) {
@@ -99,10 +105,10 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    const authRequest = isAuthRequest(original?.url || '');
+    const publicRequest = isPublicRequest(original?.url || '');
     const refreshToken = useAuthStore.getState().refreshToken;
 
-    if (original && error.response?.status === 401 && !original._retry && !authRequest && refreshToken) {
+    if (original && error.response?.status === 401 && !original._retry && !publicRequest && refreshToken) {
       original._retry = true;
       try {
         const accessToken = await ensureFreshAccessToken(true);
@@ -114,7 +120,7 @@ api.interceptors.response.use(
       }
     }
 
-    if (error.response?.status === 401 && !authRequest) {
+    if (error.response?.status === 401 && !publicRequest) {
       clearSession();
     }
 
