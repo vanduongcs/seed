@@ -153,7 +153,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   String _fileName = 'camera-frame.png';
   GrainAnalysisResult? _result;
   String? _error;
-  String _previewMode = 'samMask';
+  String _previewMode = 'overlay';
   bool _busy = false;
   double _progress = 0;
   String _progressPhase = '';
@@ -219,7 +219,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       _fileName = file.name;
       _result = null;
       _error = null;
-      _previewMode = 'samMask';
+      _previewMode = 'overlay';
     });
   }
 
@@ -480,10 +480,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _previewChip(mode: 'samMask', label: 'Hình dạng'),
-                  _previewChip(mode: 'labels', label: 'Đánh số'),
                   _previewChip(mode: 'overlay', label: 'Đánh dấu'),
-                  _previewChip(mode: 'mask', label: 'Mặt nạ'),
+                  _previewChip(mode: 'mask', label: 'Hình dạng'),
+                  _previewChip(mode: 'labels', label: 'Đánh số'),
                 ],
               ),
               const SizedBox(height: 12),
@@ -599,7 +598,7 @@ class _SegmentationFactsState extends ConsumerState<_SegmentationFacts> {
   }
 }
 
-class _ReferenceImageSelector extends StatelessWidget {
+class _ReferenceImageSelector extends StatefulWidget {
   final Uint8List bytes;
   final Size? imageSize;
   final Offset? start;
@@ -617,8 +616,16 @@ class _ReferenceImageSelector extends StatelessWidget {
   });
 
   @override
+  State<_ReferenceImageSelector> createState() =>
+      _ReferenceImageSelectorState();
+}
+
+class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
+  String? _dragTarget; // 'start', 'end', or 'new'
+
+  @override
   Widget build(BuildContext context) {
-    final sourceSize = imageSize;
+    final sourceSize = widget.imageSize;
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
@@ -646,17 +653,53 @@ class _ReferenceImageSelector extends StatelessWidget {
             }
 
             return GestureDetector(
-              onPanStart: enabled
+              onPanStart: widget.enabled
                   ? (details) {
-                      final point = imagePoint(details.localPosition);
-                      if (point != null) onChanged(point, point);
+                      final local = details.localPosition;
+                      final point = imagePoint(local);
+                      if (point == null) return;
+
+                      if (widget.start != null && widget.end != null) {
+                        // Convert start and end back to local canvas coordinates
+                        Offset canvasPoint(Offset imgPt) => Offset(
+                              fittedRect.left +
+                                  imgPt.dx / sourceSize!.width * fittedRect.width,
+                              fittedRect.top +
+                                  imgPt.dy / sourceSize.height * fittedRect.height,
+                            );
+
+                        final startCanvas = canvasPoint(widget.start!);
+                        final endCanvas = canvasPoint(widget.end!);
+
+                        final distStart = (local - startCanvas).distance;
+                        final distEnd = (local - endCanvas).distance;
+
+                        if (distStart < 35 && distStart < distEnd) {
+                          _dragTarget = 'start';
+                        } else if (distEnd < 35) {
+                          _dragTarget = 'end';
+                        } else {
+                          _dragTarget = 'new';
+                          widget.onChanged(point, point);
+                        }
+                      } else {
+                        _dragTarget = 'new';
+                        widget.onChanged(point, point);
+                      }
                     }
                   : null,
-              onPanUpdate: enabled
+              onPanUpdate: widget.enabled
                   ? (details) {
-                      if (start == null) return;
                       final point = imagePoint(details.localPosition);
-                      if (point != null) onChanged(start!, point);
+                      if (point == null) return;
+
+                      if (_dragTarget == 'start') {
+                        if (widget.end != null) widget.onChanged(point, widget.end!);
+                      } else if (_dragTarget == 'end') {
+                        if (widget.start != null) widget.onChanged(widget.start!, point);
+                      } else {
+                        if (widget.start != null) widget.onChanged(widget.start!, point);
+                      }
                     }
                   : null,
               child: Stack(
@@ -664,14 +707,14 @@ class _ReferenceImageSelector extends StatelessWidget {
                 children: [
                   ColoredBox(
                     color: const Color(0xFFF8FAF7),
-                    child: Image.memory(bytes, fit: BoxFit.contain),
+                    child: Image.memory(widget.bytes, fit: BoxFit.contain),
                   ),
                   CustomPaint(
                     painter: _ReferenceLinePainter(
                       fittedRect: fittedRect,
                       imageSize: sourceSize,
-                      start: start,
-                      end: end,
+                      start: widget.start,
+                      end: widget.end,
                     ),
                   ),
                 ],
@@ -718,13 +761,37 @@ class _ReferenceLinePainter extends CustomPainter {
         );
     final a = displayPoint(start!);
     final b = displayPoint(end!);
-    final paint = Paint()
+
+    final paintLine = Paint()
       ..color = const Color(0xFF2563EB)
-      ..strokeWidth = 3
+      ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round;
-    canvas.drawLine(a, b, paint);
-    canvas.drawCircle(a, 5, paint);
-    canvas.drawCircle(b, 5, paint);
+
+    final paintHandleInner = Paint()
+      ..color = const Color(0xFF2563EB)
+      ..style = PaintingStyle.fill;
+
+    final paintHandleOuter = Paint()
+      ..color = const Color(0x332563EB) // 20% opacity blue glow
+      ..style = PaintingStyle.fill;
+
+    final paintBorder = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    // Draw the connection line
+    canvas.drawLine(a, b, paintLine);
+
+    // Draw handle A
+    canvas.drawCircle(a, 18, paintHandleOuter); // Glowing background
+    canvas.drawCircle(a, 7, paintHandleInner);  // Center dot
+    canvas.drawCircle(a, 7, paintBorder);      // High contrast white ring
+
+    // Draw handle B
+    canvas.drawCircle(b, 18, paintHandleOuter); // Glowing background
+    canvas.drawCircle(b, 7, paintHandleInner);  // Center dot
+    canvas.drawCircle(b, 7, paintBorder);      // High contrast white ring
   }
 
   @override

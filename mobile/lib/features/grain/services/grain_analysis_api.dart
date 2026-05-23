@@ -27,8 +27,48 @@ class GrainAnalysisApi {
     double? referenceY2,
   }) async {
     final guestMode = await isGuestMode();
-    GrainAnalysisResult? localResult;
+
+    // 1. Try Server first (Online Mode)
     try {
+      final form = FormData.fromMap({
+        'image': MultipartFile.fromBytes(bytes, filename: fileName),
+        if (referencePixels != null && referencePixels > 0)
+          'referencePixels': referencePixels.toString(),
+        if (referenceMm != null && referenceMm > 0)
+          'referenceMm': referenceMm.toString(),
+        if (referencePixels != null && referencePixels > 0)
+          'referencePixelSpace': 'original',
+        if (referenceX1 != null) 'referenceX1': referenceX1.toString(),
+        if (referenceY1 != null) 'referenceY1': referenceY1.toString(),
+        if (referenceX2 != null) 'referenceX2': referenceX2.toString(),
+        if (referenceY2 != null) 'referenceY2': referenceY2.toString(),
+      });
+
+      final response = await _client.post(
+        guestMode ? '/grain/analyze-public' : '/grain/analyze',
+        data: form,
+        options: Options(
+          contentType: 'multipart/form-data',
+          sendTimeout: const Duration(seconds: 300),
+          receiveTimeout: const Duration(seconds: 300),
+        ),
+      );
+
+      final result = GrainAnalysisResult.fromJson(
+        Map<String, dynamic>.from(response.data['data'] as Map),
+      );
+
+      // Save to local storage for local history viewing (saved on phone)
+      await _localStore.save({
+        'clientRunId': result.run['id']?.toString() ?? '',
+        'sourceFileName': fileName,
+        'createdAt': DateTime.now().toIso8601String(),
+        'result': result.toJson(),
+      });
+
+      return result;
+    } catch (_) {
+      // 2. Fallback to Local TFLite (Offline Mode)
       final offlineResult = await _offlineAnalyzer.analyze(
         bytes,
         referencePixels: referencePixels,
@@ -38,62 +78,28 @@ class GrainAnalysisApi {
         referenceX2: referenceX2,
         referenceY2: referenceY2,
       );
-      localResult = GrainAnalysisResult.fromJson(offlineResult.asApiJson(fileName));
-    } catch (_) {
-      // Fall back to server analysis if this device cannot execute TFLite.
-    }
-    if (localResult != null) {
+
+      final localResult = GrainAnalysisResult.fromJson(
+        offlineResult.asApiJson(fileName),
+      );
+
       await _localStore.save({
         'clientRunId': localResult.run['id']?.toString() ?? '',
         'sourceFileName': fileName,
         'createdAt': DateTime.now().toIso8601String(),
         'result': localResult.toJson(),
       });
+
       if (!guestMode) {
         try {
           await syncPendingRuns();
         } catch (_) {
-          // Preserve local runs until the next successful authenticated sync.
+          // Will auto-sync later
         }
       }
+
       return localResult;
     }
-
-    final form = FormData.fromMap({
-      'image': MultipartFile.fromBytes(bytes, filename: fileName),
-      if (referencePixels != null && referencePixels > 0)
-        'referencePixels': referencePixels.toString(),
-      if (referenceMm != null && referenceMm > 0)
-        'referenceMm': referenceMm.toString(),
-      if (referencePixels != null && referencePixels > 0)
-        'referencePixelSpace': 'original',
-      if (referenceX1 != null) 'referenceX1': referenceX1.toString(),
-      if (referenceY1 != null) 'referenceY1': referenceY1.toString(),
-      if (referenceX2 != null) 'referenceX2': referenceX2.toString(),
-      if (referenceY2 != null) 'referenceY2': referenceY2.toString(),
-    });
-
-    final response = await _client.post(
-      guestMode ? '/grain/analyze-public' : '/grain/analyze',
-      data: form,
-      options: Options(
-        contentType: 'multipart/form-data',
-        sendTimeout: const Duration(seconds: 300),
-        receiveTimeout: const Duration(seconds: 300),
-      ),
-    );
-    final result = GrainAnalysisResult.fromJson(
-      Map<String, dynamic>.from(response.data['data'] as Map),
-    );
-    if (guestMode) {
-      await _localStore.save({
-        'clientRunId': result.run['id']?.toString() ?? '',
-        'sourceFileName': fileName,
-        'createdAt': DateTime.now().toIso8601String(),
-        'result': result.toJson(),
-      });
-    }
-    return result;
   }
 
   Future<GrainRunDetail> getRun(String id) async {
@@ -219,9 +225,9 @@ class GrainAnalysisResult {
   String previewWithFallback(String key) {
     final selected = previewBase64(key);
     if (selected.isNotEmpty) return selected;
-    if (key == 'samMask') {
-      final mask = previewBase64('mask');
-      if (mask.isNotEmpty) return mask;
+    if (key == 'mask') {
+      final samMask = previewBase64('samMask');
+      if (samMask.isNotEmpty) return samMask;
       final overlay = previewBase64('overlay');
       if (overlay.isNotEmpty) return overlay;
     }

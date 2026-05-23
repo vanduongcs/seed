@@ -232,9 +232,8 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
                 children: [
                   _chip('original', 'Ảnh gốc'),
                   _chip('overlay', 'Đánh dấu'),
-                  _chip('samMask', 'Hình dạng'),
+                  _chip('mask', 'Hình dạng'),
                   _chip('labels', 'Đánh số'),
-                  _chip('mask', 'Mặt nạ'),
                 ],
               ),
               const SizedBox(height: 12),
