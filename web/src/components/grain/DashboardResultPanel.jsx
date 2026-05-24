@@ -3,7 +3,7 @@ import { Alert, Box, Button, Card, CardContent, Divider, Stack, Typography, Coll
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-import { formatNumber } from './format.js';
+import { formatAnalysisMethod, formatMeasure, formatNumber } from './format.js';
 import { ResultRow } from './ResultRow.jsx';
 
 export const DashboardResultPanel = ({
@@ -48,6 +48,12 @@ export const DashboardResultPanel = ({
             <Stack spacing={1.2}>
               <ResultRow label="Mã lần quét" value={result.run?.id ? result.run.id.slice(-8).toUpperCase() : '-'} />
               <ResultRow label="Tổng số hạt đo được" value={result.segmentation?.segment_count ?? result.summary?.count ?? '-'} />
+              {(result.summary?.qc?.suspect_count ?? 0) > 0 && (
+                <Alert severity="warning">
+                  QC phát hiện {result.summary.qc.suspect_count} vùng nghi nhiễu/outlier. {result.summary.qc.robust_used_for_reporting !== false ? `ĐLC báo cáo tính trên ${result.summary.qc.inlier_count} hạt sau QC.` : 'Tỷ lệ nghi ngờ cao; ĐLC báo cáo giữ nguyên SD thô, không tự loại vùng.'} Kiểm tra ảnh đánh số trước khi kết luận.
+                  {result.summary.qc.suspect_ids?.length ? ` ID nghi ngờ: ${result.summary.qc.suspect_ids.slice(0, 8).map((id) => `#${id}`).join(', ')}${result.summary.qc.suspect_ids.length > 8 ? ', ...' : ''}.` : ''}
+                </Alert>
+              )}
               
               <Divider sx={{ my: 1 }} />
               
@@ -63,7 +69,7 @@ export const DashboardResultPanel = ({
 
               <Collapse in={showAdvanced}>
                 <Stack spacing={1.2} sx={{ pl: 1.5, borderLeft: '2px solid', borderColor: 'divider', mb: 1.5 }}>
-                  <ResultRow label="Phương thức phân tích" value="Phân đoạn instance YOLO ONNX trên server" />
+                  <ResultRow label="Phương thức phân tích" value={formatAnalysisMethod(result.segmentation)} />
                   <ResultRow label="Độ tin cậy nhận dạng" value={formatPercent(result.segmentation?.confidence)} />
                   <ResultRow label="Độ khớp mặt nạ (IoU)" value={formatPercent(result.segmentation?.iou)} />
                   <ResultRow label="Quét phân mảnh (Tiled)" value={result.segmentation?.tiled_inference ? 'Đang bật' : 'Đang tắt'} />
@@ -77,6 +83,15 @@ export const DashboardResultPanel = ({
                     label="Vật mốc đã loại khỏi thống kê"
                     value={String(result.segmentation?.mask_filter?.excluded_reference_object_count ?? 0)}
                   />
+                  <ResultRow
+                    label="ĐLC dài thô / sau QC"
+                    value={`${formatMeasure(result.summary?.std_length_mm, 'mm', result.summary?.std_length_px, 'px')} / ${formatMeasure(result.summary?.robust_std_length_mm, 'mm', result.summary?.robust_std_length_px, 'px')}`}
+                  />
+                  <ResultRow
+                    label="ĐLC rộng thô / sau QC"
+                    value={`${formatMeasure(result.summary?.std_width_mm, 'mm', result.summary?.std_width_px, 'px')} / ${formatMeasure(result.summary?.robust_std_width_mm, 'mm', result.summary?.robust_std_width_px, 'px')}`}
+                  />
+                  <ResultRow label="Vùng nghi nhiễu (QC)" value={String(result.summary?.qc?.suspect_count ?? 0)} />
                 </Stack>
               </Collapse>
 

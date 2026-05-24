@@ -75,3 +75,8 @@ coverage/
 /*.pt
 /*.onnx
 /test_outputs/
+
+# Mobile offline runtime intentionally ships the production ONNX model.
+!mobile/assets/models/*.onnx
+# Azure/server builds require the same production model in source artifacts.
+!backend/model/best.onnx

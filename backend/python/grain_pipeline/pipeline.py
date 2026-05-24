@@ -80,6 +80,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
         },
         "segmentation": {
             "pipeline":                "yolo_sam_onnx",
+            "execution":               "server_onnxruntime",
             "model":                   model_path(params),
             "refiner":                 refiner_name,
             "refiner_applied":         use_sam,

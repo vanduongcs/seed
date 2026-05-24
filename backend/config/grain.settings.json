@@ -64,7 +64,7 @@
     "centroid_x", "centroid_y",
     "bbox_x", "bbox_y", "bbox_w", "bbox_h",
     "angle_deg", "solidity", "extent", "aspect_ratio",
-    "confidence", "class_id", "class_name"
+    "confidence", "class_id", "class_name", "qc_outlier", "qc_reason"
   ],
   "palette": [
     [45,  108, 191],

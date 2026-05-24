@@ -1,6 +1,6 @@
 {
-    "name": "seed_mobile",
-    "short_name": "seed_mobile",
+    "name": "Seed",
+    "short_name": "Seed",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -85,7 +85,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.82),
+                      color: Colors.white.withValues(alpha: 0.82),
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(
                         color: const Color(0x282F6B4F), // rgba(47, 107, 79, 0.16)
@@ -93,7 +93,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: Colors.black.withValues(alpha: 0.04),
                           blurRadius: 30,
                           offset: const Offset(0, 15),
                         ),
@@ -119,11 +119,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                     color: const Color(0x1F2F6B4F), // rgba(47, 107, 79, 0.12)
                                     width: 1.2,
                                   ),
-                                  boxShadow: [
+                                  boxShadow: const [
                                     BoxShadow(
-                                      color: const Color(0x0A2F6B4F),
+                                      color: Color(0x0A2F6B4F),
                                       blurRadius: 8,
-                                      offset: const Offset(0, 2),
+                                      offset: Offset(0, 2),
                                     ),
                                   ],
                                 ),

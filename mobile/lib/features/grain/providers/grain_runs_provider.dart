@@ -11,24 +11,14 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
     const storage = FlutterSecureStorage();
     if (await storage.read(key: guestModeKey) == 'true') {
       final localRuns = await LocalGrainRunStore().readAll();
-      return localRuns.map((item) {
-        final result = Map<String, dynamic>.from(item['result'] as Map? ?? {});
-        final run = Map<String, dynamic>.from(result['run'] as Map? ?? {});
-        return GrainRun.fromJson({
-          ...run,
-          'sourceFileName': item['sourceFileName'] ?? run['sourceFileName'],
-          'createdAt': item['createdAt'] ?? run['createdAt'],
-          'summary': result['summary'],
-          'image': result['image'],
-        });
-      }).toList();
+      return _localGrainRuns(localRuns);
     }
     final localStore = LocalGrainRunStore();
-    final pending = await localStore.readAll();
+    final pending = await localStore.readPendingForSync();
     if (pending.isNotEmpty) {
       try {
         await ApiClient().post('/grain/runs/import', data: {'items': pending});
-        await localStore.clear();
+        await localStore.removePendingForSync();
       } catch (_) {
         // Keep pending local runs and retry next time storage refreshes.
       }
@@ -42,6 +32,10 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
             (item) => GrainRun.fromJson(Map<String, dynamic>.from(item as Map)))
         .toList();
   } on DioException catch (error) {
+    final localRuns = await LocalGrainRunStore().readAll();
+    if (localRuns.isNotEmpty && error.response?.statusCode != 401) {
+      return _localGrainRuns(localRuns);
+    }
     if (error.response?.statusCode == 401) {
       // Don't clear tokens here — the ApiClient interceptor already
       // attempted a transparent refresh. If it still failed, show an
@@ -54,6 +48,20 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
     throw GrainRunsException(_friendlyDioMessage(error));
   }
 });
+
+List<GrainRun> _localGrainRuns(List<Map<String, dynamic>> localRuns) {
+  return localRuns.map((item) {
+    final result = Map<String, dynamic>.from(item['result'] as Map? ?? {});
+    final run = Map<String, dynamic>.from(result['run'] as Map? ?? {});
+    return GrainRun.fromJson({
+      ...run,
+      'sourceFileName': item['sourceFileName'] ?? run['sourceFileName'],
+      'createdAt': item['createdAt'] ?? run['createdAt'],
+      'summary': result['summary'],
+      'image': result['image'],
+    });
+  }).toList();
+}
 
 String _friendlyDioMessage(DioException error) {
   return switch (error.type) {
@@ -87,6 +95,10 @@ class GrainRun {
   final double? meanLengthMm;
   final double? meanWidthMm;
   final double? meanAreaMm2;
+  final double? qcStdLengthPx;
+  final double? qcStdWidthPx;
+  final double? qcStdLengthMm;
+  final double? qcStdWidthMm;
   final int imageWidth;
   final int imageHeight;
 
@@ -101,6 +113,10 @@ class GrainRun {
     this.meanLengthMm,
     this.meanWidthMm,
     this.meanAreaMm2,
+    this.qcStdLengthPx,
+    this.qcStdWidthPx,
+    this.qcStdLengthMm,
+    this.qcStdWidthMm,
     required this.imageWidth,
     required this.imageHeight,
   });
@@ -108,6 +124,11 @@ class GrainRun {
   factory GrainRun.fromJson(Map<String, dynamic> json) {
     final summary = Map<String, dynamic>.from(json['summary'] as Map? ?? {});
     final image = Map<String, dynamic>.from(json['image'] as Map? ?? {});
+    final qc = Map<String, dynamic>.from(summary['qc'] as Map? ?? {});
+    final useRobustStats = qc['robust_used_for_reporting'] != false;
+    dynamic reportedStd(String rawKey, String robustKey) => useRobustStats
+        ? (summary[robustKey] ?? summary[rawKey])
+        : summary[rawKey];
     return GrainRun(
       id: json['id']?.toString() ?? '',
       sourceFileName: json['sourceFileName']?.toString() ?? 'image.png',
@@ -119,6 +140,14 @@ class GrainRun {
       meanLengthMm: _nullableDouble(summary['mean_length_mm']),
       meanWidthMm: _nullableDouble(summary['mean_width_mm']),
       meanAreaMm2: _nullableDouble(summary['mean_area_mm2']),
+      qcStdLengthPx:
+          _nullableStat(reportedStd('std_length_px', 'robust_std_length_px')),
+      qcStdWidthPx:
+          _nullableStat(reportedStd('std_width_px', 'robust_std_width_px')),
+      qcStdLengthMm:
+          _nullableStat(reportedStd('std_length_mm', 'robust_std_length_mm')),
+      qcStdWidthMm:
+          _nullableStat(reportedStd('std_width_mm', 'robust_std_width_mm')),
       imageWidth: _asInt(image['width']),
       imageHeight: _asInt(image['height']),
     );
@@ -140,5 +169,11 @@ double _asDouble(dynamic value) {
 double? _nullableDouble(dynamic value) {
   if (value == null) return null;
   final parsed = _asDouble(value);
-  return parsed.isFinite ? parsed : null;
+  return parsed.isFinite && parsed > 0 ? parsed : null;
+}
+
+double? _nullableStat(dynamic value) {
+  if (value == null) return null;
+  final parsed = _asDouble(value);
+  return parsed.isFinite && parsed >= 0 ? parsed : null;
 }

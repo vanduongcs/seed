@@ -164,18 +164,118 @@ def summary_for(measurements: list[dict]) -> dict:
             "mean_area_mm2": 0,
             "mean_length_mm": 0,
             "mean_width_mm": 0,
+            "std_area_px": 0,
+            "std_length_px": 0,
+            "std_width_px": 0,
+            "std_area_mm2": 0,
+            "std_length_mm": 0,
+            "std_width_mm": 0,
+            "robust_std_area_px": 0,
+            "robust_std_length_px": 0,
+            "robust_std_width_px": 0,
+            "robust_std_area_mm2": 0,
+            "robust_std_length_mm": 0,
+            "robust_std_width_mm": 0,
+            "cv_length_pct": 0,
+            "cv_width_pct": 0,
+            "qc": {
+                "method": "median_mad",
+                "suspect_count": 0,
+                "inlier_count": 0,
+                "suspect_ids": [],
+                "review_required": False,
+                "suspect_ratio": 0,
+                "robust_used_for_reporting": True,
+                "status": "ok",
+            },
         }
 
-    def mean(name: str) -> float:
-        return round(sum(float(item.get(name, 0) or 0) for item in measurements) / len(measurements), 6)
+    outlier_indices = _qc_outlier_indices(measurements)
+    suspect_ratio = len(outlier_indices) / len(measurements)
+    robust_used_for_reporting = suspect_ratio <= 0.05
+    for index, measurement in enumerate(measurements):
+        measurement["qc_outlier"] = index in outlier_indices
+        measurement["qc_reason"] = "size_outlier_mad" if index in outlier_indices else ""
+
+    inliers = [
+        measurement
+        for index, measurement in enumerate(measurements)
+        if index not in outlier_indices
+    ] or measurements
+
+    def values(items: list[dict], name: str) -> np.ndarray:
+        return np.asarray([float(item.get(name, 0) or 0) for item in items], dtype=np.float64)
+
+    def mean(items: list[dict], name: str) -> float:
+        return round(float(values(items, name).mean()), 6)
+
+    def std(items: list[dict], name: str) -> float:
+        data = values(items, name)
+        return round(float(data.std(ddof=1)) if len(data) > 1 else 0.0, 6)
+
+    def cv(items: list[dict], name: str) -> float:
+        average = float(values(items, name).mean())
+        return round(std(items, name) / average * 100, 3) if average > 0 else 0.0
 
     return {
         "count": len(measurements),
         "total_area_px": int(sum(int(item.get("area_px", 0) or 0) for item in measurements)),
-        "mean_area_px": mean("area_px"),
-        "mean_length_px": mean("length_px"),
-        "mean_width_px": mean("width_px"),
-        "mean_area_mm2": mean("area_mm2"),
-        "mean_length_mm": mean("length_mm"),
-        "mean_width_mm": mean("width_mm"),
+        "mean_area_px": mean(measurements, "area_px"),
+        "mean_length_px": mean(measurements, "length_px"),
+        "mean_width_px": mean(measurements, "width_px"),
+        "mean_area_mm2": mean(measurements, "area_mm2"),
+        "mean_length_mm": mean(measurements, "length_mm"),
+        "mean_width_mm": mean(measurements, "width_mm"),
+        "std_area_px": std(measurements, "area_px"),
+        "std_length_px": std(measurements, "length_px"),
+        "std_width_px": std(measurements, "width_px"),
+        "std_area_mm2": std(measurements, "area_mm2"),
+        "std_length_mm": std(measurements, "length_mm"),
+        "std_width_mm": std(measurements, "width_mm"),
+        "robust_mean_area_px": mean(inliers, "area_px"),
+        "robust_mean_length_px": mean(inliers, "length_px"),
+        "robust_mean_width_px": mean(inliers, "width_px"),
+        "robust_mean_area_mm2": mean(inliers, "area_mm2"),
+        "robust_mean_length_mm": mean(inliers, "length_mm"),
+        "robust_mean_width_mm": mean(inliers, "width_mm"),
+        "robust_std_area_px": std(inliers, "area_px"),
+        "robust_std_length_px": std(inliers, "length_px"),
+        "robust_std_width_px": std(inliers, "width_px"),
+        "robust_std_area_mm2": std(inliers, "area_mm2"),
+        "robust_std_length_mm": std(inliers, "length_mm"),
+        "robust_std_width_mm": std(inliers, "width_mm"),
+        "cv_length_pct": cv(inliers, "length_px"),
+        "cv_width_pct": cv(inliers, "width_px"),
+        "qc": {
+            "method": "median_mad",
+            "threshold": 3.5,
+            "suspect_count": len(outlier_indices),
+            "inlier_count": len(inliers),
+            "suspect_ids": [measurements[index]["id"] for index in sorted(outlier_indices)],
+            "review_required": bool(outlier_indices),
+            "suspect_ratio": round(suspect_ratio, 6),
+            "robust_used_for_reporting": robust_used_for_reporting,
+            "status": (
+                "review_required"
+                if not robust_used_for_reporting
+                else ("suspects_flagged" if outlier_indices else "ok")
+            ),
+        },
     }
+
+
+def _qc_outlier_indices(measurements: list[dict]) -> set[int]:
+    if len(measurements) < 5:
+        return set()
+    flagged: set[int] = set()
+    for name in ("area_px", "length_px", "width_px"):
+        data = np.asarray([float(item.get(name, 0) or 0) for item in measurements], dtype=np.float64)
+        median = float(np.median(data))
+        deviation = np.abs(data - median)
+        mad = float(np.median(deviation))
+        if mad <= 1e-9:
+            flagged.update(np.nonzero(deviation > 1e-9)[0].tolist())
+            continue
+        robust_z = 0.6745 * deviation / mad
+        flagged.update(np.nonzero(robust_z > 3.5)[0].tolist())
+    return flagged

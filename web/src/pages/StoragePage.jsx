@@ -34,9 +34,15 @@ import {
 } from '@mui/icons-material';
 
 import { api } from '@/api/axios.js';
-import { formatMeasure, safeStem } from '@/components/grain/format.js';
+import { formatAnalysisMethod, formatMeasure, safeStem } from '@/components/grain/format.js';
 import { useAuthStore } from '@/store/auth.store.js';
 import { deleteGuestRun, readGuestRuns } from '@/utils/guestRuns.js';
+
+function reportedStat(summary, rawKey, robustKey) {
+  return summary?.qc?.robust_used_for_reporting === false
+    ? summary?.[rawKey]
+    : (summary?.[robustKey] ?? summary?.[rawKey]);
+}
 
 export default function StoragePage() {
   const isGuest = useAuthStore((state) => state.isGuest);
@@ -166,8 +172,8 @@ export default function StoragePage() {
                       <TableCell>Ảnh đầu vào</TableCell>
                       <TableCell>Thời gian</TableCell>
                       <TableCell align="right">Số hạt</TableCell>
-                      <TableCell align="right">Dài trung bình</TableCell>
-                      <TableCell align="right">Rộng trung bình</TableCell>
+                      <TableCell align="right">ĐLC dài (báo cáo)</TableCell>
+                      <TableCell align="right">ĐLC rộng (báo cáo)</TableCell>
                       <TableCell>Trạng thái</TableCell>
                       <TableCell align="right">Thao tác</TableCell>
                     </TableRow>
@@ -190,8 +196,8 @@ export default function StoragePage() {
                         </TableCell>
                         <TableCell>{formatDate(run.createdAt)}</TableCell>
                         <TableCell align="right">{run.summary?.count ?? 0}</TableCell>
-                        <TableCell align="right">{formatMeasure(run.summary?.mean_length_mm, 'mm', run.summary?.mean_length_px, 'px')}</TableCell>
-                        <TableCell align="right">{formatMeasure(run.summary?.mean_width_mm, 'mm', run.summary?.mean_width_px, 'px')}</TableCell>
+                        <TableCell align="right">{formatMeasure(reportedStat(run.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(run.summary, 'std_length_px', 'robust_std_length_px'), 'px')}</TableCell>
+                        <TableCell align="right">{formatMeasure(reportedStat(run.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(run.summary, 'std_width_px', 'robust_std_width_px'), 'px')}</TableCell>
                         <TableCell>
                           <Chip label={isGuest ? 'Lưu local' : 'Hoàn tất'} size="small" color="success" variant="outlined" />
                         </TableCell>
@@ -296,8 +302,9 @@ export default function StoragePage() {
                   <ResultRow label="Tên tệp ảnh" value={detailRun?.sourceFileName || '-'} />
                   <ResultRow label="Thời gian quét" value={formatDate(detailRun?.createdAt)} />
                   <ResultRow label="Tổng số hạt đo được" value={detailResult.summary?.count ?? 0} />
-                  <ResultRow label="Chiều dài trung bình" value={formatMeasure(detailResult.summary?.mean_length_mm, 'mm', detailResult.summary?.mean_length_px, 'px')} />
-                  <ResultRow label="Chiều rộng trung bình" value={formatMeasure(detailResult.summary?.mean_width_mm, 'mm', detailResult.summary?.mean_width_px, 'px')} />
+                  <ResultRow label="ĐLC chiều dài (báo cáo)" value={formatMeasure(reportedStat(detailResult.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(detailResult.summary, 'std_length_px', 'robust_std_length_px'), 'px')} />
+                  <ResultRow label="ĐLC chiều rộng (báo cáo)" value={formatMeasure(reportedStat(detailResult.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(detailResult.summary, 'std_width_px', 'robust_std_width_px'), 'px')} />
+                  <ResultRow label="Vùng nghi nhiễu (QC)" value={String(detailResult.summary?.qc?.suspect_count ?? 0)} />
                   <ResultRow label="Tỷ lệ thước đo" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'Chưa thiết lập'} />
                   
                   <Divider sx={{ my: 1 }} />
@@ -314,7 +321,7 @@ export default function StoragePage() {
 
                   <Collapse in={showAdvanced}>
                     <Stack spacing={1.2} sx={{ pl: 1.5, borderLeft: '2px solid', borderColor: 'divider', my: 1 }}>
-                      <ResultRow label="Phương thức phân tích" value="Phân đoạn instance YOLO ONNX trên server" />
+                      <ResultRow label="Phương thức phân tích" value={formatAnalysisMethod(detailResult.segmentation)} />
                       {detailResult.segmentation?.confidence && (
                         <ResultRow label="Độ tin cậy nhận dạng" value={`${(Number(detailResult.segmentation.confidence) * 100).toFixed(0)}%`} />
                       )}

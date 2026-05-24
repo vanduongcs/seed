@@ -12,3 +12,9 @@ export const formatMeasure = (primary, primaryUnit, fallback, fallbackUnit) => {
 export const safeStem = (name = 'seed-image') => (
   name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_') || 'seed-image'
 );
+
+export const formatAnalysisMethod = (segmentation = {}) => (
+  segmentation.execution === 'mobile_onnxruntime'
+    ? 'Phân đoạn instance YOLO ONNX trên thiết bị'
+    : 'Phân đoạn instance YOLO ONNX trên server'
+);

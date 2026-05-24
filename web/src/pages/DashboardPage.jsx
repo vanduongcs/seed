@@ -245,6 +245,10 @@ export default function DashboardPage() {
   const activePreview = previewImages[previewMode] || result?.overlay_png_base64;
   const displayImage = activePreview ? `data:image/png;base64,${activePreview}` : previewUrl;
   const calibrationImage = previewUrl && !activePreview;
+  const useRobustStats = summary?.qc?.robust_used_for_reporting !== false;
+  const reportedStat = (rawKey, robustKey) => (
+    useRobustStats ? (summary?.[robustKey] ?? summary?.[rawKey]) : summary?.[rawKey]
+  );
 
   const stats = [
     {
@@ -253,19 +257,19 @@ export default function DashboardPage() {
       note: result ? 'Theo lần xử lý hiện tại' : 'Chưa có kết quả',
     },
     {
-      label: 'Diện tích trung bình',
-      value: summary ? formatMeasure(summary.mean_area_mm2, 'mm2', summary.mean_area_px, 'px') : '-',
-      note: 'Từ contour từng hạt',
+      label: 'ĐLC diện tích (báo cáo)',
+      value: summary ? formatMeasure(reportedStat('std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat('std_area_px', 'robust_std_area_px'), 'px2') : '-',
+      note: useRobustStats ? 'Loại vùng nghi nhiễu bằng MAD' : 'SD thô: cần kiểm tra segmentation',
     },
     {
-      label: 'Chiều dài trung bình',
-      value: summary ? formatMeasure(summary.mean_length_mm, 'mm', summary.mean_length_px, 'px') : '-',
-      note: 'Theo trục chính',
+      label: 'ĐLC chiều dài (báo cáo)',
+      value: summary ? formatMeasure(reportedStat('std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat('std_length_px', 'robust_std_length_px'), 'px') : '-',
+      note: useRobustStats ? 'Theo trục chính, sau QC' : 'Theo trục chính, SD thô',
     },
     {
-      label: 'Chiều rộng trung bình',
-      value: summary ? formatMeasure(summary.mean_width_mm, 'mm', summary.mean_width_px, 'px') : '-',
-      note: 'Theo trục phụ',
+      label: 'ĐLC chiều rộng (báo cáo)',
+      value: summary ? formatMeasure(reportedStat('std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat('std_width_px', 'robust_std_width_px'), 'px') : '-',
+      note: useRobustStats ? 'Theo trục phụ, sau QC' : 'Theo trục phụ, SD thô',
     },
   ];
 

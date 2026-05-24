@@ -150,7 +150,7 @@ class _RunCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '${run.count} hạt - ${_formatMeasure(run.meanLengthMm, 'mm', run.meanLengthPx, 'px')} x ${_formatMeasure(run.meanWidthMm, 'mm', run.meanWidthPx, 'px')}',
+                      '${run.count} hạt - ĐLC: ${run.qcStdLengthPx == null ? '-' : _formatMeasure(run.qcStdLengthMm, 'mm', run.qcStdLengthPx!, 'px')} x ${run.qcStdWidthPx == null ? '-' : _formatMeasure(run.qcStdWidthMm, 'mm', run.qcStdWidthPx!, 'px')}',
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -245,17 +245,18 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
               const SizedBox(height: 12),
               _detailRow('Tổng số hạt đo được', '${result.count}'),
               _detailRow(
-                  'Chiều dài trung bình',
+                  'ĐLC chiều dài (báo cáo)',
                   _formatMeasure(
-                      result.meanLengthMm, 'mm', result.meanLengthPx, 'px')),
+                      result.qcStdLengthMm, 'mm', result.qcStdLengthPx, 'px')),
               _detailRow(
-                  'Chiều rộng trung bình',
+                  'ĐLC chiều rộng (báo cáo)',
                   _formatMeasure(
-                      result.meanWidthMm, 'mm', result.meanWidthPx, 'px')),
+                      result.qcStdWidthMm, 'mm', result.qcStdWidthPx, 'px')),
               _detailRow(
-                  'Diện tích trung bình',
+                  'ĐLC diện tích (báo cáo)',
                   _formatMeasure(
-                      result.meanAreaMm2, 'mm2', result.meanAreaPx, 'px2')),
+                      result.qcStdAreaMm2, 'mm2', result.qcStdAreaPx, 'px2')),
+              _detailRow('Vùng nghi nhiễu (QC)', '${result.qcSuspectCount}'),
               _detailRow(
                   'Tỷ lệ thước đo',
                   result.calibration['enabled'] == true
@@ -263,23 +264,35 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
                       : 'Chưa thiết lập'),
               const Divider(),
               Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                data: Theme.of(context)
+                    .copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
                   tilePadding: EdgeInsets.zero,
                   title: Text(
-                    _expanded ? 'Ẩn thông số kỹ thuật' : 'Hiển thị thông số kỹ thuật',
-                    style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+                    _expanded
+                        ? 'Ẩn thông số kỹ thuật'
+                        : 'Hiển thị thông số kỹ thuật',
+                    style: const TextStyle(
+                        fontSize: 14, color: AppTheme.textSecondary),
                   ),
                   onExpansionChanged: (val) => setState(() => _expanded = val),
                   children: [
                     Container(
-                      padding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+                      padding:
+                          const EdgeInsets.only(left: 12, top: 4, bottom: 4),
                       decoration: const BoxDecoration(
-                        border: Border(left: BorderSide(color: AppTheme.border, width: 2)),
+                        border: Border(
+                            left: BorderSide(color: AppTheme.border, width: 2)),
                       ),
                       child: Column(
                         children: [
-                          _detailRow('Phương thức phân tích', 'YOLO segmentation'),
+                          _detailRow(
+                            'Phương thức phân tích',
+                            result.segmentation['execution'] ==
+                                    'mobile_onnxruntime'
+                                ? 'Phân đoạn instance YOLO ONNX trên thiết bị'
+                                : 'Phân đoạn instance YOLO ONNX trên server',
+                          ),
                           if (_asDouble(result.segmentation['confidence']) > 0)
                             _detailRow('Độ tin cậy nhận dạng',
                                 '${(_asDouble(result.segmentation['confidence']) * 100).toStringAsFixed(0)}%'),

@@ -1,6 +1,6 @@
+import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -25,95 +25,45 @@ class GrainAnalysisApi {
     double? referenceY1,
     double? referenceX2,
     double? referenceY2,
+    OfflineProgressCallback? onProgress,
   }) async {
-    final guestMode = await isGuestMode();
+    final localAnalysis = await _offlineAnalyzer.analyze(
+      bytes,
+      referencePixels: referencePixels,
+      referenceMm: referenceMm,
+      referenceX1: referenceX1,
+      referenceY1: referenceY1,
+      referenceX2: referenceX2,
+      referenceY2: referenceY2,
+      onProgress: onProgress,
+    );
+    final localResult = GrainAnalysisResult.fromJson(
+      localAnalysis.asApiJson(fileName),
+    );
+    await _localStore.save({
+      'pendingSync': true,
+      'clientRunId': localResult.run['id']?.toString() ?? '',
+      'sourceFileName': fileName,
+      'createdAt': DateTime.now().toIso8601String(),
+      'result': localResult.toJson(),
+    });
 
-    // 1. Try Server first (Online Mode)
-    try {
-      final form = FormData.fromMap({
-        'image': MultipartFile.fromBytes(bytes, filename: fileName),
-        if (referencePixels != null && referencePixels > 0)
-          'referencePixels': referencePixels.toString(),
-        if (referenceMm != null && referenceMm > 0)
-          'referenceMm': referenceMm.toString(),
-        if (referencePixels != null && referencePixels > 0)
-          'referencePixelSpace': 'original',
-        if (referenceX1 != null) 'referenceX1': referenceX1.toString(),
-        if (referenceY1 != null) 'referenceY1': referenceY1.toString(),
-        if (referenceX2 != null) 'referenceX2': referenceX2.toString(),
-        if (referenceY2 != null) 'referenceY2': referenceY2.toString(),
-      });
-
-      final response = await _client.post(
-        guestMode ? '/grain/analyze-public' : '/grain/analyze',
-        data: form,
-        options: Options(
-          contentType: 'multipart/form-data',
-          sendTimeout: const Duration(seconds: 300),
-          receiveTimeout: const Duration(seconds: 300),
-        ),
-      );
-
-      final result = GrainAnalysisResult.fromJson(
-        Map<String, dynamic>.from(response.data['data'] as Map),
-      );
-
-      // Save to local storage for local history viewing (saved on phone)
-      await _localStore.save({
-        'clientRunId': result.run['id']?.toString() ?? '',
-        'sourceFileName': fileName,
-        'createdAt': DateTime.now().toIso8601String(),
-        'result': result.toJson(),
-      });
-
-      return result;
-    } catch (_) {
-      // 2. Fallback to Local TFLite (Offline Mode)
-      final offlineResult = await _offlineAnalyzer.analyze(
-        bytes,
-        referencePixels: referencePixels,
-        referenceMm: referenceMm,
-        referenceX1: referenceX1,
-        referenceY1: referenceY1,
-        referenceX2: referenceX2,
-        referenceY2: referenceY2,
-      );
-
-      final localResult = GrainAnalysisResult.fromJson(
-        offlineResult.asApiJson(fileName),
-      );
-
-      await _localStore.save({
-        'clientRunId': localResult.run['id']?.toString() ?? '',
-        'sourceFileName': fileName,
-        'createdAt': DateTime.now().toIso8601String(),
-        'result': localResult.toJson(),
-      });
-
-      if (!guestMode) {
-        try {
-          await syncPendingRuns();
-        } catch (_) {
-          // Will auto-sync later
-        }
-      }
-
-      return localResult;
+    if (!await isGuestMode()) {
+      unawaited(_syncPendingRunsInBackground());
     }
+    return localResult;
   }
 
   Future<GrainRunDetail> getRun(String id) async {
-    if (id.startsWith('local-')) {
-      final localRuns = await _localStore.readAll();
-      for (final localRun in localRuns) {
-        final rawResult = localRun['result'];
-        if (rawResult is! Map) continue;
-        final result = GrainAnalysisResult.fromJson(
-          Map<String, dynamic>.from(rawResult),
-        );
-        if (result.run['id']?.toString() == id) {
-          return GrainRunDetail(run: result.run, result: result);
-        }
+    final localRuns = await _localStore.readAll();
+    for (final localRun in localRuns) {
+      final rawResult = localRun['result'];
+      if (rawResult is! Map) continue;
+      final result = GrainAnalysisResult.fromJson(
+        Map<String, dynamic>.from(rawResult),
+      );
+      if (result.run['id']?.toString() == id) {
+        return GrainRunDetail(run: result.run, result: result);
       }
     }
     final response = await _client.get('/grain/runs/$id');
@@ -126,10 +76,18 @@ class GrainAnalysisApi {
       await _storage.read(key: guestModeKey) == 'true';
 
   Future<void> syncPendingRuns() async {
-    final pending = await _localStore.readAll();
+    final pending = await _localStore.readPendingForSync();
     if (pending.isEmpty) return;
     await _client.post('/grain/runs/import', data: {'items': pending});
-    await _localStore.clear();
+    await _localStore.removePendingForSync();
+  }
+
+  Future<void> _syncPendingRunsInBackground() async {
+    try {
+      await syncPendingRuns();
+    } catch (_) {
+      // Connectivity service retries pending local runs later.
+    }
   }
 }
 
@@ -219,15 +177,61 @@ class GrainAnalysisResult {
   double? get meanLengthMm => _nullableDouble(summary['mean_length_mm']);
   double? get meanWidthMm => _nullableDouble(summary['mean_width_mm']);
   bool get calibrated => calibration['enabled'] == true;
+  double get rawStdLengthPx => _asDouble(summary['std_length_px']);
+  double get rawStdWidthPx => _asDouble(summary['std_width_px']);
+  double? get rawStdLengthMm =>
+      calibrated ? _statDouble(summary['std_length_mm']) : null;
+  double? get rawStdWidthMm =>
+      calibrated ? _statDouble(summary['std_width_mm']) : null;
+  bool get qcRobustUsedForReporting {
+    final qc = summary['qc'];
+    return qc is! Map || qc['robust_used_for_reporting'] != false;
+  }
+
+  dynamic _reportedStd(String rawKey, String robustKey) =>
+      qcRobustUsedForReporting
+          ? (summary[robustKey] ?? summary[rawKey])
+          : summary[rawKey];
+
+  double get qcStdAreaPx =>
+      _asDouble(_reportedStd('std_area_px', 'robust_std_area_px'));
+  double get qcStdLengthPx =>
+      _asDouble(_reportedStd('std_length_px', 'robust_std_length_px'));
+  double get qcStdWidthPx =>
+      _asDouble(_reportedStd('std_width_px', 'robust_std_width_px'));
+  double? get qcStdAreaMm2 => calibrated
+      ? _statDouble(_reportedStd('std_area_mm2', 'robust_std_area_mm2'))
+      : null;
+  double? get qcStdLengthMm => calibrated
+      ? _statDouble(_reportedStd('std_length_mm', 'robust_std_length_mm'))
+      : null;
+  double? get qcStdWidthMm => calibrated
+      ? _statDouble(_reportedStd('std_width_mm', 'robust_std_width_mm'))
+      : null;
+  int get qcSuspectCount {
+    final qc = summary['qc'];
+    return qc is Map ? _asInt(qc['suspect_count']) : 0;
+  }
+
+  int get qcInlierCount {
+    final qc = summary['qc'];
+    return qc is Map ? _asInt(qc['inlier_count']) : count;
+  }
+
+  String get qcSuspectIdsLabel {
+    final qc = summary['qc'];
+    final rawIds = qc is Map ? qc['suspect_ids'] : null;
+    if (rawIds is! List || rawIds.isEmpty) return '';
+    final ids = rawIds.take(8).map((id) => '#${_asInt(id)}').join(', ');
+    return rawIds.length > 8 ? '$ids, ...' : ids;
+  }
 
   String previewBase64(String key) => previews[key] ?? '';
 
   String previewWithFallback(String key) {
     final selected = previewBase64(key);
     if (selected.isNotEmpty) return selected;
-    if (key == 'mask') {
-      final samMask = previewBase64('samMask');
-      if (samMask.isNotEmpty) return samMask;
+    if (key != 'overlay') {
       final overlay = previewBase64('overlay');
       if (overlay.isNotEmpty) return overlay;
     }
@@ -250,5 +254,11 @@ double _asDouble(dynamic value) {
 double? _nullableDouble(dynamic value) {
   if (value == null) return null;
   final parsed = _asDouble(value);
-  return parsed.isFinite ? parsed : null;
+  return parsed.isFinite && parsed > 0 ? parsed : null;
+}
+
+double? _statDouble(dynamic value) {
+  if (value == null) return null;
+  final parsed = _asDouble(value);
+  return parsed.isFinite && parsed >= 0 ? parsed : null;
 }

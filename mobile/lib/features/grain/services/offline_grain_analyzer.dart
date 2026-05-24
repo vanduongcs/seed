@@ -1,12 +1,15 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
-import 'package:tflite_flutter/tflite_flutter.dart';
+
+typedef OfflineProgressCallback = void Function(double value, String phase);
 
 class OfflineGrainAnalyzer {
-  static const modelAssetPath = 'assets/models/best_float16.tflite';
+  static const modelAssetPath = 'assets/models/best.onnx';
 
   // Keep these aligned with backend/config/grain.settings.json.
   static const _inputSize = 640;
@@ -21,15 +24,31 @@ class OfflineGrainAnalyzer {
   static const _minSolidity = 0.4;
   static const _minExtent = 0.15;
 
-  Interpreter? _interpreter;
+  OrtSession? _session;
 
   Future<OfflineModelInfo> loadModelInfo() async {
-    final interpreter =
-        _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
+    final session = await _loadSession();
     return OfflineModelInfo(
       modelAssetPath: modelAssetPath,
-      inputTensors: interpreter.getInputTensors().map(_tensorInfo).toList(),
-      outputTensors: interpreter.getOutputTensors().map(_tensorInfo).toList(),
+      inputTensors: [
+        OfflineTensorInfo(
+          name: session.inputNames.first,
+          shape: const [1, 3, _inputSize, _inputSize],
+          type: 'float32',
+        ),
+      ],
+      outputTensors: [
+        OfflineTensorInfo(
+          name: session.outputNames.first,
+          shape: const [1, 38, 8400],
+          type: 'float32',
+        ),
+        OfflineTensorInfo(
+          name: session.outputNames.last,
+          shape: const [1, 32, _protoSize, _protoSize],
+          type: 'float32',
+        ),
+      ],
     );
   }
 
@@ -41,9 +60,16 @@ class OfflineGrainAnalyzer {
     double? referenceY1,
     double? referenceX2,
     double? referenceY2,
+    OfflineProgressCallback? onProgress,
   }) async {
-    final interpreter =
-        _interpreter ??= await Interpreter.fromAsset(modelAssetPath);
+    Future<void> reportProgress(double value, String phase) async {
+      onProgress?.call(value, phase);
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    await reportProgress(54, 'Tải mô hình tối ưu trên thiết bị');
+    final session = await _loadSession();
+    await reportProgress(60, 'Chuẩn bị ảnh cho mô hình ONNX');
     final original = img.decodeImage(imageBytes);
     if (original == null) throw StateError('Cannot decode selected image.');
 
@@ -61,7 +87,8 @@ class OfflineGrainAnalyzer {
         : img.Image.from(original);
 
     final squareSide = math.max(processed.width, processed.height);
-    final square = img.Image(width: squareSide, height: squareSide, numChannels: 3);
+    final square =
+        img.Image(width: squareSide, height: squareSide, numChannels: 3);
     img.fill(square, color: img.ColorRgb8(255, 255, 255));
     img.compositeImage(square, processed, dstX: 0, dstY: 0);
     final resized = img.copyResize(
@@ -71,81 +98,132 @@ class OfflineGrainAnalyzer {
       interpolation: img.Interpolation.linear,
     );
 
-    final input = Float32List(1 * _inputSize * _inputSize * 3);
-    var inputIndex = 0;
+    final input = Float32List(1 * 3 * _inputSize * _inputSize);
+    const channelSize = _inputSize * _inputSize;
     for (var y = 0; y < _inputSize; y++) {
       for (var x = 0; x < _inputSize; x++) {
         final pixel = resized.getPixel(x, y);
-        input[inputIndex++] = pixel.r / 255.0;
-        input[inputIndex++] = pixel.g / 255.0;
-        input[inputIndex++] = pixel.b / 255.0;
+        final index = y * _inputSize + x;
+        input[index] = pixel.r / 255.0;
+        input[channelSize + index] = pixel.g / 255.0;
+        input[channelSize * 2 + index] = pixel.b / 255.0;
       }
     }
 
-    final predictions = Float32List(1 * 38 * 8400);
-    final protos = Float32List(1 * _protoSize * _protoSize * 32);
+    final inputTensor =
+        await OrtValue.fromList(input, const [1, 3, _inputSize, _inputSize]);
+    await reportProgress(68, 'Chạy YOLO ONNX trên thiết bị');
+    final outputs = await session.run({session.inputNames.first: inputTensor});
+    late final Float32List predictions;
+    late final Float32List protos;
+    try {
+      predictions = Float32List.fromList(
+        (await outputs[session.outputNames.first]!.asFlattenedList())
+            .map((value) => (value as num).toDouble())
+            .toList(),
+      );
+      protos = Float32List.fromList(
+        (await outputs[session.outputNames.last]!.asFlattenedList())
+            .map((value) => (value as num).toDouble())
+            .toList(),
+      );
+    } finally {
+      await inputTensor.dispose();
+      for (final output in outputs.values) {
+        await output.dispose();
+      }
+    }
 
-    interpreter.runForMultipleInputs(
-      [input.buffer.asUint8List()],
-      {
-        0: predictions.buffer.asUint8List(),
-        1: protos.buffer.asUint8List(),
-      },
+    await reportProgress(82, 'Tạo mặt nạ, đo hạt và dựng ảnh');
+    return compute(
+      _finishAnalysis,
+      _OfflinePostprocessInput(
+        imageBytes,
+        predictions: predictions,
+        protos: protos,
+        width: processed.width,
+        height: processed.height,
+        paddedSide: squareSide,
+        originalWidth: originalWidth,
+        originalHeight: originalHeight,
+        scale: scale,
+        referencePixels: referencePixels,
+        referenceMm: referenceMm,
+        referenceX1: referenceX1,
+        referenceY1: referenceY1,
+        referenceX2: referenceX2,
+        referenceY2: referenceY2,
+      ),
     );
+  }
 
-    final detections = _decodePredictions(predictions);
+  static OfflineAnalyzeResult _finishAnalysis(_OfflinePostprocessInput input) {
+    final original = img.decodeImage(input.imageBytes);
+    if (original == null) throw StateError('Cannot decode selected image.');
+    final processed = input.scale < 1.0
+        ? img.copyResize(
+            original,
+            width: input.width,
+            height: input.height,
+            interpolation: img.Interpolation.average,
+          )
+        : img.Image.from(original);
+    final detections = _decodePredictions(input.predictions);
     final instances = detections
         .map(
           (detection) => _decodeMask(
-            protos,
+            input.protos,
             detection,
-            width: processed.width,
-            height: processed.height,
-            paddedSide: squareSide,
+            width: input.width,
+            height: input.height,
+            paddedSide: input.paddedSide,
           ),
         )
         .whereType<_Instance>()
         .toList();
     final filtered = _filterAndMeasure(
       instances,
-      width: processed.width,
-      height: processed.height,
-      scale: scale,
-      referencePixels: referencePixels,
-      referenceMm: referenceMm,
-      referenceX1: referenceX1,
-      referenceY1: referenceY1,
-      referenceX2: referenceX2,
-      referenceY2: referenceY2,
+      width: input.width,
+      height: input.height,
+      scale: input.scale,
+      referencePixels: input.referencePixels,
+      referenceMm: input.referenceMm,
+      referenceX1: input.referenceX1,
+      referenceY1: input.referenceY1,
+      referenceX2: input.referenceX2,
+      referenceY2: input.referenceY2,
     );
     final overlay = _renderOverlay(processed, filtered);
     final mask = _renderMask(filtered);
+    final labels = _renderLabels(filtered);
 
     final seedCandidateCount =
         instances.where((instance) => instance.classId == 0).length;
     final refCandidateCount = instances.length - seedCandidateCount;
     return OfflineAnalyzeResult(
+      originalPng: Uint8List.fromList(img.encodePng(original)),
       overlayPng: Uint8List.fromList(img.encodePng(overlay)),
       maskPng: Uint8List.fromList(img.encodePng(mask)),
+      labelsPng: Uint8List.fromList(img.encodePng(labels)),
       image: {
-        'width': processed.width,
-        'height': processed.height,
-        'original_width': originalWidth,
-        'original_height': originalHeight,
-        'scale': _round(scale, 6),
+        'width': input.width,
+        'height': input.height,
+        'original_width': input.originalWidth,
+        'original_height': input.originalHeight,
+        'scale': _round(input.scale, 6),
       },
       measurements: filtered.measurements,
       summary: _summaryFor(filtered.measurements),
       calibration: {
-        'referencePixels': referencePixels ?? 0,
-        'referenceMm': referenceMm ?? 0,
+        'referencePixels': input.referencePixels ?? 0,
+        'referenceMm': input.referenceMm ?? 0,
         'referencePixelSpace': 'original',
         'enabled': filtered.mmPerPixel > 0,
         'mm_per_pixel': filtered.mmPerPixel,
-        'referenceX1': referenceX1 ?? -1,
-        'referenceY1': referenceY1 ?? -1,
-        'referenceX2': referenceX2 ?? -1,
-        'referenceY2': referenceY2 ?? -1,
+        'referenceX1': input.referenceX1 ?? -1,
+        'referenceY1': input.referenceY1 ?? -1,
+        'referenceX2': input.referenceX2 ?? -1,
+        'referenceY2': input.referenceY2 ?? -1,
         'excluded_reference_object_count':
             filtered.excludedReferenceObjectCount,
       },
@@ -180,11 +258,13 @@ class OfflineGrainAnalyzer {
           'minSegmentExtent': _minExtent,
         },
         'offline': true,
+        'execution': 'mobile_onnxruntime',
+        'execution_provider': Platform.isAndroid ? 'XNNPACK/CPU' : 'CPU',
       },
     );
   }
 
-  List<_Detection> _decodePredictions(Float32List prediction) {
+  static List<_Detection> _decodePredictions(Float32List prediction) {
     final candidates = <_Detection>[];
     for (var i = 0; i < 8400; i++) {
       final seedScore = prediction[4 * 8400 + i];
@@ -204,7 +284,8 @@ class OfflineGrainAnalyzer {
           y1: cy - height / 2,
           x2: cx + width / 2,
           y2: cy + height / 2,
-          coefficients: List.generate(32, (c) => prediction[(6 + c) * 8400 + i]),
+          coefficients:
+              List.generate(32, (c) => prediction[(6 + c) * 8400 + i]),
         ),
       );
     }
@@ -219,33 +300,51 @@ class OfflineGrainAnalyzer {
     return kept;
   }
 
-  _Instance? _decodeMask(
+  static _Instance? _decodeMask(
     Float32List protos,
     _Detection detection, {
     required int width,
     required int height,
     required int paddedSide,
   }) {
-    final pixels = Uint8List(width * height);
     final scale = paddedSide / _inputSize;
     final x1 = (detection.x1 * scale).floor().clamp(0, width);
     final y1 = (detection.y1 * scale).floor().clamp(0, height);
     final x2 = (detection.x2 * scale).ceil().clamp(0, width);
     final y2 = (detection.y2 * scale).ceil().clamp(0, height);
     if (x2 <= x1 || y2 <= y1) return null;
+    final maskWidth = x2 - x1;
+    final maskHeight = y2 - y1;
+    final pixels = Uint8List(maskWidth * maskHeight);
 
     var area = 0;
     for (var y = y1; y < y2; y++) {
       final protoY = (y / paddedSide) * _protoSize - 0.5;
+      final py0 = protoY.floor().clamp(0, _protoSize - 1);
+      final py1 = (py0 + 1).clamp(0, _protoSize - 1);
+      final dy = (protoY - py0).clamp(0.0, 1.0);
       for (var x = x1; x < x2; x++) {
         final protoX = (x / paddedSide) * _protoSize - 0.5;
+        final px0 = protoX.floor().clamp(0, _protoSize - 1);
+        final px1 = (px0 + 1).clamp(0, _protoSize - 1);
+        final dx = (protoX - px0).clamp(0.0, 1.0);
+        final topLeftWeight = (1 - dx) * (1 - dy);
+        final topRightWeight = dx * (1 - dy);
+        final bottomLeftWeight = (1 - dx) * dy;
+        final bottomRightWeight = dx * dy;
         var logit = 0.0;
         for (var c = 0; c < 32; c++) {
-          logit += detection.coefficients[c] *
-              _bilinearProto(protos, protoX, protoY, c);
+          final channelOffset = c * _protoSize * _protoSize;
+          final row0 = channelOffset + py0 * _protoSize;
+          final row1 = channelOffset + py1 * _protoSize;
+          final value = protos[row0 + px0] * topLeftWeight +
+              protos[row0 + px1] * topRightWeight +
+              protos[row1 + px0] * bottomLeftWeight +
+              protos[row1 + px1] * bottomRightWeight;
+          logit += detection.coefficients[c] * value;
         }
         if (_sigmoid(logit) <= 0.5) continue;
-        pixels[y * width + x] = 1;
+        pixels[(y - y1) * maskWidth + (x - x1)] = 1;
         area++;
       }
     }
@@ -254,10 +353,14 @@ class OfflineGrainAnalyzer {
       mask: pixels,
       confidence: detection.score,
       classId: detection.classId,
+      x: x1,
+      y: y1,
+      width: maskWidth,
+      height: maskHeight,
     );
   }
 
-  _FilteredResult _filterAndMeasure(
+  static _FilteredResult _filterAndMeasure(
     List<_Instance> instances, {
     required int width,
     required int height,
@@ -294,7 +397,7 @@ class OfflineGrainAnalyzer {
       if (instance.classId != 0) continue;
       if (processedLine != null &&
           _isReferenceObjectMask(
-            instance.mask,
+            instance,
             width,
             height,
             processedLine.$1,
@@ -303,11 +406,25 @@ class OfflineGrainAnalyzer {
         excludedReferenceObjectCount++;
         continue;
       }
-      final available = Uint8List(width * height);
-      for (var i = 0; i < available.length; i++) {
-        if (instance.mask[i] != 0 && labels[i] == 0) available[i] = 1;
+      final available = Uint8List(instance.width * instance.height);
+      for (var localY = 0; localY < instance.height; localY++) {
+        final globalRow = (instance.y + localY) * width + instance.x;
+        final localRow = localY * instance.width;
+        for (var localX = 0; localX < instance.width; localX++) {
+          final localIndex = localRow + localX;
+          final globalIndex = globalRow + localX;
+          if (instance.mask[localIndex] != 0 && labels[globalIndex] == 0) {
+            available[localIndex] = 1;
+          }
+        }
       }
-      final metrics = _maskMetrics(available, width, height);
+      final metrics = _maskMetrics(
+        available,
+        instance.width,
+        instance.height,
+        offsetX: instance.x,
+        offsetY: instance.y,
+      );
       if (metrics == null) continue;
       final area = metrics['area_px'] as int;
       final aspect = metrics['aspect_ratio'] as double;
@@ -318,15 +435,20 @@ class OfflineGrainAnalyzer {
       if (solidity < _minSolidity || extent < _minExtent) continue;
 
       final id = measurements.length + 1;
-      for (var i = 0; i < available.length; i++) {
-        if (available[i] != 0) labels[i] = id;
+      for (var localY = 0; localY < instance.height; localY++) {
+        final globalRow = (instance.y + localY) * width + instance.x;
+        final localRow = localY * instance.width;
+        for (var localX = 0; localX < instance.width; localX++) {
+          if (available[localRow + localX] != 0) {
+            labels[globalRow + localX] = id;
+          }
+        }
       }
       measurements.add({
         'id': id,
         ...metrics,
-        'area_mm2': mmPerPixel == 0
-            ? 0.0
-            : _round(area * mmPerPixel * mmPerPixel, 6),
+        'area_mm2':
+            mmPerPixel == 0 ? 0.0 : _round(area * mmPerPixel * mmPerPixel, 6),
         'length_mm': mmPerPixel == 0
             ? 0.0
             : _round((metrics['length_px'] as double) * mmPerPixel, 6),
@@ -348,28 +470,32 @@ class OfflineGrainAnalyzer {
     );
   }
 
-  Map<String, dynamic>? _maskMetrics(
+  static Map<String, dynamic>? _maskMetrics(
     Uint8List mask,
     int width,
-    int height,
-  ) {
+    int height, {
+    required int offsetX,
+    required int offsetY,
+  }) {
     final points = <_Point>[];
     var sumX = 0.0;
     var sumY = 0.0;
-    var minX = width;
-    var minY = height;
+    var minX = width + offsetX;
+    var minY = height + offsetY;
     var maxX = -1;
     var maxY = -1;
     for (var y = 0; y < height; y++) {
       for (var x = 0; x < width; x++) {
         if (mask[y * width + x] == 0) continue;
-        points.add(_Point(x.toDouble(), y.toDouble()));
-        sumX += x;
-        sumY += y;
-        minX = math.min(minX, x);
-        minY = math.min(minY, y);
-        maxX = math.max(maxX, x);
-        maxY = math.max(maxY, y);
+        final globalX = x + offsetX;
+        final globalY = y + offsetY;
+        points.add(_Point(globalX.toDouble(), globalY.toDouble()));
+        sumX += globalX;
+        sumY += globalY;
+        minX = math.min(minX, globalX);
+        minY = math.min(minY, globalY);
+        maxX = math.max(maxX, globalX);
+        maxY = math.max(maxY, globalY);
       }
     }
     if (points.isEmpty) return null;
@@ -396,7 +522,7 @@ class OfflineGrainAnalyzer {
     };
   }
 
-  img.Image _renderOverlay(img.Image rgb, _FilteredResult result) {
+  static img.Image _renderOverlay(img.Image rgb, _FilteredResult result) {
     final overlay = img.Image.from(rgb);
     const palette = [
       [45, 108, 191],
@@ -426,7 +552,7 @@ class OfflineGrainAnalyzer {
     return overlay;
   }
 
-  img.Image _renderMask(_FilteredResult result) {
+  static img.Image _renderMask(_FilteredResult result) {
     final mask = img.Image(
       width: result.width,
       height: result.height,
@@ -441,33 +567,70 @@ class OfflineGrainAnalyzer {
     return mask;
   }
 
-  void close() {
-    _interpreter?.close();
-    _interpreter = null;
+  static img.Image _renderLabels(_FilteredResult result) {
+    const palette = [
+      [45, 108, 191],
+      [219, 87, 86],
+      [73, 160, 120],
+      [235, 174, 73],
+      [132, 98, 174],
+      [77, 176, 196],
+      [201, 112, 165],
+      [122, 126, 135],
+    ];
+    final labelsImage = img.Image(
+      width: result.width,
+      height: result.height,
+      numChannels: 3,
+    );
+    for (var y = 0; y < result.height; y++) {
+      for (var x = 0; x < result.width; x++) {
+        final label = result.labels[y * result.width + x];
+        if (label <= 0) continue;
+        final color = palette[(label - 1) % palette.length];
+        labelsImage.setPixelRgb(x, y, color[0], color[1], color[2]);
+      }
+    }
+    for (final measurement in result.measurements) {
+      final id = (measurement['id'] as num).toInt();
+      final centroidX = (measurement['centroid_x'] as num).round();
+      final centroidY = (measurement['centroid_y'] as num).round();
+      img.drawString(
+        labelsImage,
+        '$id',
+        font: img.arial14,
+        x: math.max(0, centroidX - 5),
+        y: math.max(0, centroidY - 7),
+        color: img.ColorRgb8(255, 255, 255),
+      );
+    }
+    return labelsImage;
   }
-}
 
-double _bilinearProto(
-  Float32List protos,
-  double x,
-  double y,
-  int channel,
-) {
-  final x0 = x.floor().clamp(0, 159);
-  final y0 = y.floor().clamp(0, 159);
-  final x1 = (x0 + 1).clamp(0, 159);
-  final y1 = (y0 + 1).clamp(0, 159);
-  final dx = (x - x0).clamp(0.0, 1.0);
-  final dy = (y - y0).clamp(0.0, 1.0);
+  Future<OrtSession> _loadSession() async {
+    final existing = _session;
+    if (existing != null) return existing;
+    final options = Platform.isAndroid
+        ? OrtSessionOptions(
+            providers: const [OrtProvider.XNNPACK, OrtProvider.CPU],
+            intraOpNumThreads:
+                math.max(1, math.min(4, Platform.numberOfProcessors - 1)),
+            interOpNumThreads: 1,
+          )
+        : null;
+    final loaded = await OnnxRuntime().createSessionFromAsset(
+      modelAssetPath,
+      options: options,
+    );
+    _session = loaded;
+    return loaded;
+  }
 
-  final idx00 = (y0 * 160 + x0) * 32 + channel;
-  final idx01 = (y0 * 160 + x1) * 32 + channel;
-  final idx10 = (y1 * 160 + x0) * 32 + channel;
-  final idx11 = (y1 * 160 + x1) * 32 + channel;
-
-  final top = protos[idx00] * (1 - dx) + protos[idx01] * dx;
-  final bottom = protos[idx10] * (1 - dx) + protos[idx11] * dx;
-  return top * (1 - dy) + bottom * dy;
+  Future<void> close() async {
+    final session = _session;
+    _session = null;
+    if (session != null) await session.close();
+  }
 }
 
 double _boxIou(_Detection a, _Detection b) {
@@ -483,8 +646,7 @@ double _boxIou(_Detection a, _Detection b) {
 }
 
 List<_Point> _convexHull(List<_Point> points) {
-  final sorted = [...points]
-    ..sort((a, b) {
+  final sorted = [...points]..sort((a, b) {
       final byX = a.x.compareTo(b.x);
       return byX != 0 ? byX : a.y.compareTo(b.y);
     });
@@ -559,14 +721,12 @@ _RectangleMetrics _minimumBoundingRectangle(List<_Point> hull) {
 }
 
 double _cross(_Point origin, _Point a, _Point b) =>
-    (a.x - origin.x) * (b.y - origin.y) -
-    (a.y - origin.y) * (b.x - origin.x);
+    (a.x - origin.x) * (b.y - origin.y) - (a.y - origin.y) * (b.x - origin.x);
 
-double _sigmoid(double value) =>
-    1 / (1 + math.exp(-value.clamp(-88.0, 88.0)));
+double _sigmoid(double value) => 1 / (1 + math.exp(-value.clamp(-88.0, 88.0)));
 
 bool _isReferenceObjectMask(
-  Uint8List mask,
+  _Instance instance,
   int width,
   int height,
   _Point start,
@@ -582,11 +742,11 @@ bool _isReferenceObjectMask(
     final ratio = i / (samples - 1);
     final x = (start.x + dx * ratio).round().clamp(0, width - 1).toInt();
     final y = (start.y + dy * ratio).round().clamp(0, height - 1).toInt();
-    if (mask[y * width + x] != 0) covered++;
+    if (instance.contains(x, y)) covered++;
   }
   final midX = ((start.x + end.x) / 2).round().clamp(0, width - 1).toInt();
   final midY = ((start.y + end.y) / 2).round().clamp(0, height - 1).toInt();
-  final midpointInside = mask[midY * width + midX] != 0;
+  final midpointInside = instance.contains(midX, midY);
   return midpointInside && covered / samples >= 0.55;
 }
 
@@ -606,36 +766,142 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
       'mean_area_mm2': 0,
       'mean_length_mm': 0,
       'mean_width_mm': 0,
+      'std_area_px': 0,
+      'std_length_px': 0,
+      'std_width_px': 0,
+      'std_area_mm2': 0,
+      'std_length_mm': 0,
+      'std_width_mm': 0,
+      'robust_std_area_px': 0,
+      'robust_std_length_px': 0,
+      'robust_std_width_px': 0,
+      'robust_std_area_mm2': 0,
+      'robust_std_length_mm': 0,
+      'robust_std_width_mm': 0,
+      'cv_length_pct': 0,
+      'cv_width_pct': 0,
+      'qc': {
+        'method': 'median_mad',
+        'suspect_count': 0,
+        'inlier_count': 0,
+        'suspect_ids': <int>[],
+        'review_required': false,
+        'suspect_ratio': 0,
+        'robust_used_for_reporting': true,
+        'status': 'ok',
+      },
     };
   }
-  double mean(String key) => _round(
-        measurements.fold<double>(
-              0,
-              (total, item) => total + ((item[key] as num?)?.toDouble() ?? 0),
-            ) /
-            measurements.length,
-        6,
-      );
+  final outliers = _qcOutlierIndices(measurements);
+  final suspectRatio = outliers.length / measurements.length;
+  final robustUsedForReporting = suspectRatio <= 0.05;
+  for (var index = 0; index < measurements.length; index++) {
+    final isOutlier = outliers.contains(index);
+    measurements[index]['qc_outlier'] = isOutlier;
+    measurements[index]['qc_reason'] = isOutlier ? 'size_outlier_mad' : '';
+  }
+  final inliers = [
+    for (var index = 0; index < measurements.length; index++)
+      if (!outliers.contains(index)) measurements[index],
+  ];
+  final robustMeasurements = inliers.isEmpty ? measurements : inliers;
+
+  List<double> values(List<Map<String, dynamic>> items, String key) =>
+      items.map((item) => ((item[key] as num?)?.toDouble() ?? 0)).toList();
+  double mean(List<Map<String, dynamic>> items, String key) =>
+      _round(values(items, key).reduce((a, b) => a + b) / items.length, 6);
+  double std(List<Map<String, dynamic>> items, String key) {
+    if (items.length <= 1) return 0;
+    final data = values(items, key);
+    final average = data.reduce((a, b) => a + b) / data.length;
+    final squaredSum = data.fold<double>(
+        0, (total, value) => total + math.pow(value - average, 2));
+    return _round(math.sqrt(squaredSum / (data.length - 1)), 6);
+  }
+
+  double cv(List<Map<String, dynamic>> items, String key) {
+    final average = mean(items, key);
+    return average > 0 ? _round(std(items, key) / average * 100, 3) : 0;
+  }
+
   return {
     'count': measurements.length,
     'total_area_px': measurements.fold<int>(
       0,
       (total, item) => total + ((item['area_px'] as num?)?.toInt() ?? 0),
     ),
-    'mean_area_px': mean('area_px'),
-    'mean_length_px': mean('length_px'),
-    'mean_width_px': mean('width_px'),
-    'mean_area_mm2': mean('area_mm2'),
-    'mean_length_mm': mean('length_mm'),
-    'mean_width_mm': mean('width_mm'),
+    'mean_area_px': mean(measurements, 'area_px'),
+    'mean_length_px': mean(measurements, 'length_px'),
+    'mean_width_px': mean(measurements, 'width_px'),
+    'mean_area_mm2': mean(measurements, 'area_mm2'),
+    'mean_length_mm': mean(measurements, 'length_mm'),
+    'mean_width_mm': mean(measurements, 'width_mm'),
+    'std_area_px': std(measurements, 'area_px'),
+    'std_length_px': std(measurements, 'length_px'),
+    'std_width_px': std(measurements, 'width_px'),
+    'std_area_mm2': std(measurements, 'area_mm2'),
+    'std_length_mm': std(measurements, 'length_mm'),
+    'std_width_mm': std(measurements, 'width_mm'),
+    'robust_mean_area_px': mean(robustMeasurements, 'area_px'),
+    'robust_mean_length_px': mean(robustMeasurements, 'length_px'),
+    'robust_mean_width_px': mean(robustMeasurements, 'width_px'),
+    'robust_mean_area_mm2': mean(robustMeasurements, 'area_mm2'),
+    'robust_mean_length_mm': mean(robustMeasurements, 'length_mm'),
+    'robust_mean_width_mm': mean(robustMeasurements, 'width_mm'),
+    'robust_std_area_px': std(robustMeasurements, 'area_px'),
+    'robust_std_length_px': std(robustMeasurements, 'length_px'),
+    'robust_std_width_px': std(robustMeasurements, 'width_px'),
+    'robust_std_area_mm2': std(robustMeasurements, 'area_mm2'),
+    'robust_std_length_mm': std(robustMeasurements, 'length_mm'),
+    'robust_std_width_mm': std(robustMeasurements, 'width_mm'),
+    'cv_length_pct': cv(robustMeasurements, 'length_px'),
+    'cv_width_pct': cv(robustMeasurements, 'width_px'),
+    'qc': {
+      'method': 'median_mad',
+      'threshold': 3.5,
+      'suspect_count': outliers.length,
+      'inlier_count': robustMeasurements.length,
+      'suspect_ids': [
+        for (final index in outliers.toList()..sort())
+          measurements[index]['id'],
+      ],
+      'review_required': outliers.isNotEmpty,
+      'suspect_ratio': _round(suspectRatio, 6),
+      'robust_used_for_reporting': robustUsedForReporting,
+      'status': !robustUsedForReporting
+          ? 'review_required'
+          : (outliers.isNotEmpty ? 'suspects_flagged' : 'ok'),
+    },
   };
 }
 
-OfflineTensorInfo _tensorInfo(Tensor tensor) => OfflineTensorInfo(
-      name: tensor.name,
-      shape: List<int>.from(tensor.shape),
-      type: tensor.type.toString(),
-    );
+Set<int> _qcOutlierIndices(List<Map<String, dynamic>> measurements) {
+  if (measurements.length < 5) return {};
+  final flagged = <int>{};
+  for (final key in ['area_px', 'length_px', 'width_px']) {
+    final data = measurements
+        .map((item) => ((item[key] as num?)?.toDouble() ?? 0))
+        .toList();
+    final middle = _median(data);
+    final deviations = data.map((value) => (value - middle).abs()).toList();
+    final mad = _median(deviations);
+    for (var index = 0; index < data.length; index++) {
+      final deviation = deviations[index];
+      final isOutlier =
+          mad <= 1e-9 ? deviation > 1e-9 : 0.6745 * deviation / mad > 3.5;
+      if (isOutlier) flagged.add(index);
+    }
+  }
+  return flagged;
+}
+
+double _median(List<double> values) {
+  final ordered = [...values]..sort();
+  final middle = ordered.length ~/ 2;
+  return ordered.length.isOdd
+      ? ordered[middle]
+      : (ordered[middle - 1] + ordered[middle]) / 2;
+}
 
 class _Detection {
   final double score;
@@ -661,12 +927,29 @@ class _Instance {
   final Uint8List mask;
   final double confidence;
   final int classId;
+  final int x;
+  final int y;
+  final int width;
+  final int height;
 
   const _Instance({
     required this.mask,
     required this.confidence,
     required this.classId,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
   });
+
+  bool contains(int globalX, int globalY) {
+    final localX = globalX - x;
+    final localY = globalY - y;
+    if (localX < 0 || localX >= width || localY < 0 || localY >= height) {
+      return false;
+    }
+    return mask[localY * width + localX] != 0;
+  }
 }
 
 class _Point {
@@ -706,6 +989,42 @@ class _FilteredResult {
   });
 }
 
+class _OfflinePostprocessInput {
+  final Uint8List imageBytes;
+  final Float32List predictions;
+  final Float32List protos;
+  final int width;
+  final int height;
+  final int paddedSide;
+  final int originalWidth;
+  final int originalHeight;
+  final double scale;
+  final double? referencePixels;
+  final double? referenceMm;
+  final double? referenceX1;
+  final double? referenceY1;
+  final double? referenceX2;
+  final double? referenceY2;
+
+  const _OfflinePostprocessInput(
+    this.imageBytes, {
+    required this.predictions,
+    required this.protos,
+    required this.width,
+    required this.height,
+    required this.paddedSide,
+    required this.originalWidth,
+    required this.originalHeight,
+    required this.scale,
+    required this.referencePixels,
+    required this.referenceMm,
+    required this.referenceX1,
+    required this.referenceY1,
+    required this.referenceX2,
+    required this.referenceY2,
+  });
+}
+
 class OfflineModelInfo {
   final String modelAssetPath;
   final List<OfflineTensorInfo> inputTensors;
@@ -731,8 +1050,10 @@ class OfflineTensorInfo {
 }
 
 class OfflineAnalyzeResult {
+  final Uint8List originalPng;
   final Uint8List overlayPng;
   final Uint8List maskPng;
+  final Uint8List labelsPng;
   final Map<String, dynamic> image;
   final List<Map<String, dynamic>> measurements;
   final Map<String, dynamic> summary;
@@ -740,8 +1061,10 @@ class OfflineAnalyzeResult {
   final Map<String, dynamic> segmentation;
 
   const OfflineAnalyzeResult({
+    required this.originalPng,
     required this.overlayPng,
     required this.maskPng,
+    required this.labelsPng,
     required this.image,
     required this.measurements,
     required this.summary,
@@ -763,14 +1086,47 @@ class OfflineAnalyzeResult {
         'calibration': calibration,
         'features': {
           'pipeline': 'yolo8_nano_segment',
-          'source': 'mobile_tflite',
+          'source': 'mobile_onnxruntime',
           'preprocess': {'enabled': false},
         },
         'measurements': measurements,
-        'csv': '',
+        'csv': _measurementsCsv(measurements),
+        'original_png_base64': base64Encode(originalPng),
         'overlay_png_base64': base64Encode(overlayPng),
         'sam_mask_png_base64': base64Encode(maskPng),
-        'labels_png_base64': '',
+        'labels_png_base64': base64Encode(labelsPng),
         'mask_png_base64': base64Encode(maskPng),
       };
+}
+
+String _measurementsCsv(List<Map<String, dynamic>> measurements) {
+  const columns = [
+    'id',
+    'area_px',
+    'length_px',
+    'width_px',
+    'area_mm2',
+    'length_mm',
+    'width_mm',
+    'centroid_x',
+    'centroid_y',
+    'bbox_x',
+    'bbox_y',
+    'bbox_w',
+    'bbox_h',
+    'angle_deg',
+    'solidity',
+    'extent',
+    'aspect_ratio',
+    'confidence',
+    'class_id',
+    'class_name',
+    'qc_outlier',
+    'qc_reason',
+  ];
+  final rows = <String>[columns.join(',')];
+  for (final measurement in measurements) {
+    rows.add(columns.map((column) => '${measurement[column] ?? ''}').join(','));
+  }
+  return '${rows.join('\n')}\n';
 }

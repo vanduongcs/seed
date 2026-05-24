@@ -1,6 +1,6 @@
 # Seed
 
-Seed is a monorepo for seed-grain image analysis. The app accepts a JPG/PNG image from web or mobile, runs one backend computer-vision pipeline, measures each detected grain, and returns summary data, CSV, and PNG previews.
+Seed is a monorepo for seed-grain image analysis. The web app runs the server ONNX pipeline; the mobile app runs the matching ONNX model locally and optionally syncs results through the backend. Both clients return measurements, QC statistics, CSV, and PNG previews.
 
 ## Structure
 
@@ -73,7 +73,7 @@ The worker resolves models in this order:
 3. `backend/model/best.pt`.
 4. `yolov8n-seg.pt` fallback for development.
 
-Model binaries are ignored by git; keep only [backend/model/README.md](backend/model/README.md) and `.gitkeep` committed.
+`backend/model/best.onnx` is committed because source-based server/Azure deployments require the production inference asset. Training checkpoints such as `best.pt` remain local artifacts.
 
 ## API
 
@@ -150,7 +150,7 @@ flutter pub get
 flutter run
 ```
 
-The mobile app automatically discovers the backend on the local network. It first uses an explicit `BASE_URL` when provided, then tries the Android emulator URL, then scans the current LAN for the backend health check on port `3000`.
+Mobile analysis runs locally through ONNX Runtime using `mobile/assets/models/best.onnx`; it does not require login or network access. The app discovers the backend only for authentication, history synchronization, and authenticated storage access. It first uses an explicit `BASE_URL` when provided, then tries the Android emulator URL, then scans the current LAN for the backend health check on port `3000`.
 
 Backend URLs for debugging:
 
@@ -167,4 +167,4 @@ flutter run --dart-define=BASE_URL=http://192.168.1.x:3000/api
 
 ## Local Files Kept Out Of Git
 
-The repo ignores local runtime artifacts such as `.env`, virtualenvs, `node_modules`, build outputs, logs, Python cache, model weights, and backend storage artifacts.
+The repo ignores local runtime artifacts such as `.env`, virtualenvs, `node_modules`, build outputs, logs, Python cache, training checkpoints, and backend storage artifacts. The two production ONNX files used by server and mobile packaging are explicitly tracked.

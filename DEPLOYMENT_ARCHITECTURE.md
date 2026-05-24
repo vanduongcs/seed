@@ -1,109 +1,40 @@
-# Seed Segmentation Deployment Architecture
+# Seed Deployment Architecture
 
-The project should be deployed as two independent inference targets.
+The project has two inference targets that use the same exported YOLO segmentation model.
 
-## Target A: Web / Public Demo
-
-The web target runs inference on a server.
+## Web And Server
 
 ```text
 browser
--> upload image
--> server API
--> YOLO ONNX model on server
--> overlay/result returned to browser
+-> backend API
+-> Python worker
+-> backend/model/best.onnx with ONNX Runtime
+-> result JSON, previews, CSV, and stored history
 ```
 
-Implementation:
+The production server model is tracked at `backend/model/best.onnx` so a clean Docker or Azure source deployment contains the required model asset.
+
+## Android Mobile
 
 ```text
-seed_deploy/
-├── app.py
-├── Dockerfile
-├── model/best.onnx
-└── grain_pipeline/
+camera/gallery
+-> Flutter preprocessing
+-> mobile/assets/models/best.onnx with ONNX Runtime
+-> local segmentation, measurements, previews, and pending history
+-> optional backend sync when signed in and online
 ```
 
-Use this for:
+Normal analysis is local-first and works for guests without internet. The backend is used for login, history import, and synchronization; mobile analysis does not upload the source image for server inference.
 
-- public demo
-- web upload page
-- REST API
-- Hugging Face Spaces / Render / VPS deployment
+The mobile model is the same production ONNX export as the server model. This preserves model output consistency while avoiding Python/PyTorch runtime packaging on Android.
 
-Do not include mobile-only assets or Flutter code in this server Docker image.
+## Shared Result Contract
 
-## Target B: Android APK / Offline Mobile
+Both paths return the same preview modes: overlay, mask, and labels. Both calculate standard deviation and QC metadata. MAD-based outlier screening is informational; the robust post-QC deviation is used as the reported value only when suspect regions are at most 5 percent of detections. Above that threshold, the reported value stays as raw standard deviation and the UI requires segmentation review.
 
-The Android target must run inference on-device.
+## Deploy Checklist
 
-```text
-Android camera/gallery
--> local preprocessing
--> TFLite model inside APK
--> local YOLO segmentation decode
--> local overlay/result
-```
-
-Current model asset:
-
-```text
-mobile/assets/models/best_float16.tflite
-```
-
-Normal mobile analysis should not require internet. If internet is available, the app may optionally sync history or compare/debug results with the server, but the primary path should remain local.
-
-## Current Status
-
-Server/web:
-
-- YOLO ONNX server inference works in Docker.
-- `/segment` returns overlay PNG.
-- `/analyze` returns JSON with measurements and overlay base64.
-
-Mobile:
-
-- TFLite model asset exists.
-- Flutter dependencies include `tflite_flutter` and `image`.
-- Full local YOLO-seg decode/postprocess is not implemented yet.
-- Current mobile UI still uses backend API for analysis.
-
-## Correct Next Mobile Work
-
-Implement mobile offline inference in this order:
-
-1. Load `assets/models/best_float16.tflite` with `tflite_flutter`.
-2. Inspect and document input/output tensor shapes.
-3. Match server preprocessing:
-   - EXIF-safe image load if possible
-   - RGB
-   - pad to square
-   - resize to model input size
-   - normalize to `[0, 1]`
-4. Decode YOLO-seg outputs:
-   - boxes
-   - class scores
-   - mask coefficients
-   - prototype masks
-5. Run local NMS.
-6. Generate instance masks.
-7. Render overlay locally.
-8. Port morphology measurements:
-   - area
-   - bbox
-   - centroid
-   - length/width approximation
-   - count
-9. Make the mobile dashboard use offline analyzer first.
-10. Keep backend API as an optional debug/sync fallback, not the default path.
-
-## Model Format Rule
-
-Use different model formats for different targets:
-
-```text
-Server/web:  ONNX  -> seed_deploy/model/best.onnx
-Mobile APK:  TFLite -> mobile/assets/models/best_float16.tflite
-```
-
-Do not ship ONNX/Python/OpenCV server code inside the Flutter APK.
+1. Keep `backend/model/best.onnx` and `mobile/assets/models/best.onnx` byte-identical.
+2. Run Python pipeline checks, Flutter analyze/tests/release APK build, and web production build.
+3. Push the deployment branch used by Azure.
+4. Confirm the deployed API responds and exposes the updated result contract before accepting production output.

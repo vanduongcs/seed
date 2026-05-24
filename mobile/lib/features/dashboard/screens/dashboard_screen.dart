@@ -82,7 +82,7 @@ class _DashboardContent extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
                 child: _StatTile(
-                    label: 'ĐLC chiều dài (QC)',
+                    label: 'ĐLC chiều dài (báo cáo)',
                     value: _formatMeasureStat(sessionResult?.qcStdLengthMm,
                         'mm', sessionResult?.qcStdLengthPx, 'px'))),
           ],
@@ -92,13 +92,13 @@ class _DashboardContent extends StatelessWidget {
           children: [
             Expanded(
                 child: _StatTile(
-                    label: 'ĐLC chiều rộng (QC)',
+                    label: 'ĐLC chiều rộng (báo cáo)',
                     value: _formatMeasureStat(sessionResult?.qcStdWidthMm, 'mm',
                         sessionResult?.qcStdWidthPx, 'px'))),
             const SizedBox(width: 12),
             Expanded(
                 child: _StatTile(
-                    label: 'ĐLC diện tích (QC)',
+                    label: 'ĐLC diện tích (báo cáo)',
                     value: _formatMeasureStat(sessionResult?.qcStdAreaMm2,
                         'mm2', sessionResult?.qcStdAreaPx, 'px2'))),
           ],
@@ -442,7 +442,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _ResultTile(
-                      label: 'ĐLC diện tích (QC)',
+                      label: 'ĐLC diện tích (báo cáo)',
                       value: result.qcStdAreaMm2 == null
                           ? '${result.qcStdAreaPx.toStringAsFixed(1)} px2'
                           : '${result.qcStdAreaMm2!.toStringAsFixed(3)} mm2',
@@ -455,7 +455,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 children: [
                   Expanded(
                     child: _ResultTile(
-                      label: 'ĐLC chiều dài (QC)',
+                      label: 'ĐLC chiều dài (báo cáo)',
                       value: result.qcStdLengthMm == null
                           ? '${result.qcStdLengthPx.toStringAsFixed(1)} px'
                           : '${result.qcStdLengthMm!.toStringAsFixed(2)} mm',
@@ -464,7 +464,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _ResultTile(
-                      label: 'ĐLC chiều rộng (QC)',
+                      label: 'ĐLC chiều rộng (báo cáo)',
                       value: result.qcStdWidthMm == null
                           ? '${result.qcStdWidthPx.toStringAsFixed(1)} px'
                           : '${result.qcStdWidthMm!.toStringAsFixed(2)} mm',
@@ -483,7 +483,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   ),
                   child: Text(
                     'QC phát hiện ${result.qcSuspectCount} vùng nghi nhiễu/outlier. '
-                    'ĐLC QC tính trên ${result.qcInlierCount} hạt; '
+                    '${result.qcRobustUsedForReporting ? 'ĐLC báo cáo tính trên ${result.qcInlierCount} hạt sau QC.' : 'Tỷ lệ nghi ngờ cao; ĐLC báo cáo giữ nguyên SD thô, không tự loại vùng.'} '
                     'hãy kiểm tra ảnh đánh số trước khi kết luận.'
                     '${result.qcSuspectIdsLabel.isEmpty ? '' : ' ID nghi ngờ: ${result.qcSuspectIdsLabel}.'}',
                     style: const TextStyle(fontSize: 12),
@@ -1170,7 +1170,6 @@ class _ReferenceMagnifier extends StatelessWidget {
   }
 }
 
-
 class _ReferenceMagnifierPainter extends CustomPainter {
   static const _windowPixels = 72.0;
 
@@ -1521,7 +1520,8 @@ class _CalibrationGuideDialog extends StatefulWidget {
   const _CalibrationGuideDialog();
 
   @override
-  State<_CalibrationGuideDialog> createState() => _CalibrationGuideDialogState();
+  State<_CalibrationGuideDialog> createState() =>
+      _CalibrationGuideDialogState();
 }
 
 class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
@@ -1551,7 +1551,8 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.help_center_outlined, color: AppTheme.primary, size: 20),
+                    Icon(Icons.help_center_outlined,
+                        color: AppTheme.primary, size: 20),
                     SizedBox(width: 6),
                     Text(
                       'Hướng dẫn căn mốc',
@@ -1605,11 +1606,13 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                             ],
                           ),
                           child: const Center(
-                            child: Icon(Icons.stars, color: Colors.white, size: 26),
+                            child: Icon(Icons.stars,
+                                color: Colors.white, size: 26),
                           ),
                         ),
                         const SizedBox(width: 16),
-                        const Icon(Icons.compare_arrows, color: Colors.grey, size: 28),
+                        const Icon(Icons.compare_arrows,
+                            color: Colors.grey, size: 28),
                         const SizedBox(width: 16),
                         Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1623,7 +1626,8 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFEAB308),
                                   borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFFCA8A04), width: 1),
+                                  border: Border.all(
+                                      color: const Color(0xFFCA8A04), width: 1),
                                 ),
                               ),
                             ),
@@ -1656,10 +1660,15 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                                   decoration: BoxDecoration(
                                     color: Colors.grey.shade300,
                                     borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: Colors.grey.shade400),
+                                    border:
+                                        Border.all(color: Colors.grey.shade400),
                                   ),
                                   child: const Center(
-                                    child: Text('Vật mốc', style: TextStyle(fontSize: 10, color: Colors.black54, fontWeight: FontWeight.w500)),
+                                    child: Text('Vật mốc',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.black54,
+                                            fontWeight: FontWeight.w500)),
                                   ),
                                 ),
                               ),
@@ -1683,7 +1692,11 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Center(
-                                    child: Text('A', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                                    child: Text('A',
+                                        style: TextStyle(
+                                            fontSize: 9,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold)),
                                   ),
                                 ),
                               ),
@@ -1698,7 +1711,11 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Center(
-                                    child: Text('B', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                                    child: Text('B',
+                                        style: TextStyle(
+                                            fontSize: 9,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold)),
                                   ),
                                 ),
                               ),
@@ -1708,7 +1725,8 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                         const Positioned(
                           right: 25,
                           bottom: 10,
-                          child: Icon(Icons.touch_app, size: 26, color: AppTheme.primary),
+                          child: Icon(Icons.touch_app,
+                              size: 26, color: AppTheme.primary),
                         ),
                       ],
                     ),
@@ -1726,7 +1744,8 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppTheme.primary, width: 2),
+                            border:
+                                Border.all(color: AppTheme.primary, width: 2),
                           ),
                           child: Stack(
                             children: [
@@ -1741,15 +1760,21 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                                 ),
                               ),
                               const Center(
-                                child: Icon(Icons.add, color: Colors.red, size: 20),
+                                child: Icon(Icons.add,
+                                    color: Colors.red, size: 20),
                               ),
                               Positioned(
                                 top: 2,
                                 left: 2,
                                 child: Container(
                                   color: AppTheme.primary,
-                                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                                  child: const Text('A', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 3, vertical: 1),
+                                  child: const Text('A',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.bold)),
                                 ),
                               ),
                             ],
@@ -1767,7 +1792,8 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                             border: Border.all(color: Colors.grey.shade300),
                           ),
                           child: const Center(
-                            child: Icon(Icons.zoom_in, size: 30, color: AppTheme.primary),
+                            child: Icon(Icons.zoom_in,
+                                size: 30, color: AppTheme.primary),
                           ),
                         ),
                       ],
@@ -1779,7 +1805,8 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                         'Sau khi căn chỉnh đường đo khớp với vật mốc trên ảnh, hãy nhập độ dài thực tế của vật mốc đó bằng mm vào ô "Vật mốc (mm)".',
                     diagram: Container(
                       width: 190,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(6),
@@ -1794,12 +1821,14 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.edit, size: 14, color: AppTheme.primary),
+                          const Icon(Icons.edit,
+                              size: 14, color: AppTheme.primary),
                           const SizedBox(width: 6),
                           const Expanded(
                             child: Text(
                               'Vật mốc (mm): 20.0',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                  fontSize: 11, fontWeight: FontWeight.w600),
                             ),
                           ),
                           Container(
@@ -1808,7 +1837,8 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                               color: Colors.green,
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.check, size: 8, color: Colors.white),
+                            child: const Icon(Icons.check,
+                                size: 8, color: Colors.white),
                           ),
                         ],
                       ),
@@ -1832,7 +1862,9 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                       width: _currentPage == index ? 14 : 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: _currentPage == index ? AppTheme.primary : AppTheme.border,
+                        color: _currentPage == index
+                            ? AppTheme.primary
+                            : AppTheme.border,
                         borderRadius: BorderRadius.circular(3),
                       ),
                     );
@@ -1851,13 +1883,16 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                         },
                         child: const Text(
                           'Quay lại',
-                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                          style: TextStyle(
+                              color: AppTheme.textSecondary, fontSize: 13),
                         ),
                       ),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        textStyle: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.bold),
                       ),
                       onPressed: () {
                         if (_currentPage < 3) {
@@ -1881,4 +1916,3 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
     );
   }
 }
-
