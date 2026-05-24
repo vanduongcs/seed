@@ -8,7 +8,6 @@ import {
   Chip,
   CircularProgress,
   Dialog,
-  DialogContent,
   Divider,
   IconButton,
   LinearProgress,
@@ -16,7 +15,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { HelpOutline, Close, Stars, CompareArrows, Edit, Check, TouchApp } from '@mui/icons-material';
+import { HelpOutline, Close, Edit, Check, Mouse, CameraAlt, Straighten } from '@mui/icons-material';
 
 const PREVIEW_MODES = [
   ['overlay', 'Đánh dấu'],
@@ -81,181 +80,139 @@ export const DashboardPreviewPanel = ({
     setCurrentStep((prev) => Math.max(prev - 1, 0));
   };
 
+  // Diagram: bước 0 — chụp ảnh có vật mốc
+  const DiagramStep0 = () => (
+    <Stack spacing={1.5} alignItems="center">
+      <Stack direction="row" spacing={2} alignItems="flex-end" justifyContent="center">
+        {/* Vật mốc: đồng xu */}
+        <Stack alignItems="center" spacing={0.5}>
+          <Box sx={{
+            width: 38, height: 38, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #FBBF24, #D97706)',
+            border: '2px solid #B45309',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <Typography sx={{ fontSize: 8, color: 'white', fontWeight: 'bold', lineHeight: 1 }}>500đ</Typography>
+          </Box>
+          <Typography variant="caption" sx={{ fontSize: 9, color: 'text.secondary' }}>Vật mốc</Typography>
+        </Stack>
+        {/* Các hạt */}
+        <Stack alignItems="center" spacing={0.5}>
+          <Stack direction="row" spacing={0.5}>
+            {[14, 18, 12, 16].map((h, i) => (
+              <Box key={i} sx={{ width: 10, height: h, borderRadius: 1, bgcolor: '#EAB308', border: '1px solid #CA8A04' }} />
+            ))}
+          </Stack>
+          <Typography variant="caption" sx={{ fontSize: 9, color: 'text.secondary' }}>Hạt cần đo</Typography>
+        </Stack>
+      </Stack>
+      <Stack direction="row" spacing={0.75} alignItems="center">
+        <CameraAlt sx={{ fontSize: 16, color: 'text.secondary' }} />
+        <Typography variant="caption" sx={{ fontSize: 10, color: 'text.secondary' }}>Chụp cùng một khung ảnh</Typography>
+      </Stack>
+    </Stack>
+  );
+
+  // Diagram: bước 1 — kéo thả chuột từ trái sang phải
+  const DiagramStep1 = () => (
+    <Box sx={{ position: 'relative', width: 200, height: 90, bgcolor: '#F3F4F6', borderRadius: 2, border: '1px solid #E5E7EB', overflow: 'hidden' }}>
+      {/* Vật mốc */}
+      <Box sx={{ position: 'absolute', left: 20, top: 28, width: 160, height: 34, bgcolor: '#D1D5DB', borderRadius: 1, border: '1px dashed #9CA3AF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography sx={{ fontSize: 9, color: '#6B7280', fontWeight: 600 }}>Vật mốc (đồng xu / thước)</Typography>
+      </Box>
+      {/* Đường đo */}
+      <Box sx={{ position: 'absolute', left: 22, top: 44, width: 156, height: 2, bgcolor: '#2563EB' }} />
+      {/* Điểm A — đang nhấn chuột */}
+      <Box sx={{ position: 'absolute', left: 14, top: 37, width: 16, height: 16, borderRadius: '50%', bgcolor: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 4px rgba(37,99,235,0.18)' }}>
+        <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>A</Typography>
+      </Box>
+      {/* Điểm B */}
+      <Box sx={{ position: 'absolute', right: 14, top: 37, width: 16, height: 16, borderRadius: '50%', bgcolor: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>B</Typography>
+      </Box>
+      {/* Mũi tên hướng kéo */}
+      <Mouse sx={{ position: 'absolute', left: 8, bottom: 6, fontSize: 16, color: '#6B7280' }} />
+      <Typography sx={{ position: 'absolute', left: 26, bottom: 8, fontSize: 9, color: '#6B7280' }}>Nhấn giữ → kéo sang phải → thả</Typography>
+    </Box>
+  );
+
+  // Diagram: bước 2 — xóa và vẽ lại
+  const DiagramStep2 = () => (
+    <Stack spacing={1.25} sx={{ width: '100%', maxWidth: 210 }}>
+      <Stack direction="row" spacing={1.25} alignItems="flex-start">
+        <Box sx={{ mt: 0.25, width: 18, height: 18, borderRadius: '50%', bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Typography sx={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>1</Typography>
+        </Box>
+        <Typography variant="caption" sx={{ lineHeight: 1.45 }}>
+          Nếu đường vẽ lệch, click nút <Box component="span" sx={{ fontWeight: 700, color: 'error.main' }}>Xóa vật mốc</Box> để xóa và vẽ lại từ đầu.
+        </Typography>
+      </Stack>
+      <Stack direction="row" spacing={1.25} alignItems="flex-start">
+        <Box sx={{ mt: 0.25, width: 18, height: 18, borderRadius: '50%', bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Typography sx={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>2</Typography>
+        </Box>
+        <Typography variant="caption" sx={{ lineHeight: 1.45 }}>
+          Kiểm tra số <Box component="span" sx={{ fontWeight: 700 }}>px</Box> hiển thị — con số này phải khớp với chiều dài vật mốc bạn vẽ.
+        </Typography>
+      </Stack>
+      <Stack direction="row" spacing={1.25} alignItems="flex-start">
+        <Box sx={{ mt: 0.25, width: 18, height: 18, borderRadius: '50%', bgcolor: 'success.main', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Check sx={{ color: 'white', fontSize: 12 }} />
+        </Box>
+        <Typography variant="caption" sx={{ lineHeight: 1.45, color: 'text.secondary' }}>
+          Đường đo khớp cả hai mép vật mốc là đạt.
+        </Typography>
+      </Stack>
+    </Stack>
+  );
+
+  // Diagram: bước 3 — nhập mm
+  const DiagramStep3 = () => (
+    <Stack spacing={1} alignItems="center">
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.25, bgcolor: 'background.paper', borderRadius: 1.5, border: '1.5px solid', borderColor: 'primary.main', width: 190 }}>
+        <Edit sx={{ color: 'primary.main', fontSize: 14 }} />
+        <Typography variant="body2" fontWeight={600} sx={{ flexGrow: 1 }}>
+          Kích thước vật mốc (mm):
+        </Typography>
+      </Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, bgcolor: '#F0FDF4', borderRadius: 1.5, border: '1px solid #86EFAC', width: 190 }}>
+        <Straighten sx={{ color: 'success.main', fontSize: 14 }} />
+        <Typography variant="body2" fontWeight={700} color="success.dark">20</Typography>
+        <Typography variant="caption" color="text.secondary">mm (ví dụ: đồng xu 500đ ≈ 20 mm)</Typography>
+      </Box>
+      <Stack direction="row" spacing={0.5} alignItems="center">
+        <Check sx={{ color: 'success.main', fontSize: 14 }} />
+        <Typography variant="caption" color="text.secondary">Hệ thống tự tính tỷ lệ mm/px</Typography>
+      </Stack>
+    </Stack>
+  );
+
   const renderSlideDiagram = (step) => {
     switch (step) {
-      case 0:
-        return (
-          <Stack direction="row" spacing={3} alignItems="center">
-            <Box sx={{
-              width: 50,
-              height: 50,
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #FBBF24 0%, #D97706 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 3px 6px rgba(0,0,0,0.12)'
-            }}>
-              <Stars sx={{ color: 'white', fontSize: 26 }} />
-            </Box>
-            <CompareArrows sx={{ color: 'text.secondary', fontSize: 28 }} />
-            <Stack direction="row" spacing={0.5}>
-              {[0, 1, 2].map((i) => (
-                <Box key={i} sx={{
-                  width: 12,
-                  height: 22,
-                  borderRadius: 1.5,
-                  bgcolor: '#EAB308',
-                  border: '1.5px solid #CA8A04'
-                }} />
-              ))}
-            </Stack>
-          </Stack>
-        );
-      case 1:
-        return (
-          <Box sx={{
-            width: 180,
-            height: 100,
-            bgcolor: '#F3F4F6',
-            borderRadius: 2,
-            border: '1px solid #E5E7EB',
-            position: 'relative',
-            overflow: 'hidden'
-          }}>
-            <Box sx={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: 100,
-              height: 28,
-              bgcolor: '#D1D5DB',
-              borderRadius: 1,
-              border: '1px dashed #9CA3AF',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: 9 }}>Vật mốc</Typography>
-            </Box>
-            <Box sx={{
-              position: 'absolute',
-              left: 45,
-              top: 50,
-              width: 90,
-              height: 2,
-              bgcolor: '#1D4ED8'
-            }} />
-            <Box sx={{
-              position: 'absolute',
-              left: 38,
-              top: 43,
-              width: 16,
-              height: 16,
-              borderRadius: '50%',
-              bgcolor: '#1D4ED8',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
-            }}>
-              <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>A</Typography>
-            </Box>
-            <Box sx={{
-              position: 'absolute',
-              right: 38,
-              top: 43,
-              width: 16,
-              height: 16,
-              borderRadius: '50%',
-              bgcolor: '#1D4ED8',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
-            }}>
-              <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>B</Typography>
-            </Box>
-            <TouchApp sx={{
-              position: 'absolute',
-              right: 25,
-              bottom: 8,
-              color: 'primary.main',
-              fontSize: 24,
-            }} />
-          </Box>
-        );
-      case 2:
-        return (
-          <Stack spacing={1} sx={{ textAlign: 'left', width: '100%', maxWidth: 210 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Check color="primary" sx={{ fontSize: 16 }} />
-              <Typography variant="caption" fontWeight={650}>Kéo thả chuột chính xác</Typography>
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ pl: 3.25, mt: -0.5, fontSize: 10, lineHeight: 1.25 }}>
-              Giữ chuột trái ở đầu A, kéo thẳng sang đầu B của vật mốc rồi thả ra để hoàn tất vẽ.
-            </Typography>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Check color="primary" sx={{ fontSize: 16 }} />
-              <Typography variant="caption" fontWeight={650}>Xóa vẽ lại dễ dàng</Typography>
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ pl: 3.25, mt: -0.5, fontSize: 10, lineHeight: 1.25 }}>
-              Click nút "Xóa vật mốc" để vẽ lại từ đầu bất cứ lúc nào.
-            </Typography>
-          </Stack>
-        );
-      case 3:
-        return (
-          <Box sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1.5,
-            p: 1.25,
-            bgcolor: 'background.paper',
-            borderRadius: 1.5,
-            border: '1.5px solid',
-            borderColor: 'primary.main',
-            boxShadow: '0 4px 10px rgba(47, 107, 79, 0.06)'
-          }}>
-            <Edit sx={{ color: 'primary.main', fontSize: 14 }} />
-            <Typography variant="body2" fontWeight={600} color="text.primary">
-              Vật mốc (mm): <Box component="span" sx={{ color: 'primary.main', fontWeight: 750 }}>20.0</Box>
-            </Typography>
-            <Box sx={{
-              width: 18,
-              height: 18,
-              borderRadius: '50%',
-              bgcolor: '#2E7D32',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
-              <Check sx={{ color: 'white', fontSize: 11 }} />
-            </Box>
-          </Box>
-        );
-      default:
-        return null;
+      case 0: return <DiagramStep0 />;
+      case 1: return <DiagramStep1 />;
+      case 2: return <DiagramStep2 />;
+      case 3: return <DiagramStep3 />;
+      default: return null;
     }
   };
 
   const getSlideTitle = (step) => {
     switch (step) {
-      case 0: return '1. Ý nghĩa của vật mốc';
-      case 1: return '2. Cách vẽ thước đo';
-      case 2: return '3. Cách thao tác kéo thả';
-      case 3: return '4. Nhập chiều dài thực tế';
+      case 0: return '1. Chuẩn bị ảnh';
+      case 1: return '2. Kéo thả chuột đo vật mốc';
+      case 2: return '3. Kiểm tra và vẽ lại';
+      case 3: return '4. Nhập kích thước thực (mm)';
       default: return '';
     }
   };
 
   const getSlideDescription = (step) => {
     switch (step) {
-      case 0: return 'Vật mốc vật lý (đồng xu, thước đo...) đặt cạnh các hạt giúp quy đổi chính xác kích thước pixel trên ảnh sang milimét trong thực tế.';
-      case 1: return 'Dùng chuột nhấp và kéo một đường đo thẳng khớp từ đầu này sang đầu kia của vật mốc trên hình ảnh để đo độ dài điểm ảnh.';
-      case 2: return 'Nhấp giữ chuột trái ở một đầu của vật mốc, giữ và kéo thẳng chuột sang đầu bên kia rồi buông chuột ra. Đường đo sẽ tự động được vẽ.';
-      case 3: return 'Cuối cùng, nhập kích thước thực của vật mốc (ví dụ: 20 mm cho đồng xu 2cm) để hoàn tất quy đổi tỷ lệ hạt.';
+      case 0: return 'Đặt vật mốc có kích thước biết trước (đồng xu, đoạn thước...) cạnh các hạt rồi chụp ảnh, sao cho cả vật mốc lẫn hạt đều nằm trong khung.';
+      case 1: return 'Nhấn giữ chuột trái tại mép trái vật mốc, kéo thẳng sang mép phải rồi thả ra. Đường đo màu xanh A–B sẽ xuất hiện dọc theo chiều dài vật mốc.';
+      case 2: return 'Nếu đường lệch, click "Xóa vật mốc" rồi kéo lại. Kiểm tra số px hiển thị — đường phải chạy sát hai mép vật mốc, không thừa không thiếu.';
+      case 3: return 'Nhập đúng chiều dài thực tế của vật mốc vào ô "Kích thước vật mốc (mm)". Hệ thống tự tính tỷ lệ và quy đổi kích thước hạt sang mm.';
       default: return '';
     }
   };

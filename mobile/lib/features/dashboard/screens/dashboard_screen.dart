@@ -1467,6 +1467,26 @@ double _asDouble(dynamic value) {
   return double.tryParse(value?.toString() ?? '') ?? 0;
 }
 
+class _MiniArrowButton extends StatelessWidget {
+  final IconData icon;
+  const _MiniArrowButton({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(2),
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Icon(icon, size: 14, color: AppTheme.textPrimary),
+    );
+  }
+}
+
 class _GuideSlide extends StatelessWidget {
   final String title;
   final String description;
@@ -1581,195 +1601,252 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                 onPageChanged: (page) => setState(() => _currentPage = page),
                 children: [
                   _GuideSlide(
-                    title: '1. Tại sao cần vật mốc?',
+                    title: '1. Chuẩn bị ảnh',
                     description:
-                        'Vật mốc vật lý (như đồng xu, thước đo...) giúp ứng dụng quy đổi kích thước ảnh (pixel) sang kích thước thực tế (mm).',
+                        'Đặt vật mốc biết kích thước (đồng xu, đoạn thước...) cạnh các hạt. Chụp sao cho cả vật mốc lẫn hạt đều nằm trong khung ảnh.',
                     diagram: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Container(
-                          width: 54,
-                          height: 54,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFFFBBF24), Color(0xFFD97706)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.1),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
-                          ),
-                          child: const Center(
-                            child: Icon(Icons.stars,
-                                color: Colors.white, size: 26),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        const Icon(Icons.compare_arrows,
-                            color: Colors.grey, size: 28),
-                        const SizedBox(width: 16),
-                        Row(
+                        // Đồng xu
+                        Column(
                           mainAxisSize: MainAxisSize.min,
-                          children: List.generate(
-                            3,
-                            (index) => Padding(
-                              padding: const EdgeInsets.only(right: 4),
-                              child: Container(
-                                width: 12,
-                                height: 22,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFEAB308),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                      color: const Color(0xFFCA8A04), width: 1),
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFBBF24),
+                                    Color(0xFFD97706)
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
                                 ),
+                                border: Border.all(
+                                    color: const Color(0xFFB45309), width: 1.5),
+                              ),
+                              child: const Center(
+                                child: Text('500đ',
+                                    style: TextStyle(
+                                        fontSize: 8,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text('Vật mốc',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    color: AppTheme.textSecondary)),
+                          ],
+                        ),
+                        const SizedBox(width: 18),
+                        // Các hạt
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                for (final h in [18, 22, 14, 20])
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 4),
+                                    child: Container(
+                                      width: 11,
+                                      height: h.toDouble(),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEAB308),
+                                        borderRadius: BorderRadius.circular(3),
+                                        border: Border.all(
+                                            color: const Color(0xFFCA8A04),
+                                            width: 1),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            const Text('Hạt cần đo',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    color: AppTheme.textSecondary)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  _GuideSlide(
+                    title: '2. Chạm để đặt đoạn đo',
+                    description:
+                        'Chạm bất kỳ vị trí nào trên vật mốc trong ảnh — đoạn A–B tự xuất hiện. Kéo chốt A hoặc B để khớp hai mép vật mốc.',
+                    diagram: SizedBox(
+                      width: 200,
+                      height: 100,
+                      child: Stack(
+                        children: [
+                          // Nền ảnh giả
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF3F4F6),
+                                borderRadius: BorderRadius.circular(8),
+                                border:
+                                    Border.all(color: const Color(0xFFE5E7EB)),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                          // Vật mốc
+                          Positioned(
+                            left: 20,
+                            top: 30,
+                            child: Container(
+                              width: 160,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade300,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.grey.shade400),
+                              ),
+                              child: const Center(
+                                child: Text('Vật mốc',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.black54,
+                                        fontWeight: FontWeight.w500)),
+                              ),
+                            ),
+                          ),
+                          // Đường đo
+                          Positioned(
+                            left: 22,
+                            top: 44,
+                            child: Container(
+                                width: 156,
+                                height: 2,
+                                color: const Color(0xFF2563EB)),
+                          ),
+                          // Chốt A
+                          Positioned(
+                            left: 14,
+                            top: 37,
+                            child: Container(
+                              width: 16,
+                              height: 16,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2563EB),
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF2563EB)
+                                        .withValues(alpha: 0.3),
+                                    blurRadius: 6,
+                                    spreadRadius: 2,
+                                  )
+                                ],
+                              ),
+                              child: const Center(
+                                child: Text('A',
+                                    style: TextStyle(
+                                        fontSize: 9,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ),
+                          // Chốt B
+                          Positioned(
+                            right: 14,
+                            top: 37,
+                            child: Container(
+                              width: 16,
+                              height: 16,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF2563EB),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Center(
+                                child: Text('B',
+                                    style: TextStyle(
+                                        fontSize: 9,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ),
+                          // Icon ngón tay chạm
+                          const Positioned(
+                            right: 8,
+                            bottom: 6,
+                            child: Icon(Icons.touch_app,
+                                size: 22, color: AppTheme.primary),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   _GuideSlide(
-                    title: '2. Cách vẽ đường mốc',
+                    title: '3. Kính lúp & tinh chỉnh',
                     description:
-                        'Chạm bất kỳ điểm nào trên vật mốc trong ảnh để tạo đường đo. Sau đó, kéo đầu A hoặc đầu B để căn chỉnh khớp chiều dài.',
-                    diagram: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          width: 180,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3F4F6),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                          ),
-                          child: Stack(
-                            children: [
-                              Center(
-                                child: Container(
-                                  width: 110,
-                                  height: 32,
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade300,
-                                    borderRadius: BorderRadius.circular(4),
-                                    border:
-                                        Border.all(color: Colors.grey.shade400),
-                                  ),
-                                  child: const Center(
-                                    child: Text('Vật mốc',
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.black54,
-                                            fontWeight: FontWeight.w500)),
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                left: 45,
-                                top: 50,
-                                child: Container(
-                                  width: 90,
-                                  height: 2,
-                                  color: const Color(0xFF2563EB),
-                                ),
-                              ),
-                              Positioned(
-                                left: 38,
-                                top: 43,
-                                child: Container(
-                                  width: 16,
-                                  height: 16,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF2563EB),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Center(
-                                    child: Text('A',
-                                        style: TextStyle(
-                                            fontSize: 9,
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold)),
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                right: 38,
-                                top: 43,
-                                child: Container(
-                                  width: 16,
-                                  height: 16,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF2563EB),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Center(
-                                    child: Text('B',
-                                        style: TextStyle(
-                                            fontSize: 9,
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold)),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Positioned(
-                          right: 25,
-                          bottom: 10,
-                          child: Icon(Icons.touch_app,
-                              size: 26, color: AppTheme.primary),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _GuideSlide(
-                    title: '3. Kính lúp căn chỉnh',
-                    description:
-                        'Khi kéo các chốt A và B, hãy quan sát ô Kính lúp cố định ở góc trên bên phải để căn các chốt khớp hoàn hảo với mép vật mốc.',
+                        'Khi kéo chốt A hoặc B, ô kính lúp phóng to vùng đang chỉnh. Dùng nút mũi tên ← → ↑ ↓ để dịch chuyển 1 pixel cho đến khi khớp mép.',
                     diagram: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
+                        // Kính lúp
                         Container(
-                          width: 64,
-                          height: 64,
+                          width: 70,
+                          height: 70,
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(6),
                             border:
                                 Border.all(color: AppTheme.primary, width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppTheme.primary.withValues(alpha: 0.15),
+                                blurRadius: 6,
+                                spreadRadius: 1,
+                              )
+                            ],
                           ),
                           child: Stack(
                             children: [
-                              Center(
-                                child: Container(
-                                  width: 48,
-                                  height: 48,
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade300,
-                                    shape: BoxShape.circle,
-                                  ),
+                              // Ảnh giả phóng to
+                              Positioned.fill(
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(5),
+                                  child: Container(color: Colors.grey.shade200),
                                 ),
                               ),
+                              // Đường đo trong kính lúp
+                              const Positioned(
+                                left: 10,
+                                right: 10,
+                                top: 34,
+                                child: SizedBox(
+                                    height: 2,
+                                    child:
+                                        ColoredBox(color: Color(0xFF2563EB))),
+                              ),
+                              // Crosshair
                               const Center(
                                 child: Icon(Icons.add,
-                                    color: Colors.red, size: 20),
+                                    color: Colors.red, size: 18),
                               ),
+                              // Nhãn A
                               Positioned(
-                                top: 2,
-                                left: 2,
+                                top: 3,
+                                left: 3,
                                 child: Container(
-                                  color: AppTheme.primary,
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 3, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primary,
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
                                   child: const Text('A',
                                       style: TextStyle(
                                           color: Colors.white,
@@ -1780,68 +1857,100 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        const Icon(Icons.arrow_forward, color: Colors.grey),
-                        const SizedBox(width: 12),
-                        Container(
-                          width: 64,
-                          height: 64,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3F4F6),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.grey.shade300),
-                          ),
-                          child: const Center(
-                            child: Icon(Icons.zoom_in,
-                                size: 30, color: AppTheme.primary),
-                          ),
+                        const SizedBox(width: 14),
+                                                // Nút mũi tên
+                                                const Column(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    _MiniArrowButton(icon: Icons.arrow_upward),
+                                                    Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        _MiniArrowButton(icon: Icons.arrow_back),
+                                                        SizedBox(width: 4),
+                                                        _MiniArrowButton(icon: Icons.arrow_forward),
+                                                      ],
+                                                    ),
+                                                    _MiniArrowButton(icon: Icons.arrow_downward),
+                                                    SizedBox(height: 2),
+                                                    Text('1 px/lần',
+                                                        style: TextStyle(
+                                                            fontSize: 8,
+                                                            color: AppTheme.textSecondary)),
+                          ],
                         ),
                       ],
                     ),
                   ),
                   _GuideSlide(
-                    title: '4. Nhập số đo thực tế',
+                    title: '4. Nhập kích thước thực (mm)',
                     description:
-                        'Sau khi căn chỉnh đường đo khớp với vật mốc trên ảnh, hãy nhập độ dài thực tế của vật mốc đó bằng mm vào ô "Vật mốc (mm)".',
-                    diagram: Container(
-                      width: 190,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: AppTheme.primary, width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
+                        'Nhập đúng chiều dài thực tế của vật mốc vào ô "Vật mốc (mm)". Hệ thống tự tính tỷ lệ và quy đổi kích thước hạt sang mm.',
+                    diagram: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 200,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border:
+                                Border.all(color: AppTheme.primary, width: 1.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.05),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              )
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.edit,
-                              size: 14, color: AppTheme.primary),
-                          const SizedBox(width: 6),
-                          const Expanded(
-                            child: Text(
-                              'Vật mốc (mm): 20.0',
-                              style: TextStyle(
-                                  fontSize: 11, fontWeight: FontWeight.w600),
-                            ),
+                                                    child: const Row(
+                            children: [
+                              Icon(Icons.edit,
+                                  size: 14, color: AppTheme.primary),
+                              SizedBox(width: 6),
+                              Text(
+                                'Vật mốc (mm):',
+                                style: TextStyle(
+                                    fontSize: 11, fontWeight: FontWeight.w600),
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                '20',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.primary),
+                              ),
+                            ],
                           ),
-                          Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: const BoxDecoration(
-                              color: Colors.green,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.check,
-                                size: 8, color: Colors.white),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0FDF4),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFF86EFAC)),
                           ),
-                        ],
-                      ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_outline,
+                                  size: 13, color: Colors.green),
+                              SizedBox(width: 5),
+                              Text(
+                                'Hệ thống tự tính tỷ lệ mm/px',
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.green),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
