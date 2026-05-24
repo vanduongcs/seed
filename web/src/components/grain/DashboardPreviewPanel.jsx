@@ -265,11 +265,25 @@ export const DashboardPreviewPanel = ({
       <Card sx={{ height: '100%' }}>
         <CardContent sx={{ p: 2.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
-            <Box>
-              <Typography variant="h6" fontWeight={700}>Hình ảnh hiển thị</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Xem trước ảnh chụp từ camera hoặc tệp ảnh tải lên để phân tích kích thước hạt.
-              </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75 }}>
+              <Box>
+                <Typography variant="h6" fontWeight={700}>Hình ảnh hiển thị</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Xem trước ảnh chụp từ camera hoặc tệp ảnh tải lên để phân tích kích thước hạt.
+                </Typography>
+              </Box>
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => {
+                  setCurrentStep(0);
+                  setGuideOpen(true);
+                }}
+                title="Xem hướng dẫn căn mốc"
+                aria-label="Xem hướng dẫn căn mốc"
+              >
+                <HelpOutline fontSize="small" />
+              </IconButton>
             </Box>
             <Chip
               label={result ? 'Đã xử lý' : 'Sẵn sàng'}
@@ -386,28 +400,15 @@ export const DashboardPreviewPanel = ({
           {previewUrl && (
             <Box sx={{ mb: 1.5 }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
-                <Stack direction="row" spacing={0.5} alignItems="center">
-                  <TextField
-                    label="Kích thước vật mốc (mm)"
-                    type="number"
-                    size="small"
-                    value={calibration.referenceMm}
-                    onChange={(event) => onCalibrationChange((current) => ({ ...current, referenceMm: event.target.value }))}
-                    inputProps={{ min: 0, step: 0.01 }}
-                    sx={{ maxWidth: { sm: 220 } }}
-                  />
-                  <IconButton
-                    size="small"
-                    color="primary"
-                    onClick={() => {
-                      setCurrentStep(0);
-                      setGuideOpen(true);
-                    }}
-                    title="Xem hướng dẫn căn mốc"
-                  >
-                    <HelpOutline fontSize="small" />
-                  </IconButton>
-                </Stack>
+                <TextField
+                  label="Kích thước vật mốc (mm)"
+                  type="number"
+                  size="small"
+                  value={calibration.referenceMm}
+                  onChange={(event) => onCalibrationChange((current) => ({ ...current, referenceMm: event.target.value }))}
+                  inputProps={{ min: 0, step: 0.01 }}
+                  sx={{ maxWidth: { sm: 220 } }}
+                />
                 <Chip
                   size="small"
                   color={calibrationReady ? 'primary' : 'default'}
