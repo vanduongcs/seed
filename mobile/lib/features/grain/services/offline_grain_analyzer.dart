@@ -189,10 +189,12 @@ class OfflineGrainAnalyzer {
       }
     }
 
+    final processedPng = Uint8List.fromList(img.encodePng(processed));
+
     return compute(
       _finishAnalysis,
       _OfflinePostprocessInput(
-        imageBytes,
+        processedPng,
         predictions: predictions,
         protos: protos,
         predictionsEnhanced: predictionsEnhanced,
@@ -214,16 +216,8 @@ class OfflineGrainAnalyzer {
   }
 
   static OfflineAnalyzeResult _finishAnalysis(_OfflinePostprocessInput input) {
-    final original = img.decodeImage(input.imageBytes);
-    if (original == null) throw StateError('Cannot decode selected image.');
-    final processed = input.scale < 1.0
-        ? img.copyResize(
-            original,
-            width: input.width,
-            height: input.height,
-            interpolation: img.Interpolation.average,
-          )
-        : img.Image.from(original);
+    final processed = img.decodePng(input.previewImagePng);
+    if (processed == null) throw StateError('Cannot decode selected image.');
     final detections = _mergeDetections(
       _decodePredictions(input.predictions, passId: 0),
       _decodePredictions(input.predictionsEnhanced, passId: 1),
@@ -262,7 +256,7 @@ class OfflineGrainAnalyzer {
         instances.where((instance) => instance.classId == 0).length;
     final refCandidateCount = instances.length - seedCandidateCount;
     return OfflineAnalyzeResult(
-      originalPng: Uint8List.fromList(img.encodePng(original)),
+      originalPng: input.previewImagePng,
       overlayPng: Uint8List.fromList(img.encodePng(overlay)),
       maskPng: Uint8List.fromList(img.encodePng(mask)),
       labelsPng: Uint8List.fromList(img.encodePng(labels)),
@@ -1202,7 +1196,7 @@ class _FilteredResult {
 }
 
 class _OfflinePostprocessInput {
-  final Uint8List imageBytes;
+  final Uint8List previewImagePng;
   final Float32List predictions;
   final Float32List protos;
   final Float32List predictionsEnhanced;
@@ -1221,7 +1215,7 @@ class _OfflinePostprocessInput {
   final double? referenceY2;
 
   const _OfflinePostprocessInput(
-    this.imageBytes, {
+    this.previewImagePng, {
     required this.predictions,
     required this.protos,
     required this.predictionsEnhanced,

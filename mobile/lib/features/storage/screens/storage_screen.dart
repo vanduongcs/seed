@@ -156,7 +156,11 @@ class _RunCardState extends State<_RunCard> {
                         builder: (context, snapshot) {
                           final bytes = snapshot.data;
                           if (bytes != null) {
-                            return Image.memory(bytes, fit: BoxFit.cover);
+                            return Image.memory(
+                              bytes,
+                              fit: BoxFit.cover,
+                              cacheWidth: 164,
+                            );
                           }
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) {
@@ -175,7 +179,11 @@ class _RunCardState extends State<_RunCard> {
                           );
                         },
                       )
-                    : Image.memory(overlayBytes, fit: BoxFit.cover),
+                    : Image.memory(
+                        overlayBytes,
+                        fit: BoxFit.cover,
+                        cacheWidth: 164,
+                      ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -295,7 +303,10 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
               if (preview.isNotEmpty)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(base64Decode(preview)),
+                  child: Image.memory(
+                    base64Decode(preview),
+                    cacheWidth: 1200,
+                  ),
                 ),
               const SizedBox(height: 12),
               _detailRow('Tổng số hạt đo được', '${result.count}'),

@@ -207,6 +207,10 @@ class _BackendAnalysisCard extends ConsumerStatefulWidget {
 }
 
 class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
+  static const _pickedImageMaxDimension = 1800.0;
+  static const _pickedImageQuality = 88;
+  static const _previewCacheWidth = 1200;
+
   final _picker = ImagePicker();
   final _api = GrainAnalysisApi();
   final _referencePixels = TextEditingController();
@@ -268,9 +272,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   Future<void> _pick(ImageSource source) async {
     final file = await _picker.pickImage(
       source: source,
-      imageQuality: 94,
-      maxWidth: 2600,
-      maxHeight: 2600,
+      imageQuality: _pickedImageQuality,
+      maxWidth: _pickedImageMaxDimension,
+      maxHeight: _pickedImageMaxDimension,
+      requestFullMetadata: false,
     );
     if (file == null) return;
     final bytes = await file.readAsBytes();
@@ -316,19 +321,21 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       _startProgressDrift();
       final referencePixels = double.tryParse(_referencePixels.text.trim());
       final referenceMm = double.tryParse(_referenceMm.text.trim());
-      final result = await _api.analyzeImage(
-        bytes: bytes,
-        fileName: _fileName,
-        referencePixels: referencePixels,
-        referenceMm: referenceMm,
-        referenceX1: _referenceStart?.dx,
-        referenceY1: _referenceStart?.dy,
-        referenceX2: _referenceEnd?.dx,
-        referenceY2: _referenceEnd?.dy,
-        onProgress: (value, phase) {
-          if (mounted) _setProgress(value, phase);
-        },
-      );
+      final result = await _api
+          .analyzeImage(
+            bytes: bytes,
+            fileName: _fileName,
+            referencePixels: referencePixels,
+            referenceMm: referenceMm,
+            referenceX1: _referenceStart?.dx,
+            referenceY1: _referenceStart?.dy,
+            referenceX2: _referenceEnd?.dx,
+            referenceY2: _referenceEnd?.dy,
+            onProgress: (value, phase) {
+              if (mounted) _setProgress(value, phase);
+            },
+          )
+          .timeout(const Duration(minutes: 5));
       _stopProgress();
       _setProgress(96, 'Lưu kết quả');
       if (!mounted) return;
@@ -1400,7 +1407,9 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                             child: widget.bytes == null
                                 ? const _ImagePlaceholder()
                                 : Image.memory(widget.bytes!,
-                                    fit: BoxFit.contain),
+                                    fit: BoxFit.contain,
+                                    cacheWidth: _BackendAnalysisCardState
+                                        ._previewCacheWidth),
                           ),
                           CustomPaint(
                             painter: _ReferenceLinePainter(
@@ -1983,6 +1992,13 @@ String _friendlyError(Object error) {
         error.type == DioExceptionType.connectionError) {
       return 'Không kết nối được backend hoặc worker xử lý quá lâu. Kiểm tra server, Wi-Fi và Python dependencies.';
     }
+  }
+  if (error is TimeoutException) {
+    return 'Thiết bị xử lý quá lâu nên đã dừng tác vụ. Hãy thử chụp gần hơn, giảm số hạt trong ảnh hoặc đóng các ứng dụng nền rồi xử lý lại.';
+  }
+  if (error is OutOfMemoryError ||
+      error.toString().toLowerCase().contains('memory')) {
+    return 'Thiết bị không đủ bộ nhớ để xử lý ảnh này. Hãy thử chụp ảnh gần hơn, giảm độ phân giải ảnh hoặc đóng các ứng dụng nền rồi thử lại.';
   }
   final message = error.toString().replaceFirst('Exception: ', '').trim();
   if (message.isNotEmpty && message != 'null') {
