@@ -207,8 +207,6 @@ class _BackendAnalysisCard extends ConsumerStatefulWidget {
 }
 
 class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
-  static const _pickedImageMaxDimension = 1800.0;
-  static const _pickedImageQuality = 88;
   static const _previewCacheWidth = 1200;
 
   final _picker = ImagePicker();
@@ -272,9 +270,6 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   Future<void> _pick(ImageSource source) async {
     final file = await _picker.pickImage(
       source: source,
-      imageQuality: _pickedImageQuality,
-      maxWidth: _pickedImageMaxDimension,
-      maxHeight: _pickedImageMaxDimension,
       requestFullMetadata: false,
     );
     if (file == null) return;

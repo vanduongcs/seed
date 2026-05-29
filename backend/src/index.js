@@ -64,6 +64,26 @@ app.get('/health', (_req, res) => {
   res.json({ success: true, message: 'Server đang chạy', timestamp: new Date().toISOString() });
 });
 
+app.get('/api/mobile/version', (_req, res) => {
+  const latestBuildNumber = parseInt(process.env.MOBILE_LATEST_BUILD_NUMBER || '3', 10);
+  const minSupportedBuildNumber = parseInt(process.env.MOBILE_MIN_SUPPORTED_BUILD_NUMBER || '2', 10);
+  const latestVersionName = process.env.MOBILE_LATEST_VERSION_NAME || '1.0.2';
+  const playStoreUrl = process.env.MOBILE_PLAY_STORE_URL ||
+    'https://play.google.com/store/apps/details?id=vn.mekonglab.seedvision';
+
+  res.json({
+    success: true,
+    data: {
+      latestVersionName,
+      latestBuildNumber,
+      minSupportedBuildNumber,
+      playStoreUrl,
+      title: 'Có bản cập nhật mới',
+      message: 'Vui lòng cập nhật Seed trên Google Play để nhận bản sửa lỗi và cải tiến mới nhất.',
+    },
+  });
+});
+
 // ---- Routes ----
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);

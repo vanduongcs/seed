@@ -22,6 +22,22 @@ if errorlevel 1 (
   exit /b 1
 )
 
+set "FLUTTER_ROOT="
+for /f "delims=" %%F in ('where flutter 2^>nul') do (
+  if not defined FLUTTER_ROOT for %%I in ("%%~dpF..") do set "FLUTTER_ROOT=%%~fI"
+)
+set "DART_EXE=%FLUTTER_ROOT%\bin\cache\dart-sdk\bin\dart.exe"
+set "FLUTTER_SNAPSHOT=%FLUTTER_ROOT%\bin\cache\flutter_tools.snapshot"
+set "FLUTTER_PACKAGES=%FLUTTER_ROOT%\packages\flutter_tools\.dart_tool\package_config.json"
+if not exist "%DART_EXE%" (
+  echo ERROR: Dart executable was not found: %DART_EXE%
+  exit /b 1
+)
+if not exist "%FLUTTER_SNAPSHOT%" (
+  echo ERROR: Flutter tool snapshot was not found: %FLUTTER_SNAPSHOT%
+  exit /b 1
+)
+
 if not exist "%KEY_PROPS%" (
   echo ERROR: Release signing config is missing: %KEY_PROPS%
   echo Create mobile\android\key.properties and keep it out of git.
@@ -49,23 +65,28 @@ if /I "%~1"=="clean" (
   popd
 )
 
-echo Running flutter pub get...
-pushd "%MOBILE_DIR%"
-call flutter pub get
-if errorlevel 1 (
+if /I "%~1"=="pub" (
+  echo Running flutter pub get...
+  pushd "%MOBILE_DIR%"
+  call flutter pub get
+  if errorlevel 1 (
+    popd
+    exit /b 1
+  )
   popd
-  exit /b 1
 )
 
+pushd "%MOBILE_DIR%"
+
 echo Building release APK for local install...
-call flutter build apk --release
+call "%DART_EXE%" --packages="%FLUTTER_PACKAGES%" "%FLUTTER_SNAPSHOT%" build apk --release --no-pub
 if errorlevel 1 (
   popd
   exit /b 1
 )
 
 echo Building release AAB for Play Console...
-call flutter build appbundle --release
+call "%DART_EXE%" --packages="%FLUTTER_PACKAGES%" "%FLUTTER_SNAPSHOT%" build appbundle --release --no-pub
 if errorlevel 1 (
   popd
   exit /b 1
