@@ -29,22 +29,22 @@ const CALIBRATION_GUIDE_SLIDES = [
   {
     title: '1. Upload ảnh hạt và vật mốc',
     description: 'Chọn hoặc chụp ảnh có cả hạt cần đo và vật mốc có kích thước thật đã biết.',
-    image: '/images/calibration_guide_1.png',
+    image: '/images/calibration_guide_1.webp',
   },
   {
     title: '2. Tạo đoạn đo bằng 2 chốt',
     description: 'Kéo chuột trên vật mốc để tạo đoạn thẳng gồm chốt A và chốt B.',
-    image: '/images/calibration_guide_2.png',
+    image: '/images/calibration_guide_2.webp',
   },
   {
     title: '3. Kéo thả chốt đo vật mốc',
     description: 'Kéo từng chốt tới đúng hai mép vật mốc; có thể dùng nút mũi tên để tinh chỉnh.',
-    image: '/images/calibration_guide_3.png',
+    image: '/images/calibration_guide_3.webp',
   },
   {
     title: '4. Nhập kích thước thật',
     description: 'Nhập chiều dài thật của vật mốc vào ô Vật mốc (mm), sau đó bấm Xử lý.',
-    image: '/images/calibration_guide_4.png',
+    image: '/images/calibration_guide_4.webp',
   },
 ];
 
@@ -82,6 +82,8 @@ const GuideImage = ({ src, alt }) => (
       component="img"
       src={src}
       alt={alt}
+      loading="eager"
+      decoding="async"
       sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
     />
   </Box>
@@ -491,9 +493,14 @@ export const DashboardPreviewPanel = ({
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
           <Stack direction="row" spacing={1} alignItems="center">
             <HelpOutline color="primary" sx={{ fontSize: 22 }} />
-            <Typography variant="h6" fontWeight={750} color="text.primary" sx={{ fontSize: '1rem' }}>
-              Hướng dẫn căn vật mốc
-            </Typography>
+            <Stack spacing={0.25}>
+              <Typography variant="h6" fontWeight={750} color="text.primary" sx={{ fontSize: '1rem' }}>
+                Hướng dẫn căn vật mốc
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', lineHeight: 1.25 }}>
+                *Ảnh chụp minh họa được chụp từ mobile app*
+              </Typography>
+            </Stack>
           </Stack>
           <IconButton size="small" onClick={() => setGuideOpen(false)} sx={{ color: 'text.secondary' }}>
             <Close fontSize="small" />
