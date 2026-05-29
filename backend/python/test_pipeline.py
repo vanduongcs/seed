@@ -1,11 +1,15 @@
-"""Quick benchmark — compare YOLO-only vs YOLO+GrabCut+EdgeSnap."""
-import json, sys, pathlib, time, base64
+"""Quick benchmark: compare YOLO-only vs YOLO+GrabCut+EdgeSnap."""
+import base64
+import pathlib
+import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from grain_pipeline.pipeline import analyze_image
 
-IMAGE   = pathlib.Path("D:/seed/test_images/sample.jpg")
-OUT_DIR = pathlib.Path("D:/seed/test_outputs")
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+IMAGE = ROOT / "test_images" / "sample.jpg"
+OUT_DIR = ROOT / "test_outputs"
 OUT_DIR.mkdir(exist_ok=True)
 
 
@@ -40,7 +44,7 @@ def run(label, params):
     return r, dt
 
 
-# 1. Baseline — YOLO ONNX only
+# 1. Baseline: YOLO ONNX only
 r_base, _ = run("YOLO ONNX only (baseline)", {
     "enableSamRefine":   False,
     "enableGrabCut":     False,

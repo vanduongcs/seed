@@ -21,7 +21,7 @@ class SeedApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
-      title: 'Seed',
+      title: 'SeedVision',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.appTheme,
       routerConfig: router,

@@ -1,7 +1,7 @@
 """Export MobileSAM encoder + decoder to ONNX.
 
 Run once with the system Python (which has mobile_sam, torch, timm):
-    python export_mobile_sam_onnx.py
+    python scripts/export_mobile_sam_onnx.py
 
 Outputs:
     backend/model/mobile_sam_encoder.onnx  (~27 MB)
@@ -9,10 +9,10 @@ Outputs:
 
 These two files together replace both FastSAM-s.onnx (45 MB) and the
 GrabCut/edge-snap post-processor. At inference time:
-  1. Run encoder ONCE per image  → image_embedding [1, 256, 64, 64]
-  2. For each grain bbox: run decoder → mask + iou_predictions
-Total extra time for N grains ≈ encoder_time + N * decoder_time
-                               ≈ 0.5s        + N * 0.05s
+  1. Run encoder once per image -> image_embedding [1, 256, 64, 64]
+  2. For each grain bbox: run decoder -> mask + iou_predictions
+Total extra time for N grains ~= encoder_time + N * decoder_time
+                               ~= 0.5s        + N * 0.05s
 """
 
 from __future__ import annotations
@@ -24,15 +24,15 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
-ROOT      = pathlib.Path(__file__).resolve().parent
+ROOT      = pathlib.Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "backend" / "model"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-CHECKPOINT  = ROOT / "mobile_sam.pt"
+CHECKPOINT  = ROOT / "artifacts" / "models" / "mobile_sam.pt"
 ENC_OUT     = MODEL_DIR / "mobile_sam_encoder.onnx"
 DEC_OUT     = MODEL_DIR / "mobile_sam_decoder.onnx"
 OPSET       = 12
-IMAGE_SIZE  = 1024  # MobileSAM always uses 1024×1024
+IMAGE_SIZE  = 1024  # MobileSAM always uses 1024x1024
 
 print(f"\n=== MobileSAM ONNX Export ===")
 print(f"Checkpoint : {CHECKPOINT}")
@@ -41,7 +41,7 @@ print(f"Decoder    : {DEC_OUT}")
 print()
 
 if not CHECKPOINT.exists():
-    sys.exit(f"ERROR: {CHECKPOINT} not found. Place mobile_sam.pt in the project root.")
+    sys.exit(f"ERROR: {CHECKPOINT} not found. Place mobile_sam.pt under artifacts/models.")
 
 import torch
 from mobile_sam import sam_model_registry
@@ -49,7 +49,7 @@ from mobile_sam import sam_model_registry
 sam = sam_model_registry["vit_t"](checkpoint=str(CHECKPOINT))
 sam.eval()
 
-# ── 1. Export Image Encoder ────────────────────────────────────────────────
+# 1. Export image encoder.
 
 print("[1/2] Exporting image encoder...")
 
@@ -83,7 +83,7 @@ size_mb = ENC_OUT.stat().st_size / 1024 / 1024
 print(f"   Saved: {ENC_OUT}  ({size_mb:.1f} MB)")
 
 
-# ── 2. Export Mask Decoder ─────────────────────────────────────────────────
+# 2. Export mask decoder.
 
 print("[2/2] Exporting mask decoder...")
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -10,15 +12,18 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
   try {
     const storage = FlutterSecureStorage();
     if (await storage.read(key: guestModeKey) == 'true') {
-      final localRuns = await LocalGrainRunStore().readAll();
+      final localRuns = await LocalGrainRunStore().readVisible(isGuest: true);
       return _localGrainRuns(localRuns);
     }
     final localStore = LocalGrainRunStore();
-    final pending = await localStore.readPendingForSync();
+    final userId = await _currentUserId(storage);
+    final pending = userId == null
+        ? <Map<String, dynamic>>[]
+        : await localStore.claimAndReadPendingForSync(userId);
     if (pending.isNotEmpty) {
       try {
         await ApiClient().post('/grain/runs/import', data: {'items': pending});
-        await localStore.removePendingForSync();
+        await localStore.removePendingForSync(userId!);
       } catch (_) {
         // Keep pending local runs and retry next time storage refreshes.
       }
@@ -32,7 +37,12 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
             (item) => GrainRun.fromJson(Map<String, dynamic>.from(item as Map)))
         .toList();
   } on DioException catch (error) {
-    final localRuns = await LocalGrainRunStore().readAll();
+    const storage = FlutterSecureStorage();
+    final isGuest = await storage.read(key: guestModeKey) == 'true';
+    final localRuns = await LocalGrainRunStore().readVisible(
+      isGuest: isGuest,
+      userId: isGuest ? null : await _currentUserId(storage),
+    );
     if (localRuns.isNotEmpty && error.response?.statusCode != 401) {
       return _localGrainRuns(localRuns);
     }
@@ -49,6 +59,15 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
   }
 });
 
+Future<String?> _currentUserId(FlutterSecureStorage storage) async {
+  final raw = await storage.read(key: userKey);
+  if (raw == null || raw.isEmpty) return null;
+  final user = jsonDecode(raw);
+  if (user is! Map) return null;
+  final value = user['_id']?.toString() ?? user['id']?.toString() ?? '';
+  return value.isEmpty ? null : value;
+}
+
 List<GrainRun> _localGrainRuns(List<Map<String, dynamic>> localRuns) {
   return localRuns.map((item) {
     final result = Map<String, dynamic>.from(item['result'] as Map? ?? {});
@@ -59,6 +78,8 @@ List<GrainRun> _localGrainRuns(List<Map<String, dynamic>> localRuns) {
       'createdAt': item['createdAt'] ?? run['createdAt'],
       'summary': result['summary'],
       'image': result['image'],
+      'calibration': result['calibration'],
+      'overlay_png_base64': result['overlay_png_base64'],
     });
   }).toList();
 }
@@ -101,6 +122,8 @@ class GrainRun {
   final double? qcStdWidthMm;
   final int imageWidth;
   final int imageHeight;
+  final String overlayBase64;
+  final bool calibrated;
 
   const GrainRun({
     required this.id,
@@ -119,11 +142,16 @@ class GrainRun {
     this.qcStdWidthMm,
     required this.imageWidth,
     required this.imageHeight,
+    required this.overlayBase64,
+    required this.calibrated,
   });
 
   factory GrainRun.fromJson(Map<String, dynamic> json) {
     final summary = Map<String, dynamic>.from(json['summary'] as Map? ?? {});
     final image = Map<String, dynamic>.from(json['image'] as Map? ?? {});
+    final calibration =
+        Map<String, dynamic>.from(json['calibration'] as Map? ?? {});
+    final calibrated = calibration['enabled'] == true;
     final qc = Map<String, dynamic>.from(summary['qc'] as Map? ?? {});
     final useRobustStats = qc['robust_used_for_reporting'] != false;
     dynamic reportedStd(String rawKey, String robustKey) => useRobustStats
@@ -137,19 +165,26 @@ class GrainRun {
       meanLengthPx: _asDouble(summary['mean_length_px']),
       meanWidthPx: _asDouble(summary['mean_width_px']),
       meanAreaPx: _asDouble(summary['mean_area_px']),
-      meanLengthMm: _nullableDouble(summary['mean_length_mm']),
-      meanWidthMm: _nullableDouble(summary['mean_width_mm']),
-      meanAreaMm2: _nullableDouble(summary['mean_area_mm2']),
+      meanLengthMm:
+          calibrated ? _nullableDouble(summary['mean_length_mm']) : null,
+      meanWidthMm:
+          calibrated ? _nullableDouble(summary['mean_width_mm']) : null,
+      meanAreaMm2:
+          calibrated ? _nullableDouble(summary['mean_area_mm2']) : null,
       qcStdLengthPx:
           _nullableStat(reportedStd('std_length_px', 'robust_std_length_px')),
       qcStdWidthPx:
           _nullableStat(reportedStd('std_width_px', 'robust_std_width_px')),
-      qcStdLengthMm:
-          _nullableStat(reportedStd('std_length_mm', 'robust_std_length_mm')),
-      qcStdWidthMm:
-          _nullableStat(reportedStd('std_width_mm', 'robust_std_width_mm')),
+      qcStdLengthMm: calibrated
+          ? _nullableStat(reportedStd('std_length_mm', 'robust_std_length_mm'))
+          : null,
+      qcStdWidthMm: calibrated
+          ? _nullableStat(reportedStd('std_width_mm', 'robust_std_width_mm'))
+          : null,
       imageWidth: _asInt(image['width']),
       imageHeight: _asInt(image['height']),
+      overlayBase64: json['overlay_png_base64']?.toString() ?? '',
+      calibrated: calibrated,
     );
   }
 }

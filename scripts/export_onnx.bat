@@ -1,22 +1,23 @@
 @echo off
 setlocal
 
-set "ROOT=%~dp0"
-set "ROOT=%ROOT:~0,-1%"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
 :: Use system python (must have ultralytics + torch installed).
 :: If you prefer the venv, change this to: set "PYTHON=%ROOT%\backend\.venv\Scripts\python.exe"
 set "PYTHON=python"
-set "FASTSAM_S_PT=%ROOT%\FastSAM-s.pt"
+set "FASTSAM_S_PT=%ROOT%\artifacts\models\FastSAM-s.pt"
 set "FASTSAM_S_ONNX=%ROOT%\backend\model\FastSAM-s.onnx"
 
 echo.
 echo === Seed ONNX Export ===
 echo.
 
-:: Check Python venv
-if not exist "%PYTHON%" (
-  echo ERROR: Python venv not found at: %PYTHON%
-  echo Run run.bat first to set up the backend venv.
+:: Check Python availability
+"%PYTHON%" --version >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: Python is not available via: %PYTHON%
+  echo Run scripts\run.bat first to set up the backend venv if needed.
   pause
   exit /b 1
 )
@@ -33,11 +34,11 @@ if errorlevel 1 (
   )
 )
 
-:: ── Export FastSAM-s ──────────────────────────────────────────────────────────
-echo [1/1] Exporting FastSAM-s.pt → FastSAM-s.onnx ...
+:: Export FastSAM-s.
+echo [1/1] Exporting FastSAM-s.pt to FastSAM-s.onnx ...
 if not exist "%FASTSAM_S_PT%" (
   echo ERROR: Source model not found: %FASTSAM_S_PT%
-  echo Place FastSAM-s.pt in the project root ^(%ROOT%^).
+  echo Place FastSAM-s.pt under artifacts\models.
   pause
   exit /b 1
 )

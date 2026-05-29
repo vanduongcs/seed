@@ -1,7 +1,9 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
+cd /d "%ROOT%"
 title Seed Launcher
 
 if /i "%~1"=="backend" goto backend_worker
@@ -46,15 +48,15 @@ call :start_mobile
 goto done
 
 :start_backend
-start "Seed Backend" /D "%~dp0" cmd /k call run.bat backend
+start "Seed Backend" /D "%ROOT%" cmd /k call scripts\run.bat backend
 exit /b
 
 :start_web
-start "Seed Web" /D "%~dp0" cmd /k "npm run dev:web"
+start "Seed Web" /D "%ROOT%" cmd /k "npm run dev:web"
 exit /b
 
 :start_mobile
-start "Seed Mobile" /D "%~dp0mobile" cmd /k "echo Seed Mobile will auto-discover the backend on the local network. && flutter pub get && flutter run"
+start "Seed Mobile" /D "%ROOT%\mobile" cmd /k "echo Seed Mobile will auto-discover the backend on the local network. && flutter pub get && flutter run"
 exit /b
 
 :done

@@ -26,9 +26,11 @@ export default function DashboardPage() {
   const [previewMode, setPreviewMode] = useState('overlay');
   const [calibration, setCalibration] = useState(emptyCalibration);
   const [drawingCalibration, setDrawingCalibration] = useState(false);
+  const [qcEditMode, setQcEditMode] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressPhase, setProgressPhase] = useState('');
   const progressTimerRef = useRef(null);
+  const qcRenderSeqRef = useRef(0);
 
   useEffect(() => () => {
     if (videoRef.current?.srcObject) {
@@ -37,9 +39,11 @@ export default function DashboardPage() {
   }, []);
 
   const resetRunState = () => {
+    qcRenderSeqRef.current += 1;
     setResult(null);
     setPreviewMode('overlay');
     setCalibration(emptyCalibration);
+    setQcEditMode(false);
   };
 
   const handleCamera = async () => {
@@ -116,8 +120,8 @@ export default function DashboardPage() {
       <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
         <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
           <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#1d4ed8" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
-          <circle cx={start.x} cy={start.y} r="1.1" fill="#1d4ed8" />
-          <circle cx={end.x} cy={end.y} r="1.1" fill="#1d4ed8" />
+          <circle cx={start.x} cy={start.y} r="1.8" fill="#1d4ed8" stroke="#ffffff" strokeWidth="0.5" />
+          <circle cx={end.x} cy={end.y} r="1.8" fill="#1d4ed8" stroke="#ffffff" strokeWidth="0.5" />
         </svg>
       </Box>
     );
@@ -200,6 +204,7 @@ export default function DashboardPage() {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
       setProgress(96);
       setProgressPhase('Lưu kết quả');
+      qcRenderSeqRef.current += 1;
       setResult(data.data);
       if (isGuest) {
         saveGuestRun({ result: data.data, sourceFileName: file.name });
@@ -219,6 +224,18 @@ export default function DashboardPage() {
         setProgress(0);
         setProgressPhase('');
       }, 500);
+    }
+  };
+
+  const handleToggleMeasurementQc = async (measurementId) => {
+    if (!result) return;
+    const renderSeq = qcRenderSeqRef.current + 1;
+    qcRenderSeqRef.current = renderSeq;
+    const nextResult = updateResultMeasurementQc(result, measurementId);
+    setResult(nextResult);
+    const renderedResult = await renderQcPreviewsFromLabelMap(nextResult);
+    if (qcRenderSeqRef.current === renderSeq) {
+      setResult(renderedResult);
     }
   };
 
@@ -254,22 +271,31 @@ export default function DashboardPage() {
     {
       label: 'Số hạt đo được',
       value: summary ? String(summary.count) : '0',
-      note: result ? 'Theo lần xử lý hiện tại' : 'Chưa có kết quả',
+      note: result ? 'Theo lần xử lý hiện tại' : 'Chưa có dữ liệu',
     },
     {
-      label: 'ĐLC diện tích (báo cáo)',
+      label: 'Giá trị trung bình (dài × rộng)',
+      value: summary
+        ? `${formatMeasure(summary?.mean_length_mm, 'mm', summary?.mean_length_px, 'px')} × ${formatMeasure(summary?.mean_width_mm, 'mm', summary?.mean_width_px, 'px')}`
+        : '-',
+      note: 'Thống kê trung bình trên các hạt hợp lệ',
+    },
+    {
+      label: 'Giá trị trung bình diện tích',
+      value: summary ? formatMeasure(summary?.mean_area_mm2, 'mm2', summary?.mean_area_px, 'px2') : '-',
+      note: 'Thống kê trung bình trên các hạt hợp lệ',
+    },
+    {
+      label: 'Độ lệch chuẩn (dài × rộng)',
+      value: summary
+        ? `${formatMeasure(reportedStat('std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat('std_length_px', 'robust_std_length_px'), 'px')} × ${formatMeasure(reportedStat('std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat('std_width_px', 'robust_std_width_px'), 'px')}`
+        : '-',
+      note: useRobustStats ? 'Sau QC (MAD)' : 'SD thô do nghi ngờ cao',
+    },
+    {
+      label: 'Độ lệch chuẩn diện tích',
       value: summary ? formatMeasure(reportedStat('std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat('std_area_px', 'robust_std_area_px'), 'px2') : '-',
-      note: useRobustStats ? 'Loại vùng nghi nhiễu bằng MAD' : 'SD thô: cần kiểm tra segmentation',
-    },
-    {
-      label: 'ĐLC chiều dài (báo cáo)',
-      value: summary ? formatMeasure(reportedStat('std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat('std_length_px', 'robust_std_length_px'), 'px') : '-',
-      note: useRobustStats ? 'Theo trục chính, sau QC' : 'Theo trục chính, SD thô',
-    },
-    {
-      label: 'ĐLC chiều rộng (báo cáo)',
-      value: summary ? formatMeasure(reportedStat('std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat('std_width_px', 'robust_std_width_px'), 'px') : '-',
-      note: useRobustStats ? 'Theo trục phụ, sau QC' : 'Theo trục phụ, SD thô',
+      note: useRobustStats ? 'Sau QC (MAD)' : 'SD thô do nghi ngờ cao',
     },
   ];
 
@@ -312,6 +338,9 @@ export default function DashboardPage() {
             renderCalibrationOverlay={renderCalibrationOverlay}
             progress={progress}
             progressPhase={progressPhase}
+            qcEditMode={qcEditMode}
+            onToggleQcEditMode={() => setQcEditMode((value) => !value)}
+            onToggleMeasurementQc={handleToggleMeasurementQc}
           />
         </Grid>
 
@@ -357,4 +386,229 @@ const downloadBlob = (fileName, content, mimeType) => {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
+};
+
+const updateResultMeasurementQc = (result, measurementId) => {
+  if (!result?.measurements?.length) return result;
+  const measurements = result.measurements.map((measurement) => {
+    if (Number(measurement.id) !== Number(measurementId)) return { ...measurement };
+    const nextOutlier = measurement.qc_outlier !== true;
+    return {
+      ...measurement,
+      qc_outlier: nextOutlier,
+      qc_reason: nextOutlier ? 'manual_qc_toggle' : '',
+      qc_manual_override: true,
+    };
+  });
+  return {
+    ...result,
+    measurements,
+    summary: recomputeSummaryFromMeasurements(result.summary, measurements),
+    csv: measurementsToCsv(measurements, result.csv),
+  };
+};
+
+const renderQcPreviewsFromLabelMap = async (result) => {
+  if (!result?.label_map_png_base64) return result;
+  const base64 = result.preprocessed_png_base64 || result.original_png_base64;
+  if (!base64) return result;
+
+  const [baseImage, labelMapImage] = await Promise.all([
+    loadImageData(base64),
+    loadImageData(result.label_map_png_base64),
+  ]);
+  if (
+    !baseImage || !labelMapImage ||
+    baseImage.width !== labelMapImage.width ||
+    baseImage.height !== labelMapImage.height
+  ) {
+    return result;
+  }
+
+  const outlierIds = new Set(
+    result.measurements
+      .filter((measurement) => measurement.qc_outlier === true)
+      .map((measurement) => Number(measurement.id))
+      .filter(Number.isFinite),
+  );
+  const width = baseImage.width;
+  const height = baseImage.height;
+  const overlay = new ImageData(new Uint8ClampedArray(baseImage.data), width, height);
+  const mask = new ImageData(width, height);
+  const labelAt = (x, y) => {
+    const offset = ((y * width) + x) * 4;
+    return labelMapImage.data[offset] +
+      (labelMapImage.data[offset + 1] << 8) +
+      (labelMapImage.data[offset + 2] << 16);
+  };
+  const isEdge = (x, y, label) => (
+    x === 0 || y === 0 || x === width - 1 || y === height - 1 ||
+    labelAt(x - 1, y) !== label ||
+    labelAt(x + 1, y) !== label ||
+    labelAt(x, y - 1) !== label ||
+    labelAt(x, y + 1) !== label
+  );
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const label = labelAt(x, y);
+      const offset = ((y * width) + x) * 4;
+      if (!label) {
+        mask.data[offset + 3] = 0;
+        continue;
+      }
+      const outlier = outlierIds.has(label);
+      const color = outlier ? [220, 38, 38] : [37, 99, 235];
+      const edge = isEdge(x, y, label);
+      const alpha = edge ? 0.56 : 0.34;
+      overlay.data[offset] = Math.round(overlay.data[offset] * (1 - alpha) + color[0] * alpha);
+      overlay.data[offset + 1] = Math.round(overlay.data[offset + 1] * (1 - alpha) + color[1] * alpha);
+      overlay.data[offset + 2] = Math.round(overlay.data[offset + 2] * (1 - alpha) + color[2] * alpha);
+      overlay.data[offset + 3] = 255;
+
+      const maskColor = edge
+        ? (outlier ? [185, 28, 28, 255] : [30, 64, 175, 255])
+        : (outlier ? [239, 68, 68, 170] : [59, 130, 246, 145]);
+      mask.data[offset] = maskColor[0];
+      mask.data[offset + 1] = maskColor[1];
+      mask.data[offset + 2] = maskColor[2];
+      mask.data[offset + 3] = maskColor[3];
+    }
+  }
+
+  return {
+    ...result,
+    overlay_png_base64: imageDataToBase64(overlay),
+    mask_png_base64: imageDataToBase64(mask),
+    sam_mask_png_base64: imageDataToBase64(mask),
+  };
+};
+
+const loadImageData = (base64) => new Promise((resolve) => {
+  const image = new Image();
+  image.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0);
+    resolve(context.getImageData(0, 0, canvas.width, canvas.height));
+  };
+  image.onerror = () => resolve(null);
+  image.src = `data:image/png;base64,${base64}`;
+});
+
+const imageDataToBase64 = (imageData) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  canvas.getContext('2d').putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png').split(',')[1] || '';
+};
+
+const recomputeSummaryFromMeasurements = (previousSummary = {}, measurements) => {
+  if (!measurements.length) return previousSummary;
+  const inliers = measurements.filter((measurement) => measurement.qc_outlier !== true);
+  const robustMeasurements = inliers.length ? inliers : measurements;
+  const suspectIds = measurements
+    .filter((measurement) => measurement.qc_outlier === true)
+    .map((measurement) => Number(measurement.id))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const suspectRatio = suspectIds.length / measurements.length;
+  const robustUsedForReporting = suspectRatio <= 0.05;
+  const calibrated = measurements[0]?.length_mm !== null && measurements[0]?.length_mm !== undefined;
+
+  const values = (items, key) => items.map((item) => Number(item[key]) || 0);
+  const mean = (items, key) => {
+    const data = values(items, key);
+    return round(data.reduce((sum, value) => sum + value, 0) / Math.max(1, data.length), 6);
+  };
+  const std = (items, key) => {
+    const data = values(items, key);
+    if (data.length <= 1) return 0;
+    const average = data.reduce((sum, value) => sum + value, 0) / data.length;
+    const variance = data.reduce((sum, value) => sum + ((value - average) ** 2), 0) / (data.length - 1);
+    return round(Math.sqrt(variance), 6);
+  };
+  const cv = (items, key) => {
+    const average = mean(items, key);
+    return average > 0 ? round((std(items, key) / average) * 100, 3) : 0;
+  };
+  const metricMm = (statistic, items, key) => calibrated ? statistic(items, key) : null;
+
+  return {
+    ...previousSummary,
+    count: measurements.length,
+    total_area_px: measurements.reduce((sum, item) => sum + (Number(item.area_px) || 0), 0),
+    mean_area_px: mean(measurements, 'area_px'),
+    mean_length_px: mean(measurements, 'length_px'),
+    mean_width_px: mean(measurements, 'width_px'),
+    mean_area_mm2: metricMm(mean, measurements, 'area_mm2'),
+    mean_length_mm: metricMm(mean, measurements, 'length_mm'),
+    mean_width_mm: metricMm(mean, measurements, 'width_mm'),
+    std_area_px: std(measurements, 'area_px'),
+    std_length_px: std(measurements, 'length_px'),
+    std_width_px: std(measurements, 'width_px'),
+    std_area_mm2: metricMm(std, measurements, 'area_mm2'),
+    std_length_mm: metricMm(std, measurements, 'length_mm'),
+    std_width_mm: metricMm(std, measurements, 'width_mm'),
+    robust_mean_area_px: mean(robustMeasurements, 'area_px'),
+    robust_mean_length_px: mean(robustMeasurements, 'length_px'),
+    robust_mean_width_px: mean(robustMeasurements, 'width_px'),
+    robust_mean_area_mm2: metricMm(mean, robustMeasurements, 'area_mm2'),
+    robust_mean_length_mm: metricMm(mean, robustMeasurements, 'length_mm'),
+    robust_mean_width_mm: metricMm(mean, robustMeasurements, 'width_mm'),
+    robust_std_area_px: std(robustMeasurements, 'area_px'),
+    robust_std_length_px: std(robustMeasurements, 'length_px'),
+    robust_std_width_px: std(robustMeasurements, 'width_px'),
+    robust_std_area_mm2: metricMm(std, robustMeasurements, 'area_mm2'),
+    robust_std_length_mm: metricMm(std, robustMeasurements, 'length_mm'),
+    robust_std_width_mm: metricMm(std, robustMeasurements, 'width_mm'),
+    cv_length_pct: cv(robustMeasurements, 'length_px'),
+    cv_width_pct: cv(robustMeasurements, 'width_px'),
+    qc: {
+      ...(previousSummary.qc || {}),
+      suspect_count: suspectIds.length,
+      inlier_count: robustMeasurements.length,
+      suspect_ids: suspectIds,
+      review_required: suspectIds.length > 0,
+      suspect_ratio: round(suspectRatio, 6),
+      robust_used_for_reporting: robustUsedForReporting,
+      manual_override: true,
+      status: !robustUsedForReporting
+        ? 'review_required'
+        : (suspectIds.length ? 'suspects_flagged' : 'ok'),
+    },
+  };
+};
+
+const measurementsToCsv = (measurements, existingCsv = '') => {
+  const firstLine = existingCsv.split(/\r?\n/, 1)[0];
+  const baseColumns = firstLine
+    ? firstLine.split(',')
+    : [
+      'id', 'area_px', 'length_px', 'width_px', 'area_mm2', 'length_mm', 'width_mm',
+      'centroid_x', 'centroid_y', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h', 'angle_deg',
+      'solidity', 'extent', 'aspect_ratio', 'confidence', 'class_id', 'class_name',
+      'qc_outlier', 'qc_reason',
+    ];
+  const columns = baseColumns.includes('qc_manual_override')
+    ? baseColumns
+    : [...baseColumns, 'qc_manual_override'];
+  return [
+    columns.join(','),
+    ...measurements.map((measurement) => columns.map((column) => csvEscape(measurement[column])).join(',')),
+  ].join('\n');
+};
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+};
+
+const round = (value, decimals) => {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 };

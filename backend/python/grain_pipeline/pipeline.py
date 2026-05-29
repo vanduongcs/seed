@@ -11,7 +11,7 @@ from .mask_refine import refine_instances_post
 from .measure import calibration_factor, filter_and_measure, is_seed_instance, measurements_csv, summary_for
 from .mobile_sam_refine import is_mobile_sam_model, refine_instances_with_mobile_sam
 from .preprocess import apply_light_preprocessing
-from .render import instance_mask_rgb, label_rgb, mask_rgb, overlay_rgb
+from .render import instance_mask_rgb, label_map_rgb, label_rgb, mask_rgb, overlay_rgb
 from .yolo_segment import predict_instances
 
 
@@ -53,11 +53,12 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     if labels.shape[:2] != segment_input.shape[:2]:
         labels = np.zeros(segment_input.shape[:2], dtype=np.int32)
 
-    overlay       = overlay_rgb(segment_input, labels)
-    labels_image  = label_rgb(labels)
-    mask_image    = mask_rgb(labels)
-    sam_mask_image = instance_mask_rgb(instances)
     summary       = summary_for(measurements)
+    overlay       = overlay_rgb(segment_input, labels, measurements)
+    labels_image  = label_rgb(labels, measurements)
+    mask_image    = mask_rgb(labels, measurements)
+    label_map     = label_map_rgb(labels)
+    sam_mask_image = instance_mask_rgb(instances)
     mask_pixels   = int(np.count_nonzero(labels))
     mm_per_pixel  = calibration_factor(params, prepared.scale)
 
@@ -156,4 +157,5 @@ def analyze_image(image_path: Path, params: dict) -> dict:
         "sam_mask_png_base64":     png_base64(sam_mask_image),
         "mask_png_base64":         png_base64(mask_image),
         "labels_png_base64":       png_base64(labels_image),
+        "label_map_png_base64":    png_base64(label_map),
     }

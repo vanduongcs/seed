@@ -27,14 +27,38 @@ class LocalGrainRunStore {
     await _write(runs);
   }
 
-  Future<List<Map<String, dynamic>>> readPendingForSync() async {
+  Future<List<Map<String, dynamic>>> readVisible({
+    required bool isGuest,
+    String? userId,
+  }) async {
     final runs = await readAll();
-    return runs.where(_needsSync).toList();
+    return runs.where((run) {
+      final ownerId = _ownerId(run);
+      return isGuest ? ownerId == null : userId != null && ownerId == userId;
+    }).toList();
   }
 
-  Future<void> removePendingForSync() async {
+  Future<List<Map<String, dynamic>>> claimAndReadPendingForSync(
+      String userId) async {
     final runs = await readAll();
-    await _write(runs.where((run) => !_needsSync(run)).toList());
+    var changed = false;
+    for (final run in runs) {
+      if (_needsSync(run) && _ownerId(run) == null) {
+        run['ownerUserId'] = userId;
+        changed = true;
+      }
+    }
+    if (changed) await _write(runs);
+    return runs
+        .where((run) => _needsSync(run) && _ownerId(run) == userId)
+        .toList();
+  }
+
+  Future<void> removePendingForSync(String userId) async {
+    final runs = await readAll();
+    await _write(runs
+        .where((run) => !(_needsSync(run) && _ownerId(run) == userId))
+        .toList());
   }
 
   Future<void> clear() => _write([]);
@@ -59,5 +83,10 @@ class LocalGrainRunStore {
     return run['localOnly'] == true ||
         run['offline'] == true ||
         run['id']?.toString().startsWith('local-') == true;
+  }
+
+  String? _ownerId(Map<String, dynamic> item) {
+    final value = item['ownerUserId']?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
   }
 }

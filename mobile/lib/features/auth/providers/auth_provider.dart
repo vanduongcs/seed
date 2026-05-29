@@ -106,10 +106,16 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
 
   Future<void> _syncPendingRuns() async {
     final store = LocalGrainRunStore();
-    final pending = await store.readPendingForSync();
+    final rawUser = await _storage.read(key: userKey);
+    if (rawUser == null || rawUser.isEmpty) return;
+    final user = jsonDecode(rawUser);
+    if (user is! Map) return;
+    final userId = user['_id']?.toString() ?? user['id']?.toString() ?? '';
+    if (userId.isEmpty) return;
+    final pending = await store.claimAndReadPendingForSync(userId);
     if (pending.isEmpty) return;
     await _api.post('/grain/runs/import', data: {'items': pending});
-    await store.removePendingForSync();
+    await store.removePendingForSync(userId);
   }
 
   Future<void> _trySyncPendingRuns() async {

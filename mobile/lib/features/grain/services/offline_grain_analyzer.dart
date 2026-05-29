@@ -8,6 +8,9 @@ import 'package:image/image.dart' as img;
 
 typedef OfflineProgressCallback = void Function(double value, String phase);
 
+const _qcMadZThreshold = 4.0;
+const _qcMinOutlierMetrics = 2;
+
 class OfflineGrainAnalyzer {
   static const modelAssetPath = 'assets/models/best.onnx';
 
@@ -15,14 +18,15 @@ class OfflineGrainAnalyzer {
   static const _inputSize = 640;
   static const _protoSize = 160;
   static const _maxSide = 1024;
-  static const _confidence = 0.03;
-  static const _iou = 0.60;
+  static const _confidence = 0.05;
+  static const _iou = 0.55;
   static const _maxDetections = 5000;
-  static const _minArea = 12;
+  static const _minArea = 20;
   static const _maxArea = 200000;
-  static const _maxAspectRatio = 20.0;
-  static const _minSolidity = 0.4;
-  static const _minExtent = 0.15;
+  static const _maxAspectRatio = 14.0;
+  static const _minSolidity = 0.5;
+  static const _minExtent = 0.2;
+  static const _enableEnhancedPass = false;
 
   OrtSession? _session;
 
@@ -135,12 +139,64 @@ class OfflineGrainAnalyzer {
     }
 
     await reportProgress(82, 'Tạo mặt nạ, đo hạt và dựng ảnh');
+    var predictionsEnhanced = predictions;
+    var protosEnhanced = protos;
+    if (_enableEnhancedPass) {
+      final enhanced = _enhanceForDetection(processed);
+      final enhancedSquare =
+          img.Image(width: squareSide, height: squareSide, numChannels: 3);
+      img.fill(enhancedSquare, color: img.ColorRgb8(255, 255, 255));
+      img.compositeImage(enhancedSquare, enhanced, dstX: 0, dstY: 0);
+      final enhancedResized = img.copyResize(
+        enhancedSquare,
+        width: _inputSize,
+        height: _inputSize,
+        interpolation: img.Interpolation.linear,
+      );
+      final enhancedInput = Float32List(1 * 3 * _inputSize * _inputSize);
+      for (var y = 0; y < _inputSize; y++) {
+        for (var x = 0; x < _inputSize; x++) {
+          final pixel = enhancedResized.getPixel(x, y);
+          final index = y * _inputSize + x;
+          enhancedInput[index] = pixel.r / 255.0;
+          enhancedInput[channelSize + index] = pixel.g / 255.0;
+          enhancedInput[channelSize * 2 + index] = pixel.b / 255.0;
+        }
+      }
+      final enhancedTensor = await OrtValue.fromList(
+        enhancedInput,
+        const [1, 3, _inputSize, _inputSize],
+      );
+      final enhancedOutputs = await session.run({
+        session.inputNames.first: enhancedTensor,
+      });
+      try {
+        predictionsEnhanced = Float32List.fromList(
+          (await enhancedOutputs[session.outputNames.first]!.asFlattenedList())
+              .map((value) => (value as num).toDouble())
+              .toList(),
+        );
+        protosEnhanced = Float32List.fromList(
+          (await enhancedOutputs[session.outputNames.last]!.asFlattenedList())
+              .map((value) => (value as num).toDouble())
+              .toList(),
+        );
+      } finally {
+        await enhancedTensor.dispose();
+        for (final output in enhancedOutputs.values) {
+          await output.dispose();
+        }
+      }
+    }
+
     return compute(
       _finishAnalysis,
       _OfflinePostprocessInput(
         imageBytes,
         predictions: predictions,
         protos: protos,
+        predictionsEnhanced: predictionsEnhanced,
+        protosEnhanced: protosEnhanced,
         width: processed.width,
         height: processed.height,
         paddedSide: squareSide,
@@ -168,11 +224,14 @@ class OfflineGrainAnalyzer {
             interpolation: img.Interpolation.average,
           )
         : img.Image.from(original);
-    final detections = _decodePredictions(input.predictions);
+    final detections = _mergeDetections(
+      _decodePredictions(input.predictions, passId: 0),
+      _decodePredictions(input.predictionsEnhanced, passId: 1),
+    );
     final instances = detections
         .map(
           (detection) => _decodeMask(
-            input.protos,
+            detection.passId == 0 ? input.protos : input.protosEnhanced,
             detection,
             width: input.width,
             height: input.height,
@@ -193,9 +252,11 @@ class OfflineGrainAnalyzer {
       referenceX2: input.referenceX2,
       referenceY2: input.referenceY2,
     );
+    final summary = _summaryFor(filtered.measurements);
     final overlay = _renderOverlay(processed, filtered);
     final mask = _renderMask(filtered);
     final labels = _renderLabels(filtered);
+    final labelMap = _renderLabelMap(filtered);
 
     final seedCandidateCount =
         instances.where((instance) => instance.classId == 0).length;
@@ -205,6 +266,7 @@ class OfflineGrainAnalyzer {
       overlayPng: Uint8List.fromList(img.encodePng(overlay)),
       maskPng: Uint8List.fromList(img.encodePng(mask)),
       labelsPng: Uint8List.fromList(img.encodePng(labels)),
+      labelMapPng: Uint8List.fromList(img.encodePng(labelMap)),
       image: {
         'width': input.width,
         'height': input.height,
@@ -213,10 +275,10 @@ class OfflineGrainAnalyzer {
         'scale': _round(input.scale, 6),
       },
       measurements: filtered.measurements,
-      summary: _summaryFor(filtered.measurements),
+      summary: summary,
       calibration: {
-        'referencePixels': input.referencePixels ?? 0,
-        'referenceMm': input.referenceMm ?? 0,
+        'referencePixels': input.referencePixels,
+        'referenceMm': input.referenceMm,
         'referencePixelSpace': 'original',
         'enabled': filtered.mmPerPixel > 0,
         'mm_per_pixel': filtered.mmPerPixel,
@@ -235,6 +297,8 @@ class OfflineGrainAnalyzer {
         'confidence': _confidence,
         'iou': _iou,
         'max_det': _maxDetections,
+        'multi_pass_enabled': _enableEnhancedPass,
+        'multi_pass_count': _enableEnhancedPass ? 2 : 1,
         'tiled_inference': false,
         'candidate_count': detections.length,
         'refined_candidate_count': instances.length,
@@ -264,7 +328,10 @@ class OfflineGrainAnalyzer {
     );
   }
 
-  static List<_Detection> _decodePredictions(Float32List prediction) {
+  static List<_Detection> _decodePredictions(
+    Float32List prediction, {
+    required int passId,
+  }) {
     final candidates = <_Detection>[];
     for (var i = 0; i < 8400; i++) {
       final seedScore = prediction[4 * 8400 + i];
@@ -280,6 +347,7 @@ class OfflineGrainAnalyzer {
         _Detection(
           score: score,
           classId: classId,
+          passId: passId,
           x1: cx - width / 2,
           y1: cy - height / 2,
           x2: cx + width / 2,
@@ -293,6 +361,22 @@ class OfflineGrainAnalyzer {
     final kept = <_Detection>[];
     for (final candidate in candidates) {
       if (kept.every((other) => _boxIou(candidate, other) < _iou)) {
+        kept.add(candidate);
+        if (kept.length >= _maxDetections) break;
+      }
+    }
+    return kept;
+  }
+
+  static List<_Detection> _mergeDetections(
+    List<_Detection> primary,
+    List<_Detection> secondary,
+  ) {
+    final merged = <_Detection>[...primary, ...secondary]
+      ..sort((a, b) => b.score.compareTo(a.score));
+    final kept = <_Detection>[];
+    for (final candidate in merged) {
+      if (kept.every((other) => _boxIou(candidate, other) < 0.5)) {
         kept.add(candidate);
         if (kept.length >= _maxDetections) break;
       }
@@ -433,6 +517,9 @@ class OfflineGrainAnalyzer {
       if (area < _minArea || area > _maxArea) continue;
       if (aspect > _maxAspectRatio) continue;
       if (solidity < _minSolidity || extent < _minExtent) continue;
+      if (!_passesConfidenceAwareShapeFilter(instance.confidence, metrics)) {
+        continue;
+      }
 
       final id = measurements.length + 1;
       for (var localY = 0; localY < instance.height; localY++) {
@@ -448,12 +535,12 @@ class OfflineGrainAnalyzer {
         'id': id,
         ...metrics,
         'area_mm2':
-            mmPerPixel == 0 ? 0.0 : _round(area * mmPerPixel * mmPerPixel, 6),
+            mmPerPixel == 0 ? null : _round(area * mmPerPixel * mmPerPixel, 6),
         'length_mm': mmPerPixel == 0
-            ? 0.0
+            ? null
             : _round((metrics['length_px'] as double) * mmPerPixel, 6),
         'width_mm': mmPerPixel == 0
-            ? 0.0
+            ? null
             : _round((metrics['width_px'] as double) * mmPerPixel, 6),
         'confidence': _round(instance.confidence, 6),
         'class_id': 0,
@@ -524,28 +611,24 @@ class OfflineGrainAnalyzer {
 
   static img.Image _renderOverlay(img.Image rgb, _FilteredResult result) {
     final overlay = img.Image.from(rgb);
-    const palette = [
-      [45, 108, 191],
-      [219, 87, 86],
-      [73, 160, 120],
-      [235, 174, 73],
-      [132, 98, 174],
-      [77, 176, 196],
-      [201, 112, 165],
-      [122, 126, 135],
-    ];
+    final outlierIds = _outlierIds(result.measurements);
     for (var y = 0; y < result.height; y++) {
       for (var x = 0; x < result.width; x++) {
         final label = result.labels[y * result.width + x];
         if (label <= 0) continue;
-        final color = palette[(label - 1) % palette.length];
+        final color = outlierIds.contains(label)
+            ? const [220, 38, 38]
+            : const [37, 99, 235];
+        final isEdge = _isLabelEdge(
+            result.labels, result.width, result.height, x, y, label);
+        final fillOpacity = isEdge ? 0.56 : 0.34;
         final source = overlay.getPixel(x, y);
         overlay.setPixelRgb(
           x,
           y,
-          (source.r * 0.55 + color[0] * 0.45).round(),
-          (source.g * 0.55 + color[1] * 0.45).round(),
-          (source.b * 0.55 + color[2] * 0.45).round(),
+          (source.r * (1 - fillOpacity) + color[0] * fillOpacity).round(),
+          (source.g * (1 - fillOpacity) + color[1] * fillOpacity).round(),
+          (source.b * (1 - fillOpacity) + color[2] * fillOpacity).round(),
         );
       }
     }
@@ -556,15 +639,96 @@ class OfflineGrainAnalyzer {
     final mask = img.Image(
       width: result.width,
       height: result.height,
+      numChannels: 4,
+    );
+    final outlierIds = _outlierIds(result.measurements);
+    for (var y = 0; y < result.height; y++) {
+      for (var x = 0; x < result.width; x++) {
+        final label = result.labels[y * result.width + x];
+        if (label <= 0) {
+          mask.setPixelRgba(x, y, 0, 0, 0, 0);
+          continue;
+        }
+        final isOutlier = outlierIds.contains(label);
+        final isEdge = _isLabelEdge(
+            result.labels, result.width, result.height, x, y, label);
+        if (isEdge) {
+          final edgeColor =
+              isOutlier ? const [185, 28, 28] : const [30, 64, 175];
+          mask.setPixelRgba(
+              x, y, edgeColor[0], edgeColor[1], edgeColor[2], 255);
+          continue;
+        }
+        final fillColor =
+            isOutlier ? const [239, 68, 68] : const [59, 130, 246];
+        final alpha = isOutlier ? 170 : 145;
+        mask.setPixelRgba(
+            x, y, fillColor[0], fillColor[1], fillColor[2], alpha);
+      }
+    }
+    return mask;
+  }
+
+  static img.Image _renderLabelMap(_FilteredResult result) {
+    final labelMap = img.Image(
+      width: result.width,
+      height: result.height,
       numChannels: 3,
     );
     for (var y = 0; y < result.height; y++) {
       for (var x = 0; x < result.width; x++) {
-        final value = result.labels[y * result.width + x] > 0 ? 255 : 0;
-        mask.setPixelRgb(x, y, value, value, value);
+        final label = result.labels[y * result.width + x];
+        labelMap.setPixelRgb(
+          x,
+          y,
+          label & 0xFF,
+          (label >> 8) & 0xFF,
+          (label >> 16) & 0xFF,
+        );
       }
     }
-    return mask;
+    return labelMap;
+  }
+
+  static Set<int> _outlierIds(List<Map<String, dynamic>> measurements) {
+    return {
+      for (final measurement in measurements)
+        if (measurement['qc_outlier'] == true)
+          ((measurement['id'] as num?)?.toInt() ?? -1),
+    }..remove(-1);
+  }
+
+  static bool _passesConfidenceAwareShapeFilter(
+    double confidence,
+    Map<String, dynamic> metrics,
+  ) {
+    final solidity = (metrics['solidity'] as num).toDouble();
+    final extent = (metrics['extent'] as num).toDouble();
+    final aspect = (metrics['aspect_ratio'] as num).toDouble();
+    if (confidence >= 0.18) return true;
+    if (confidence >= 0.12) {
+      return solidity >= 0.48 && extent >= 0.22 && aspect <= 12.0;
+    }
+    if (confidence >= 0.08) {
+      return solidity >= 0.56 && extent >= 0.25 && aspect <= 10.0;
+    }
+    return solidity >= 0.62 && extent >= 0.30 && aspect <= 8.0;
+  }
+
+  static bool _isLabelEdge(
+    Int32List labels,
+    int width,
+    int height,
+    int x,
+    int y,
+    int label,
+  ) {
+    if (x == 0 || y == 0 || x == width - 1 || y == height - 1) return true;
+    if (labels[y * width + (x - 1)] != label) return true;
+    if (labels[y * width + (x + 1)] != label) return true;
+    if (labels[(y - 1) * width + x] != label) return true;
+    if (labels[(y + 1) * width + x] != label) return true;
+    return false;
   }
 
   static img.Image _renderLabels(_FilteredResult result) {
@@ -605,6 +769,39 @@ class OfflineGrainAnalyzer {
       );
     }
     return labelsImage;
+  }
+
+  static img.Image _enhanceForDetection(img.Image source) {
+    final enhanced = img.Image.from(source);
+    final pixelCount = math.max(1, enhanced.width * enhanced.height);
+    var sumR = 0.0;
+    var sumG = 0.0;
+    var sumB = 0.0;
+    for (var y = 0; y < enhanced.height; y++) {
+      for (var x = 0; x < enhanced.width; x++) {
+        final p = enhanced.getPixel(x, y);
+        sumR += p.r;
+        sumG += p.g;
+        sumB += p.b;
+      }
+    }
+    final meanR = sumR / pixelCount;
+    final meanG = sumG / pixelCount;
+    final meanB = sumB / pixelCount;
+    final meanGray = (meanR + meanG + meanB) / 3.0;
+    final gainR = (meanGray / math.max(meanR, 1.0)).clamp(0.8, 1.3);
+    final gainG = (meanGray / math.max(meanG, 1.0)).clamp(0.8, 1.3);
+    final gainB = (meanGray / math.max(meanB, 1.0)).clamp(0.8, 1.3);
+    for (var y = 0; y < enhanced.height; y++) {
+      for (var x = 0; x < enhanced.width; x++) {
+        final p = enhanced.getPixel(x, y);
+        final r = ((p.r * gainR - 128) * 1.12 + 128).round().clamp(0, 255);
+        final g = ((p.g * gainG - 128) * 1.12 + 128).round().clamp(0, 255);
+        final b = ((p.b * gainB - 128) * 1.12 + 128).round().clamp(0, 255);
+        enhanced.setPixelRgb(x, y, r, g, b);
+      }
+    }
+    return img.gaussianBlur(enhanced, radius: 1);
   }
 
   Future<OrtSession> _loadSession() async {
@@ -763,31 +960,33 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
       'mean_area_px': 0,
       'mean_length_px': 0,
       'mean_width_px': 0,
-      'mean_area_mm2': 0,
-      'mean_length_mm': 0,
-      'mean_width_mm': 0,
+      'mean_area_mm2': null,
+      'mean_length_mm': null,
+      'mean_width_mm': null,
       'std_area_px': 0,
       'std_length_px': 0,
       'std_width_px': 0,
-      'std_area_mm2': 0,
-      'std_length_mm': 0,
-      'std_width_mm': 0,
+      'std_area_mm2': null,
+      'std_length_mm': null,
+      'std_width_mm': null,
       'robust_std_area_px': 0,
       'robust_std_length_px': 0,
       'robust_std_width_px': 0,
-      'robust_std_area_mm2': 0,
-      'robust_std_length_mm': 0,
-      'robust_std_width_mm': 0,
+      'robust_std_area_mm2': null,
+      'robust_std_length_mm': null,
+      'robust_std_width_mm': null,
       'cv_length_pct': 0,
       'cv_width_pct': 0,
       'qc': {
-        'method': 'median_mad',
+        'method': 'median_mad_multimetric',
         'suspect_count': 0,
         'inlier_count': 0,
         'suspect_ids': <int>[],
         'review_required': false,
         'suspect_ratio': 0,
         'robust_used_for_reporting': true,
+        'threshold': _qcMadZThreshold,
+        'min_metrics': _qcMinOutlierMetrics,
         'status': 'ok',
       },
     };
@@ -798,7 +997,8 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
   for (var index = 0; index < measurements.length; index++) {
     final isOutlier = outliers.contains(index);
     measurements[index]['qc_outlier'] = isOutlier;
-    measurements[index]['qc_reason'] = isOutlier ? 'size_outlier_mad' : '';
+    measurements[index]['qc_reason'] =
+        isOutlier ? 'size_outlier_mad_multimetric' : '';
   }
   final inliers = [
     for (var index = 0; index < measurements.length; index++)
@@ -824,6 +1024,11 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
     return average > 0 ? _round(std(items, key) / average * 100, 3) : 0;
   }
 
+  final calibrated = measurements.first['length_mm'] != null;
+  double? metricMm(double Function(List<Map<String, dynamic>>, String) stat,
+          List<Map<String, dynamic>> items, String key) =>
+      calibrated ? stat(items, key) : null;
+
   return {
     'count': measurements.length,
     'total_area_px': measurements.fold<int>(
@@ -833,32 +1038,33 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
     'mean_area_px': mean(measurements, 'area_px'),
     'mean_length_px': mean(measurements, 'length_px'),
     'mean_width_px': mean(measurements, 'width_px'),
-    'mean_area_mm2': mean(measurements, 'area_mm2'),
-    'mean_length_mm': mean(measurements, 'length_mm'),
-    'mean_width_mm': mean(measurements, 'width_mm'),
+    'mean_area_mm2': metricMm(mean, measurements, 'area_mm2'),
+    'mean_length_mm': metricMm(mean, measurements, 'length_mm'),
+    'mean_width_mm': metricMm(mean, measurements, 'width_mm'),
     'std_area_px': std(measurements, 'area_px'),
     'std_length_px': std(measurements, 'length_px'),
     'std_width_px': std(measurements, 'width_px'),
-    'std_area_mm2': std(measurements, 'area_mm2'),
-    'std_length_mm': std(measurements, 'length_mm'),
-    'std_width_mm': std(measurements, 'width_mm'),
+    'std_area_mm2': metricMm(std, measurements, 'area_mm2'),
+    'std_length_mm': metricMm(std, measurements, 'length_mm'),
+    'std_width_mm': metricMm(std, measurements, 'width_mm'),
     'robust_mean_area_px': mean(robustMeasurements, 'area_px'),
     'robust_mean_length_px': mean(robustMeasurements, 'length_px'),
     'robust_mean_width_px': mean(robustMeasurements, 'width_px'),
-    'robust_mean_area_mm2': mean(robustMeasurements, 'area_mm2'),
-    'robust_mean_length_mm': mean(robustMeasurements, 'length_mm'),
-    'robust_mean_width_mm': mean(robustMeasurements, 'width_mm'),
+    'robust_mean_area_mm2': metricMm(mean, robustMeasurements, 'area_mm2'),
+    'robust_mean_length_mm': metricMm(mean, robustMeasurements, 'length_mm'),
+    'robust_mean_width_mm': metricMm(mean, robustMeasurements, 'width_mm'),
     'robust_std_area_px': std(robustMeasurements, 'area_px'),
     'robust_std_length_px': std(robustMeasurements, 'length_px'),
     'robust_std_width_px': std(robustMeasurements, 'width_px'),
-    'robust_std_area_mm2': std(robustMeasurements, 'area_mm2'),
-    'robust_std_length_mm': std(robustMeasurements, 'length_mm'),
-    'robust_std_width_mm': std(robustMeasurements, 'width_mm'),
+    'robust_std_area_mm2': metricMm(std, robustMeasurements, 'area_mm2'),
+    'robust_std_length_mm': metricMm(std, robustMeasurements, 'length_mm'),
+    'robust_std_width_mm': metricMm(std, robustMeasurements, 'width_mm'),
     'cv_length_pct': cv(robustMeasurements, 'length_px'),
     'cv_width_pct': cv(robustMeasurements, 'width_px'),
     'qc': {
-      'method': 'median_mad',
-      'threshold': 3.5,
+      'method': 'median_mad_multimetric',
+      'threshold': _qcMadZThreshold,
+      'min_metrics': _qcMinOutlierMetrics,
       'suspect_count': outliers.length,
       'inlier_count': robustMeasurements.length,
       'suspect_ids': [
@@ -877,7 +1083,7 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
 
 Set<int> _qcOutlierIndices(List<Map<String, dynamic>> measurements) {
   if (measurements.length < 5) return {};
-  final flagged = <int>{};
+  final outlierCounts = List<int>.filled(measurements.length, 0);
   for (final key in ['area_px', 'length_px', 'width_px']) {
     final data = measurements
         .map((item) => ((item[key] as num?)?.toDouble() ?? 0))
@@ -887,12 +1093,16 @@ Set<int> _qcOutlierIndices(List<Map<String, dynamic>> measurements) {
     final mad = _median(deviations);
     for (var index = 0; index < data.length; index++) {
       final deviation = deviations[index];
-      final isOutlier =
-          mad <= 1e-9 ? deviation > 1e-9 : 0.6745 * deviation / mad > 3.5;
-      if (isOutlier) flagged.add(index);
+      final isOutlier = mad <= 1e-9
+          ? deviation > 1e-9
+          : 0.6745 * deviation / mad > _qcMadZThreshold;
+      if (isOutlier) outlierCounts[index]++;
     }
   }
-  return flagged;
+  return {
+    for (var index = 0; index < outlierCounts.length; index++)
+      if (outlierCounts[index] >= _qcMinOutlierMetrics) index,
+  };
 }
 
 double _median(List<double> values) {
@@ -906,6 +1116,7 @@ double _median(List<double> values) {
 class _Detection {
   final double score;
   final int classId;
+  final int passId;
   final double x1;
   final double y1;
   final double x2;
@@ -915,6 +1126,7 @@ class _Detection {
   const _Detection({
     required this.score,
     required this.classId,
+    required this.passId,
     required this.x1,
     required this.y1,
     required this.x2,
@@ -993,6 +1205,8 @@ class _OfflinePostprocessInput {
   final Uint8List imageBytes;
   final Float32List predictions;
   final Float32List protos;
+  final Float32List predictionsEnhanced;
+  final Float32List protosEnhanced;
   final int width;
   final int height;
   final int paddedSide;
@@ -1010,6 +1224,8 @@ class _OfflinePostprocessInput {
     this.imageBytes, {
     required this.predictions,
     required this.protos,
+    required this.predictionsEnhanced,
+    required this.protosEnhanced,
     required this.width,
     required this.height,
     required this.paddedSide,
@@ -1054,6 +1270,7 @@ class OfflineAnalyzeResult {
   final Uint8List overlayPng;
   final Uint8List maskPng;
   final Uint8List labelsPng;
+  final Uint8List labelMapPng;
   final Map<String, dynamic> image;
   final List<Map<String, dynamic>> measurements;
   final Map<String, dynamic> summary;
@@ -1065,6 +1282,7 @@ class OfflineAnalyzeResult {
     required this.overlayPng,
     required this.maskPng,
     required this.labelsPng,
+    required this.labelMapPng,
     required this.image,
     required this.measurements,
     required this.summary,
@@ -1096,6 +1314,7 @@ class OfflineAnalyzeResult {
         'sam_mask_png_base64': base64Encode(maskPng),
         'labels_png_base64': base64Encode(labelsPng),
         'mask_png_base64': base64Encode(maskPng),
+        'label_map_png_base64': base64Encode(labelMapPng),
       };
 }
 

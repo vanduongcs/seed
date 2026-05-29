@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  Chip,
   CircularProgress,
   Collapse,
   Dialog,
@@ -16,12 +15,6 @@ import {
   Grid,
   IconButton,
   Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Typography,
 } from '@mui/material';
 import {
@@ -29,6 +22,7 @@ import {
   DownloadOutlined,
   ExpandLess,
   ExpandMore,
+  ImageOutlined,
   RefreshOutlined,
   VisibilityOutlined,
 } from '@mui/icons-material';
@@ -42,6 +36,68 @@ function reportedStat(summary, rawKey, robustKey) {
   return summary?.qc?.robust_used_for_reporting === false
     ? summary?.[rawKey]
     : (summary?.[robustKey] ?? summary?.[rawKey]);
+}
+
+function RunThumbnail({ run, isGuest }) {
+  const hostRef = useRef(null);
+  const [overlay, setOverlay] = useState(run.overlay_png_base64 || '');
+  const [visible, setVisible] = useState(Boolean(run.overlay_png_base64));
+
+  useEffect(() => {
+    setOverlay(run.overlay_png_base64 || '');
+    setVisible(Boolean(run.overlay_png_base64));
+  }, [run.id, run.overlay_png_base64]);
+
+  useEffect(() => {
+    if (overlay || isGuest || !hostRef.current) return undefined;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '120px' });
+    observer.observe(hostRef.current);
+    return () => observer.disconnect();
+  }, [overlay, isGuest, run.id]);
+
+  useEffect(() => {
+    if (!visible || overlay || isGuest) return undefined;
+    let active = true;
+    api.get(`/grain/runs/${run.id}`)
+      .then(({ data }) => {
+        if (active) setOverlay(data.data?.result?.overlay_png_base64 || '');
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [visible, overlay, isGuest, run.id]);
+
+  return (
+    <Box ref={hostRef} sx={{
+      width: 112,
+      minWidth: 112,
+      height: 112,
+      bgcolor: 'rgba(47, 107, 79, 0.08)',
+      borderRadius: 1.5,
+      border: '1px solid',
+      borderColor: 'divider',
+      overflow: 'hidden',
+      display: 'grid',
+      placeItems: 'center',
+    }}>
+      {overlay ? (
+        <Box
+          component="img"
+          src={`data:image/png;base64,${overlay}`}
+          alt="Ảnh đánh dấu"
+          sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      ) : (
+        <ImageOutlined color="disabled" />
+      )}
+    </Box>
+  );
 }
 
 export default function StoragePage() {
@@ -66,6 +122,8 @@ export default function StoragePage() {
           createdAt: item.createdAt,
           image: item.result?.image || {},
           summary: item.result?.summary || {},
+          calibration: item.result?.calibration || {},
+          overlay_png_base64: item.result?.overlay_png_base64 || '',
           localOnly: true,
         })));
         return;
@@ -149,7 +207,7 @@ export default function StoragePage() {
           <Typography variant="h5" fontWeight={700} mb={0.75}>Lưu trữ</Typography>
           {isGuest && (
             <Typography variant="body2" color="text.secondary">
-              Các bản xử lý này lưu trên trình duyệt hiện tại. Đăng nhập để đồng bộ vào tài khoản.
+              Dữ liệu đang được lưu trữ cục bộ. Đăng nhập để đồng bộ lên server.
             </Typography>
           )}
         </Box>
@@ -160,84 +218,54 @@ export default function StoragePage() {
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      <Grid container spacing={2}>
-        <Grid item xs={12}>
-          <Card>
-            <CardContent sx={{ p: 0 }}>
-              <TableContainer sx={{ overflowX: 'auto' }}>
-                <Table sx={{ minWidth: 920 }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Mã xử lý</TableCell>
-                      <TableCell>Ảnh đầu vào</TableCell>
-                      <TableCell>Thời gian</TableCell>
-                      <TableCell align="right">Số hạt</TableCell>
-                      <TableCell align="right">ĐLC dài (báo cáo)</TableCell>
-                      <TableCell align="right">ĐLC rộng (báo cáo)</TableCell>
-                      <TableCell>Trạng thái</TableCell>
-                      <TableCell align="right">Thao tác</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {loading ? (
-                      <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 5 }}>
-                          <CircularProgress size={28} />
-                        </TableCell>
-                      </TableRow>
-                    ) : runs.length ? runs.map((run) => (
-                      <TableRow key={run.id} hover>
-                        <TableCell>{shortRunId(run.id)}</TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={650} sx={{ maxWidth: 220 }} noWrap>{run.sourceFileName}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {run.image?.width || '-'} x {run.image?.height || '-'} px
-                          </Typography>
-                        </TableCell>
-                        <TableCell>{formatDate(run.createdAt)}</TableCell>
-                        <TableCell align="right">{run.summary?.count ?? 0}</TableCell>
-                        <TableCell align="right">{formatMeasure(reportedStat(run.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(run.summary, 'std_length_px', 'robust_std_length_px'), 'px')}</TableCell>
-                        <TableCell align="right">{formatMeasure(reportedStat(run.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(run.summary, 'std_width_px', 'robust_std_width_px'), 'px')}</TableCell>
-                        <TableCell>
-                          <Chip label={isGuest ? 'Lưu local' : 'Hoàn tất'} size="small" color="success" variant="outlined" />
-                        </TableCell>
-                        <TableCell align="right">
-                          <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                            <Button
-                              size="small"
-                              startIcon={<VisibilityOutlined />}
-                              onClick={() => openDetail(run.id)}
-                              disabled={detailLoading}
-                            >
-                              Xem
-                            </Button>
-                            <Button
-                              size="small"
-                              color="error"
-                              startIcon={<DeleteOutline />}
-                              onClick={() => deleteRun(run)}
-                            >
-                              Xóa
-                            </Button>
-                          </Stack>
-                        </TableCell>
-                      </TableRow>
-                    )) : (
-                      <TableRow>
-                        <TableCell colSpan={8}>
-                          <Alert severity="info" sx={{ m: 2 }}>
-                            Chưa có lịch sử. Vào Trang chủ, import ảnh và chạy xử lý để tạo run đầu tiên.
-                          </Alert>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </CardContent>
-          </Card>
+      {loading ? (
+        <Card>
+          <CardContent sx={{ py: 5, textAlign: 'center' }}>
+            <CircularProgress size={28} />
+          </CardContent>
+        </Card>
+      ) : runs.length ? (
+        <Grid container spacing={2}>
+          {runs.map((run) => (
+            <Grid item xs={12} md={6} key={run.id}>
+              <Card sx={{ height: '100%' }}>
+                <CardContent sx={{ display: 'flex', gap: 1.5, alignItems: 'stretch' }}>
+                  <RunThumbnail run={run} isGuest={isGuest} />
+                  <Stack spacing={0.75} sx={{ minWidth: 0, flexGrow: 1 }}>
+                    <Typography variant="body1" fontWeight={700} noWrap>
+                      {`${run.summary?.count ?? 0} hạt - ${formatDate(run.createdAt)}`}
+                    </Typography>
+                    <Typography variant="body2" fontWeight={650} color="text.primary">
+                      ĐLC: {formatPair(
+                        reportedStat(run.summary, 'std_length_mm', 'robust_std_length_mm'),
+                        reportedStat(run.summary, 'std_width_mm', 'robust_std_width_mm'),
+                        reportedStat(run.summary, 'std_length_px', 'robust_std_length_px'),
+                        reportedStat(run.summary, 'std_width_px', 'robust_std_width_px'),
+                        run.calibration?.enabled === true,
+                      )}
+                    </Typography>
+                    <Typography variant="body2" fontWeight={650} color="text.primary">
+                      TB: {formatPair(
+                        run.summary?.mean_length_mm,
+                        run.summary?.mean_width_mm,
+                        run.summary?.mean_length_px,
+                        run.summary?.mean_width_px,
+                        run.calibration?.enabled === true,
+                      )}
+                    </Typography>
+                    <Stack direction="row" spacing={0.5} sx={{ mt: 'auto' }}>
+                      <Button size="small" startIcon={<VisibilityOutlined />} onClick={() => openDetail(run.id)} disabled={detailLoading}>Xem</Button>
+                      <Button size="small" color="error" startIcon={<DeleteOutline />} onClick={() => deleteRun(run)}>Xóa</Button>
+                    </Stack>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
         </Grid>
-      </Grid>
+      ) : (
+        <Alert severity="info">Chưa có dữ liệu.</Alert>
+      )}
 
       <Dialog open={Boolean(selected)} onClose={() => { setSelected(null); setShowAdvanced(false); }} maxWidth="lg" fullWidth>
         <DialogTitle>Chi tiết xử lý {detailRun ? shortRunId(detailRun.id) : ''}</DialogTitle>
@@ -302,8 +330,8 @@ export default function StoragePage() {
                   <ResultRow label="Tên tệp ảnh" value={detailRun?.sourceFileName || '-'} />
                   <ResultRow label="Thời gian quét" value={formatDate(detailRun?.createdAt)} />
                   <ResultRow label="Tổng số hạt đo được" value={detailResult.summary?.count ?? 0} />
-                  <ResultRow label="ĐLC chiều dài (báo cáo)" value={formatMeasure(reportedStat(detailResult.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(detailResult.summary, 'std_length_px', 'robust_std_length_px'), 'px')} />
-                  <ResultRow label="ĐLC chiều rộng (báo cáo)" value={formatMeasure(reportedStat(detailResult.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(detailResult.summary, 'std_width_px', 'robust_std_width_px'), 'px')} />
+                  <ResultRow label="ĐLC chiều dài (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(detailResult.summary, 'std_length_px', 'robust_std_length_px'), 'px')} />
+                  <ResultRow label="ĐLC chiều rộng (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(detailResult.summary, 'std_width_px', 'robust_std_width_px'), 'px')} />
                   <ResultRow label="Vùng nghi nhiễu (QC)" value={String(detailResult.summary?.qc?.suspect_count ?? 0)} />
                   <ResultRow label="Tỷ lệ thước đo" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'Chưa thiết lập'} />
                   
@@ -392,6 +420,18 @@ const formatDate = (value) => {
   }).format(new Date(value));
 };
 
+const formatPair = (lengthMm, widthMm, lengthPx, widthPx, calibrated) => {
+  const hasMm = calibrated && lengthMm != null && widthMm != null;
+  return hasMm
+    ? `${formatStorageMeasure({ enabled: true }, lengthMm, 'mm', lengthPx, 'px')} x ${formatStorageMeasure({ enabled: true }, widthMm, 'mm', widthPx, 'px')}`
+    : `${formatMeasure(null, 'mm', lengthPx, 'px')} x ${formatMeasure(null, 'mm', widthPx, 'px')}`;
+};
+
+const formatStorageMeasure = (calibration, mmValue, mmUnit, pxValue, pxUnit) => (
+  calibration?.enabled === true && mmValue != null
+    ? `${Number(mmValue).toFixed(mmUnit === 'mm2' ? 3 : 2)} ${mmUnit}`
+    : formatMeasure(null, mmUnit, pxValue, pxUnit)
+);
 
 
 const downloadBlob = (fileName, content, mimeType) => {

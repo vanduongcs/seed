@@ -222,5 +222,5 @@ def _resolve_model(model_name: str) -> str:
             return str(path)
     raise FileNotFoundError(
         f"MobileSAM ONNX model not found: {model_name}. "
-        "Run `python export_mobile_sam_onnx.py` first."
+        "Run `python scripts/export_mobile_sam_onnx.py` first."
     )

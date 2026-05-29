@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,29 +38,29 @@ class StorageScreen extends ConsumerWidget {
             ),
           ],
         ),
-        data: (runs) => ListView(
+        data: (runs) => ListView.builder(
           padding: const EdgeInsets.all(20),
-          children: [
-            _Header(isGuest: isGuest),
-            const SizedBox(height: 18),
-            if (runs.isEmpty)
-              Card(
+          itemCount: runs.isEmpty ? 3 : runs.length + 2,
+          itemBuilder: (context, index) {
+            if (index == 0) return _Header(isGuest: isGuest);
+            if (index == 1) return const SizedBox(height: 18);
+            if (runs.isEmpty) {
+              return const Card(
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.all(16),
                   child: Text(
-                    isGuest
-                        ? 'Chưa có bản xử lý local. Chọn ảnh hoặc chụp ảnh để chạy phân tích offline.'
-                        : 'Chưa có lịch sử. Hãy chạy phân tích ảnh để tạo bản đầu tiên.',
-                    style: const TextStyle(color: AppTheme.textSecondary),
+                    'Chưa có dữ liệu',
+                    style: TextStyle(color: AppTheme.textSecondary),
                   ),
                 ),
-              )
-            else
-              ...runs.map((run) => _RunCard(
-                    run: run,
-                    onTap: () => _openRunDetail(context, run.id),
-                  )),
-          ],
+              );
+            }
+            final run = runs[index - 2];
+            return _RunCard(
+              run: run,
+              onTap: () => _openRunDetail(context, run.id),
+            );
+          },
         ),
       ),
     );
@@ -76,14 +77,9 @@ class _Header extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Lịch sử xử lý',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 6),
         Text(
           isGuest
-              ? 'Các bản xử lý đang lưu trên điện thoại. Đăng nhập để đồng bộ vào tài khoản.'
+              ? 'Dữ liệu đang được lưu trữ cục bộ. Đăng nhập để đồng bộ lên server.'
               : 'Các lần xử lý đã đồng bộ với tài khoản của bạn trên server.',
           style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
@@ -92,42 +88,94 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _RunCard extends StatelessWidget {
+class _RunCard extends StatefulWidget {
   final GrainRun run;
   final VoidCallback onTap;
 
   const _RunCard({required this.run, required this.onTap});
 
   @override
+  State<_RunCard> createState() => _RunCardState();
+}
+
+class _RunCardState extends State<_RunCard> {
+  Future<Uint8List?>? _remoteOverlay;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepareRemoteOverlay();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RunCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.run.id != widget.run.id ||
+        oldWidget.run.overlayBase64 != widget.run.overlayBase64) {
+      _prepareRemoteOverlay();
+    }
+  }
+
+  void _prepareRemoteOverlay() {
+    if (_decodePreview(widget.run.overlayBase64) != null) {
+      _remoteOverlay = null;
+      return;
+    }
+    _remoteOverlay = GrainAnalysisApi()
+        .getRun(widget.run.id)
+        .then(
+            (detail) => _decodePreview(detail.result.previewBase64('overlay')))
+        .catchError((_) => null);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final overlayBytes = _decodePreview(widget.run.overlayBase64);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
-        onTap: onTap,
+        onTap: widget.onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
               Container(
-                width: 58,
-                height: 58,
+                width: 82,
+                height: 82,
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppTheme.border),
                 ),
-                child: Center(
-                  child: Text(
-                    run.id.length >= 4
-                        ? run.id.substring(run.id.length - 4).toUpperCase()
-                        : 'RUN',
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
+                clipBehavior: Clip.antiAlias,
+                child: overlayBytes == null
+                    ? FutureBuilder<Uint8List?>(
+                        future: _remoteOverlay,
+                        builder: (context, snapshot) {
+                          final bytes = snapshot.data;
+                          if (bytes != null) {
+                            return Image.memory(bytes, fit: BoxFit.cover);
+                          }
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            );
+                          }
+                          return const Icon(
+                            Icons.image_outlined,
+                            color: AppTheme.textSecondary,
+                          );
+                        },
+                      )
+                    : Image.memory(overlayBytes, fit: BoxFit.cover),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -135,29 +183,27 @@ class _RunCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      run.sourceFileName,
+                      '${widget.run.count} hạt - ${_formatDate(widget.run.createdAt)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatDate(run.createdAt),
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
                     const SizedBox(height: 6),
                     Text(
-                      '${run.count} hạt - ĐLC: ${run.qcStdLengthPx == null ? '-' : _formatMeasure(run.qcStdLengthMm, 'mm', run.qcStdLengthPx!, 'px')} x ${run.qcStdWidthPx == null ? '-' : _formatMeasure(run.qcStdWidthMm, 'mm', run.qcStdWidthPx!, 'px')}',
+                      'ĐLC: ${_formatPair(widget.run.qcStdLengthMm, widget.run.qcStdWidthMm, widget.run.qcStdLengthPx, widget.run.qcStdWidthPx)}',
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${run.imageWidth} x ${run.imageHeight} px',
+                      'TB: ${_formatPair(widget.run.meanLengthMm, widget.run.meanWidthMm, widget.run.meanLengthPx, widget.run.meanWidthPx)}',
                       style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -168,6 +214,15 @@ class _RunCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+Uint8List? _decodePreview(String value) {
+  if (value.isEmpty) return null;
+  try {
+    return base64Decode(value);
+  } on FormatException {
+    return null;
   }
 }
 
@@ -357,7 +412,8 @@ Widget _detailRow(String label, String value) {
 Future<void> _shareCsv(String sourceName, String csv) async {
   final file = await _writeTempFile(
       '${_safeStem(sourceName)}_measurements.csv', utf8.encode(csv));
-  await Share.shareXFiles([XFile(file.path)], text: 'Seed measurements CSV');
+  await Share.shareXFiles([XFile(file.path)],
+      text: 'SeedVision measurements CSV');
 }
 
 String _segmentationPng(GrainAnalysisResult result) {
@@ -371,7 +427,8 @@ String _segmentationPng(GrainAnalysisResult result) {
 Future<void> _sharePng(String sourceName, String base64) async {
   final file = await _writeTempFile(
       '${_safeStem(sourceName)}_segmentation.png', base64Decode(base64));
-  await Share.shareXFiles([XFile(file.path)], text: 'Seed segmentation PNG');
+  await Share.shareXFiles([XFile(file.path)],
+      text: 'SeedVision segmentation PNG');
 }
 
 Future<File> _writeTempFile(String name, List<int> bytes) async {
@@ -394,6 +451,15 @@ String _formatMeasure(
     return '${primary.toStringAsFixed(primaryUnit == 'mm2' ? 3 : 2)} $primaryUnit';
   }
   return '${fallback.toStringAsFixed(1)} $fallbackUnit';
+}
+
+String _formatPair(
+    double? lengthMm, double? widthMm, double? lengthPx, double? widthPx) {
+  if (lengthMm != null && widthMm != null) {
+    return '${lengthMm.toStringAsFixed(2)} mm x ${widthMm.toStringAsFixed(2)} mm';
+  }
+  if (lengthPx == null || widthPx == null) return '-';
+  return '${lengthPx.toStringAsFixed(1)} px x ${widthPx.toStringAsFixed(1)} px';
 }
 
 String _formatDate(DateTime? value) {

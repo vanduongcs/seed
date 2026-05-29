@@ -11,6 +11,8 @@ from .yolo_segment import InstanceMask
 
 SEED_CLASS_IDS = {0}
 SEED_CLASS_NAMES = {"seed"}
+QC_MAD_Z_THRESHOLD = 4.0
+QC_MIN_OUTLIER_METRICS = 2
 
 
 def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float) -> tuple[np.ndarray, list[dict], int]:
@@ -46,15 +48,17 @@ def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float
             continue
         if metrics["solidity"] < min_solidity or metrics["extent"] < min_extent:
             continue
+        if not _passes_confidence_aware_shape_filter(instance.confidence, metrics):
+            continue
 
         item_id = len(measurements) + 1
         labels[available] = item_id
         measurement = {
             "id": item_id,
             **metrics,
-            "area_mm2": round(metrics["area_px"] * pixel_to_mm * pixel_to_mm, 6) if pixel_to_mm else 0.0,
-            "length_mm": round(metrics["length_px"] * pixel_to_mm, 6) if pixel_to_mm else 0.0,
-            "width_mm": round(metrics["width_px"] * pixel_to_mm, 6) if pixel_to_mm else 0.0,
+            "area_mm2": round(metrics["area_px"] * pixel_to_mm * pixel_to_mm, 6) if pixel_to_mm else None,
+            "length_mm": round(metrics["length_px"] * pixel_to_mm, 6) if pixel_to_mm else None,
+            "width_mm": round(metrics["width_px"] * pixel_to_mm, 6) if pixel_to_mm else None,
             "confidence": round(instance.confidence, 6),
             "class_id": instance.class_id,
             "class_name": instance.class_name,
@@ -62,6 +66,16 @@ def filter_and_measure(instances: list[InstanceMask], params: dict, scale: float
         measurements.append(measurement)
 
     return labels, measurements, excluded_reference_object_count
+
+
+def _passes_confidence_aware_shape_filter(confidence: float, metrics: dict) -> bool:
+    if confidence >= 0.18:
+        return True
+    if confidence >= 0.12:
+        return metrics["solidity"] >= 0.48 and metrics["extent"] >= 0.22 and metrics["aspect_ratio"] <= 12.0
+    if confidence >= 0.08:
+        return metrics["solidity"] >= 0.56 and metrics["extent"] >= 0.25 and metrics["aspect_ratio"] <= 10.0
+    return metrics["solidity"] >= 0.62 and metrics["extent"] >= 0.30 and metrics["aspect_ratio"] <= 8.0
 
 
 def is_seed_instance(instance: InstanceMask) -> bool:
@@ -161,31 +175,33 @@ def summary_for(measurements: list[dict]) -> dict:
             "mean_area_px": 0,
             "mean_length_px": 0,
             "mean_width_px": 0,
-            "mean_area_mm2": 0,
-            "mean_length_mm": 0,
-            "mean_width_mm": 0,
+            "mean_area_mm2": None,
+            "mean_length_mm": None,
+            "mean_width_mm": None,
             "std_area_px": 0,
             "std_length_px": 0,
             "std_width_px": 0,
-            "std_area_mm2": 0,
-            "std_length_mm": 0,
-            "std_width_mm": 0,
+            "std_area_mm2": None,
+            "std_length_mm": None,
+            "std_width_mm": None,
             "robust_std_area_px": 0,
             "robust_std_length_px": 0,
             "robust_std_width_px": 0,
-            "robust_std_area_mm2": 0,
-            "robust_std_length_mm": 0,
-            "robust_std_width_mm": 0,
+            "robust_std_area_mm2": None,
+            "robust_std_length_mm": None,
+            "robust_std_width_mm": None,
             "cv_length_pct": 0,
             "cv_width_pct": 0,
             "qc": {
-                "method": "median_mad",
+                "method": "median_mad_multimetric",
                 "suspect_count": 0,
                 "inlier_count": 0,
                 "suspect_ids": [],
                 "review_required": False,
                 "suspect_ratio": 0,
                 "robust_used_for_reporting": True,
+                "threshold": QC_MAD_Z_THRESHOLD,
+                "min_metrics": QC_MIN_OUTLIER_METRICS,
                 "status": "ok",
             },
         }
@@ -195,7 +211,7 @@ def summary_for(measurements: list[dict]) -> dict:
     robust_used_for_reporting = suspect_ratio <= 0.05
     for index, measurement in enumerate(measurements):
         measurement["qc_outlier"] = index in outlier_indices
-        measurement["qc_reason"] = "size_outlier_mad" if index in outlier_indices else ""
+        measurement["qc_reason"] = "size_outlier_mad_multimetric" if index in outlier_indices else ""
 
     inliers = [
         measurement
@@ -217,38 +233,43 @@ def summary_for(measurements: list[dict]) -> dict:
         average = float(values(items, name).mean())
         return round(std(items, name) / average * 100, 3) if average > 0 else 0.0
 
+    calibrated = measurements[0].get("length_mm") is not None
+    def metric_mm(statistic, items: list[dict], name: str) -> float | None:
+        return statistic(items, name) if calibrated else None
+
     return {
         "count": len(measurements),
         "total_area_px": int(sum(int(item.get("area_px", 0) or 0) for item in measurements)),
         "mean_area_px": mean(measurements, "area_px"),
         "mean_length_px": mean(measurements, "length_px"),
         "mean_width_px": mean(measurements, "width_px"),
-        "mean_area_mm2": mean(measurements, "area_mm2"),
-        "mean_length_mm": mean(measurements, "length_mm"),
-        "mean_width_mm": mean(measurements, "width_mm"),
+        "mean_area_mm2": metric_mm(mean, measurements, "area_mm2"),
+        "mean_length_mm": metric_mm(mean, measurements, "length_mm"),
+        "mean_width_mm": metric_mm(mean, measurements, "width_mm"),
         "std_area_px": std(measurements, "area_px"),
         "std_length_px": std(measurements, "length_px"),
         "std_width_px": std(measurements, "width_px"),
-        "std_area_mm2": std(measurements, "area_mm2"),
-        "std_length_mm": std(measurements, "length_mm"),
-        "std_width_mm": std(measurements, "width_mm"),
+        "std_area_mm2": metric_mm(std, measurements, "area_mm2"),
+        "std_length_mm": metric_mm(std, measurements, "length_mm"),
+        "std_width_mm": metric_mm(std, measurements, "width_mm"),
         "robust_mean_area_px": mean(inliers, "area_px"),
         "robust_mean_length_px": mean(inliers, "length_px"),
         "robust_mean_width_px": mean(inliers, "width_px"),
-        "robust_mean_area_mm2": mean(inliers, "area_mm2"),
-        "robust_mean_length_mm": mean(inliers, "length_mm"),
-        "robust_mean_width_mm": mean(inliers, "width_mm"),
+        "robust_mean_area_mm2": metric_mm(mean, inliers, "area_mm2"),
+        "robust_mean_length_mm": metric_mm(mean, inliers, "length_mm"),
+        "robust_mean_width_mm": metric_mm(mean, inliers, "width_mm"),
         "robust_std_area_px": std(inliers, "area_px"),
         "robust_std_length_px": std(inliers, "length_px"),
         "robust_std_width_px": std(inliers, "width_px"),
-        "robust_std_area_mm2": std(inliers, "area_mm2"),
-        "robust_std_length_mm": std(inliers, "length_mm"),
-        "robust_std_width_mm": std(inliers, "width_mm"),
+        "robust_std_area_mm2": metric_mm(std, inliers, "area_mm2"),
+        "robust_std_length_mm": metric_mm(std, inliers, "length_mm"),
+        "robust_std_width_mm": metric_mm(std, inliers, "width_mm"),
         "cv_length_pct": cv(inliers, "length_px"),
         "cv_width_pct": cv(inliers, "width_px"),
         "qc": {
-            "method": "median_mad",
-            "threshold": 3.5,
+            "method": "median_mad_multimetric",
+            "threshold": QC_MAD_Z_THRESHOLD,
+            "min_metrics": QC_MIN_OUTLIER_METRICS,
             "suspect_count": len(outlier_indices),
             "inlier_count": len(inliers),
             "suspect_ids": [measurements[index]["id"] for index in sorted(outlier_indices)],
@@ -267,15 +288,15 @@ def summary_for(measurements: list[dict]) -> dict:
 def _qc_outlier_indices(measurements: list[dict]) -> set[int]:
     if len(measurements) < 5:
         return set()
-    flagged: set[int] = set()
+    outlier_counts = np.zeros(len(measurements), dtype=np.int32)
     for name in ("area_px", "length_px", "width_px"):
         data = np.asarray([float(item.get(name, 0) or 0) for item in measurements], dtype=np.float64)
         median = float(np.median(data))
         deviation = np.abs(data - median)
         mad = float(np.median(deviation))
         if mad <= 1e-9:
-            flagged.update(np.nonzero(deviation > 1e-9)[0].tolist())
+            outlier_counts += (deviation > 1e-9).astype(np.int32)
             continue
         robust_z = 0.6745 * deviation / mad
-        flagged.update(np.nonzero(robust_z > 3.5)[0].tolist())
-    return flagged
+        outlier_counts += (robust_z > QC_MAD_Z_THRESHOLD).astype(np.int32)
+    return set(np.nonzero(outlier_counts >= QC_MIN_OUTLIER_METRICS)[0].tolist())

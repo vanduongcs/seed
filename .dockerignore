@@ -15,10 +15,15 @@ mobile/
 seed_deploy/
 seed-backend/
 test_outputs/
+artifacts/
 
+*.apk
+*.aab
 *.pt
 *.onnx
 !backend/model/*.onnx
+SeedVision-feature-graphic*
+SeedVision-play-icon-512.png
 
 backend/.venv/
 backend/storage/

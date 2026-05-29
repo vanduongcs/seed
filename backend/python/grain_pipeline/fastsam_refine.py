@@ -1,7 +1,7 @@
 """FastSAM-s segmentation refinement via ONNX Runtime (CPU-only).
 
 Replaces the previous Ultralytics/PyTorch FastSAM implementation.
-Uses `FastSAM-s.onnx` which must be exported once via `export_onnx.bat`.
+Uses `FastSAM-s.onnx` which must be exported once via `scripts/export_onnx.bat`.
 
 Strategy: instead of running FastSAM on the full image and filtering by bbox
 (which required Ultralytics' prompt feature), we run FastSAM on a per-instance

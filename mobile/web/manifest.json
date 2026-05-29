@@ -1,6 +1,6 @@
 {
-    "name": "Seed",
-    "short_name": "Seed",
+    "name": "SeedVision",
+    "short_name": "SeedVision",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -3,8 +3,9 @@ import { api } from '@/api/axios.js';
 const GUEST_RUNS_KEY = 'seed-guest-runs';
 
 export const saveGuestRun = ({ result, sourceFileName }) => {
-  const pending = readGuestRuns();
+  const pending = readStoredGuestRuns();
   pending.unshift({
+    ownerUserId: null,
     clientRunId: result.run?.id || `web-local-${Date.now()}`,
     sourceFileName: sourceFileName || result.run?.sourceFileName || 'image.png',
     createdAt: result.run?.createdAt || new Date().toISOString(),
@@ -13,15 +14,31 @@ export const saveGuestRun = ({ result, sourceFileName }) => {
   localStorage.setItem(GUEST_RUNS_KEY, JSON.stringify(pending));
 };
 
-export const syncGuestRuns = async () => {
-  const pending = readGuestRuns();
+export const syncGuestRuns = async (userId) => {
+  if (!userId) return 0;
+  const allRuns = readStoredGuestRuns();
+  const pending = allRuns
+    .filter((item) => !item.ownerUserId || item.ownerUserId === userId)
+    .map((item) => ({ ...item, ownerUserId: userId }));
   if (!pending.length) return 0;
+  const claimedIds = new Set(pending.map((item) => item.clientRunId));
+  localStorage.setItem(
+    GUEST_RUNS_KEY,
+    JSON.stringify(allRuns.map((item) => (
+      claimedIds.has(item.clientRunId) ? { ...item, ownerUserId: userId } : item
+    )))
+  );
   await api.post('/grain/runs/import', { items: pending });
-  localStorage.removeItem(GUEST_RUNS_KEY);
+  localStorage.setItem(
+    GUEST_RUNS_KEY,
+    JSON.stringify(readStoredGuestRuns().filter((item) => !(
+      item.ownerUserId === userId && claimedIds.has(item.clientRunId)
+    )))
+  );
   return pending.length;
 };
 
-export const readGuestRuns = () => {
+const readStoredGuestRuns = () => {
   try {
     const value = JSON.parse(localStorage.getItem(GUEST_RUNS_KEY) || '[]');
     return Array.isArray(value) ? value : [];
@@ -30,7 +47,9 @@ export const readGuestRuns = () => {
   }
 };
 
+export const readGuestRuns = () => readStoredGuestRuns().filter((item) => !item.ownerUserId);
+
 export const deleteGuestRun = (clientRunId) => {
-  const next = readGuestRuns().filter((item) => item.clientRunId !== clientRunId);
+  const next = readStoredGuestRuns().filter((item) => item.clientRunId !== clientRunId);
   localStorage.setItem(GUEST_RUNS_KEY, JSON.stringify(next));
 };

@@ -42,7 +42,7 @@ export default function RegisterPage() {
     try {
       const { data } = await api.post('/auth/register', form);
       setAuth(data.data.user, data.data.accessToken, data.data.refreshToken);
-      await syncGuestRuns().catch(() => {});
+      await syncGuestRuns(data.data.user?._id || data.data.user?.id).catch(() => {});
       navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.message || 'Đăng ký thất bại. Vui lòng thử lại.');

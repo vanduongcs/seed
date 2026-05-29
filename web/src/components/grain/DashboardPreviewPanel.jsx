@@ -13,6 +13,7 @@ import {
   LinearProgress,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { HelpOutline, Close, Edit, Check, Mouse, CameraAlt, Straighten } from '@mui/icons-material';
@@ -64,9 +65,13 @@ export const DashboardPreviewPanel = ({
   renderCalibrationOverlay,
   progress,
   progressPhase,
+  qcEditMode,
+  onToggleQcEditMode,
+  onToggleMeasurementQc,
 }) => {
   const [guideOpen, setGuideOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [draggingHandle, setDraggingHandle] = useState(null);
 
   const handleNext = () => {
     if (currentStep < 3) {
@@ -78,6 +83,19 @@ export const DashboardPreviewPanel = ({
 
   const handleBack = () => {
     setCurrentStep((prev) => Math.max(prev - 1, 0));
+  };
+
+  const getNearestCalibrationHandle = (point) => {
+    const image = imageRef.current;
+    if (!point || !image?.naturalWidth || !calibration.start || !calibration.end) return null;
+
+    const rect = image.getBoundingClientRect();
+    const threshold = (16 / Math.max(1, rect.width)) * image.naturalWidth;
+    const startDistance = Math.hypot(point.x - calibration.start.x, point.y - calibration.start.y);
+    const endDistance = Math.hypot(point.x - calibration.end.x, point.y - calibration.end.y);
+
+    if (Math.min(startDistance, endDistance) > threshold) return null;
+    return startDistance <= endDistance ? 'start' : 'end';
   };
 
   // Diagram: bước 0 — chụp ảnh có vật mốc
@@ -122,21 +140,21 @@ export const DashboardPreviewPanel = ({
       </Box>
       {/* Đường đo */}
       <Box sx={{ position: 'absolute', left: 22, top: 44, width: 156, height: 2, bgcolor: '#2563EB' }} />
-      {/* Điểm A — đang nhấn chuột */}
+      {/* Chốt A */}
       <Box sx={{ position: 'absolute', left: 14, top: 37, width: 16, height: 16, borderRadius: '50%', bgcolor: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 4px rgba(37,99,235,0.18)' }}>
         <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>A</Typography>
       </Box>
-      {/* Điểm B */}
+      {/* Chốt B */}
       <Box sx={{ position: 'absolute', right: 14, top: 37, width: 16, height: 16, borderRadius: '50%', bgcolor: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>B</Typography>
       </Box>
       {/* Mũi tên hướng kéo */}
       <Mouse sx={{ position: 'absolute', left: 8, bottom: 6, fontSize: 16, color: '#6B7280' }} />
-      <Typography sx={{ position: 'absolute', left: 26, bottom: 8, fontSize: 9, color: '#6B7280' }}>Nhấn giữ → kéo sang phải → thả</Typography>
+      <Typography sx={{ position: 'absolute', left: 26, bottom: 8, fontSize: 9, color: '#6B7280' }}>Kéo chuột để tạo đoạn tham chiếu</Typography>
     </Box>
   );
 
-  // Diagram: bước 2 — xóa và vẽ lại
+  // Diagram: bước 2 — kéo chốt để căn lại
   const DiagramStep2 = () => (
     <Stack spacing={1.25} sx={{ width: '100%', maxWidth: 210 }}>
       <Stack direction="row" spacing={1.25} alignItems="flex-start">
@@ -144,7 +162,7 @@ export const DashboardPreviewPanel = ({
           <Typography sx={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>1</Typography>
         </Box>
         <Typography variant="caption" sx={{ lineHeight: 1.45 }}>
-          Nếu đường vẽ lệch, click nút <Box component="span" sx={{ fontWeight: 700, color: 'error.main' }}>Xóa vật mốc</Box> để xóa và vẽ lại từ đầu.
+          Kéo <Box component="span" sx={{ fontWeight: 700 }}>chốt A</Box> hoặc <Box component="span" sx={{ fontWeight: 700 }}>chốt B</Box> sát mép vật mốc.
         </Typography>
       </Stack>
       <Stack direction="row" spacing={1.25} alignItems="flex-start">
@@ -152,7 +170,7 @@ export const DashboardPreviewPanel = ({
           <Typography sx={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>2</Typography>
         </Box>
         <Typography variant="caption" sx={{ lineHeight: 1.45 }}>
-          Kiểm tra số <Box component="span" sx={{ fontWeight: 700 }}>px</Box> hiển thị — con số này phải khớp với chiều dài vật mốc bạn vẽ.
+          Số <Box component="span" sx={{ fontWeight: 700 }}>px</Box> tự cập nhật khi di chuyển chốt.
         </Typography>
       </Stack>
       <Stack direction="row" spacing={1.25} alignItems="flex-start">
@@ -160,7 +178,7 @@ export const DashboardPreviewPanel = ({
           <Check sx={{ color: 'white', fontSize: 12 }} />
         </Box>
         <Typography variant="caption" sx={{ lineHeight: 1.45, color: 'text.secondary' }}>
-          Đường đo khớp cả hai mép vật mốc là đạt.
+          Xóa đoạn tham chiếu nếu cần đặt lại từ đầu.
         </Typography>
       </Stack>
     </Stack>
@@ -199,23 +217,41 @@ export const DashboardPreviewPanel = ({
 
   const getSlideTitle = (step) => {
     switch (step) {
-      case 0: return '1. Chuẩn bị ảnh';
-      case 1: return '2. Kéo thả chuột đo vật mốc';
-      case 2: return '3. Kiểm tra và vẽ lại';
-      case 3: return '4. Nhập kích thước thực (mm)';
+      case 0: return '1. Chụp kèm vật mốc';
+      case 1: return '2. Tạo đoạn tham chiếu';
+      case 2: return '3. Kéo chốt để căn chính xác';
+      case 3: return '4. Nhập kích thước thực tế (mm)';
       default: return '';
     }
   };
 
   const getSlideDescription = (step) => {
     switch (step) {
-      case 0: return 'Đặt vật mốc có kích thước biết trước (đồng xu, đoạn thước...) cạnh các hạt rồi chụp ảnh, sao cho cả vật mốc lẫn hạt đều nằm trong khung.';
-      case 1: return 'Nhấn giữ chuột trái tại mép trái vật mốc, kéo thẳng sang mép phải rồi thả ra. Đường đo màu xanh A–B sẽ xuất hiện dọc theo chiều dài vật mốc.';
-      case 2: return 'Nếu đường lệch, click "Xóa vật mốc" rồi kéo lại. Kiểm tra số px hiển thị — đường phải chạy sát hai mép vật mốc, không thừa không thiếu.';
-      case 3: return 'Nhập đúng chiều dài thực tế của vật mốc vào ô "Kích thước vật mốc (mm)". Hệ thống tự tính tỷ lệ và quy đổi kích thước hạt sang mm.';
+      case 0: return 'Đặt vật mốc có kích thước biết trước cạnh hạt và chụp chung trong một khung ảnh.';
+      case 1: return 'Kéo chuột dọc theo vật mốc để tạo đoạn tham chiếu.';
+      case 2: return 'Kéo chốt A hoặc chốt B sát hai mép vật mốc.';
+      case 3: return 'Nhập kích thước thực tế của vật mốc để quy đổi kết quả sang mm.';
       default: return '';
     }
   };
+
+  const imageWidth = Number(result?.image?.width) || imageRef.current?.naturalWidth || 1;
+  const imageHeight = Number(result?.image?.height) || imageRef.current?.naturalHeight || 1;
+  const measurementMasks = (result?.measurements || [])
+    .filter((measurement) => (
+      (Number(measurement.length_px) > 0 && Number(measurement.width_px) > 0)
+      || (Number(measurement.bbox_w) > 0 && Number(measurement.bbox_h) > 0)
+    ))
+    .map((measurement) => ({
+      id: measurement.id,
+      outlier: measurement.qc_outlier === true,
+      manual: measurement.qc_manual_override === true,
+      centerX: (Number(measurement.centroid_x ?? (Number(measurement.bbox_x) + Number(measurement.bbox_w) / 2)) / imageWidth) * 100,
+      centerY: (Number(measurement.centroid_y ?? (Number(measurement.bbox_y) + Number(measurement.bbox_h) / 2)) / imageHeight) * 100,
+      width: (Math.max(Number(measurement.length_px) || 0, Number(measurement.bbox_w) || 0) / imageWidth) * 100,
+      height: (Math.max(Number(measurement.width_px) || 0, Math.min(Number(measurement.bbox_h) || 0, Number(measurement.bbox_w) || 0)) / imageHeight) * 100,
+      angle: Number(measurement.angle_deg) || 0,
+    }));
 
   return (
     <>
@@ -251,17 +287,34 @@ export const DashboardPreviewPanel = ({
           </Box>
 
           {result && (
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1.5 }}>
-              {PREVIEW_MODES.map(([key, label]) => (
+            <Stack spacing={1} sx={{ mb: 1.5 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                {PREVIEW_MODES.map(([key, label]) => (
+                  <Button
+                    key={key}
+                    size="small"
+                    variant={previewMode === key ? 'contained' : 'outlined'}
+                    onClick={() => onPreviewModeChange(key)}
+                  >
+                    {label}
+                  </Button>
+                ))}
                 <Button
-                  key={key}
                   size="small"
-                  variant={previewMode === key ? 'contained' : 'outlined'}
-                  onClick={() => onPreviewModeChange(key)}
+                  color={qcEditMode ? 'warning' : 'primary'}
+                  variant={qcEditMode ? 'contained' : 'outlined'}
+                  startIcon={qcEditMode ? <Check fontSize="small" /> : <Edit fontSize="small" />}
+                  onClick={onToggleQcEditMode}
+                  sx={{ fontWeight: 750 }}
                 >
-                  {label}
+                  {qcEditMode ? 'Xong sửa QC' : 'Sửa QC'}
                 </Button>
-              ))}
+              </Stack>
+              {qcEditMode && (
+                <Alert severity="info" sx={{ py: 0.5 }}>
+                  Click vào hạt để đổi giữa nghi ngờ và hợp lệ. Hạt nghi ngờ hiển thị bằng mask đỏ, không vẽ ô chữ nhật.
+                </Alert>
+              )}
             </Stack>
           )}
 
@@ -282,19 +335,43 @@ export const DashboardPreviewPanel = ({
               <Box
                 sx={{ position: 'relative', width: '100%', height: 360, display: 'grid', placeItems: 'center', touchAction: calibrationImage ? 'none' : 'auto' }}
                 onPointerDown={(event) => {
+                  if (qcEditMode) return;
                   if (!calibrationImage || processing) return;
                   const point = getCalibrationPoint(event);
                   if (!point) return;
+                  const handle = getNearestCalibrationHandle(point);
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  if (handle) {
+                    setDraggingHandle(handle);
+                    return;
+                  }
+                  setDraggingHandle(null);
                   onDrawingCalibrationChange(true);
                   onCalibrationChange((current) => ({ ...current, start: point, end: point }));
                 }}
                 onPointerMove={(event) => {
-                  if (!drawingCalibration) return;
                   const point = getCalibrationPoint(event);
-                  if (point) onCalibrationChange((current) => ({ ...current, end: point }));
+                  if (!point) return;
+                  if (draggingHandle) {
+                    onCalibrationChange((current) => ({ ...current, [draggingHandle]: point }));
+                    return;
+                  }
+                  if (drawingCalibration) onCalibrationChange((current) => ({ ...current, end: point }));
                 }}
-                onPointerUp={() => onDrawingCalibrationChange(false)}
-                onPointerLeave={() => onDrawingCalibrationChange(false)}
+                onPointerUp={(event) => {
+                  setDraggingHandle(null);
+                  onDrawingCalibrationChange(false);
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                }}
+                onPointerCancel={() => {
+                  setDraggingHandle(null);
+                  onDrawingCalibrationChange(false);
+                }}
+                onPointerLeave={() => {
+                  if (!draggingHandle) onDrawingCalibrationChange(false);
+                }}
               >
                 <Box component="span" sx={{ position: 'relative', display: 'inline-flex', maxWidth: '100%', maxHeight: 360 }}>
                   <Box
@@ -305,6 +382,46 @@ export const DashboardPreviewPanel = ({
                     draggable={false}
                     sx={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain', userSelect: 'none' }}
                   />
+                  {result && measurementMasks.map((mask) => {
+                    if (!qcEditMode) return null;
+                    return (
+                      <Tooltip
+                        key={mask.id}
+                        title={`${mask.outlier ? 'Bỏ nghi ngờ' : 'Đánh dấu nghi ngờ'} #${mask.id}`}
+                        arrow
+                      >
+                        <Box
+                          component="button"
+                          type="button"
+                          onPointerDown={(event) => {
+                            if (!qcEditMode) return;
+                            event.stopPropagation();
+                            onToggleMeasurementQc(mask.id);
+                          }}
+                          sx={{
+                            position: 'absolute',
+                            left: `${mask.centerX}%`,
+                            top: `${mask.centerY}%`,
+                            width: `${mask.width}%`,
+                            height: `${mask.height}%`,
+                            minWidth: 10,
+                            minHeight: 6,
+                            border: 0,
+                            bgcolor: 'transparent',
+                            borderRadius: '999px',
+                            clipPath: 'ellipse(50% 50% at 50% 50%)',
+                            transform: `translate(-50%, -50%) rotate(${mask.angle}deg)`,
+                            transformOrigin: '50% 50%',
+                            cursor: qcEditMode ? 'pointer' : 'default',
+                            pointerEvents: 'auto',
+                            p: 0,
+                            opacity: 0,
+                            outline: 'none',
+                          }}
+                        />
+                      </Tooltip>
+                    );
+                  })}
                   {calibrationImage && renderCalibrationOverlay()}
                 </Box>
               </Box>
@@ -451,9 +568,9 @@ export const DashboardPreviewPanel = ({
             <Close fontSize="small" />
           </IconButton>
         </Box>
-        
+
         <Divider sx={{ mb: 2 }} />
-        
+
         <Box sx={{ minHeight: 220, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <SlideContent
             title={getSlideTitle(currentStep)}
@@ -461,9 +578,9 @@ export const DashboardPreviewPanel = ({
             diagram={renderSlideDiagram(currentStep)}
           />
         </Box>
-        
+
         <Divider sx={{ mt: 2, mb: 1.5 }} />
-        
+
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {/* Custom dots indicators */}
           <Stack direction="row" spacing={0.75}>
@@ -480,7 +597,7 @@ export const DashboardPreviewPanel = ({
               />
             ))}
           </Stack>
-          
+
           <Stack direction="row" spacing={1}>
             {currentStep > 0 && (
               <Button size="small" color="inherit" onClick={handleBack} sx={{ fontWeight: 600 }}>

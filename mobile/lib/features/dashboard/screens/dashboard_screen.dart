@@ -64,47 +64,119 @@ class _DashboardContent extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text(
-          'Phân tích hạt',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
         if (historyError != null) ...[
-          const SizedBox(height: 14),
           Text(historyError!, style: TextStyle(color: Colors.red.shade700)),
+          const SizedBox(height: 14),
         ],
-        const SizedBox(height: 22),
-        Row(
-          children: [
-            Expanded(
-                child: _StatTile(
-                    label: 'Số hạt đo được',
-                    value: _formatCountStat(sessionResult?.count))),
-            const SizedBox(width: 12),
-            Expanded(
-                child: _StatTile(
-                    label: 'ĐLC chiều dài (báo cáo)',
-                    value: _formatMeasureStat(sessionResult?.qcStdLengthMm,
-                        'mm', sessionResult?.qcStdLengthPx, 'px'))),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-                child: _StatTile(
-                    label: 'ĐLC chiều rộng (báo cáo)',
-                    value: _formatMeasureStat(sessionResult?.qcStdWidthMm, 'mm',
-                        sessionResult?.qcStdWidthPx, 'px'))),
-            const SizedBox(width: 12),
-            Expanded(
-                child: _StatTile(
-                    label: 'ĐLC diện tích (báo cáo)',
-                    value: _formatMeasureStat(sessionResult?.qcStdAreaMm2,
-                        'mm2', sessionResult?.qcStdAreaPx, 'px2'))),
-          ],
-        ),
-        const SizedBox(height: 18),
         _BackendAnalysisCard(onResultChanged: onSessionResultChanged),
+        if (sessionResult case final result?) ...[
+          const SizedBox(height: 18),
+          _StatTile(label: 'Tổng số hạt', value: '${result.count}'),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _StatTile(
+                  label: 'Số hạt chắc chắn',
+                  value: '${result.qcInlierCount}',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatTile(
+                  label: 'Số hạt nghi ngờ',
+                  value: '${result.qcSuspectCount}',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Giá trị trung bình',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _StatTile(
+                  label: 'Chiều dài trung bình',
+                  value: _formatMeasureStat(
+                    result.meanLengthMm,
+                    'mm',
+                    result.meanLengthPx,
+                    'px',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatTile(
+                  label: 'Chiều rộng trung bình',
+                  value: _formatMeasureStat(
+                    result.meanWidthMm,
+                    'mm',
+                    result.meanWidthPx,
+                    'px',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _StatTile(
+            label: 'Diện tích trung bình',
+            value: _formatMeasureStat(
+              result.meanAreaMm2,
+              'mm2',
+              result.meanAreaPx,
+              'px2',
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Độ lệch chuẩn',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _StatTile(
+                  label: 'ĐLC chiều dài',
+                  value: _formatMeasureStat(
+                    result.qcStdLengthMm,
+                    'mm',
+                    result.qcStdLengthPx,
+                    'px',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatTile(
+                  label: 'ĐLC chiều rộng',
+                  value: _formatMeasureStat(
+                    result.qcStdWidthMm,
+                    'mm',
+                    result.qcStdWidthPx,
+                    'px',
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _StatTile(
+            label: 'ĐLC diện tích',
+            value: _formatMeasureStat(
+              result.qcStdAreaMm2,
+              'mm2',
+              result.qcStdAreaPx,
+              'px2',
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -120,8 +192,6 @@ String _formatMeasureStat(double? primary, String primaryUnit, double? fallback,
   }
   return '_';
 }
-
-String _formatCountStat(int? value) => value == null ? '_' : '$value';
 
 class _BackendAnalysisCard extends ConsumerStatefulWidget {
   final ValueChanged<GrainAnalysisResult?> onResultChanged;
@@ -147,6 +217,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   GrainAnalysisResult? _result;
   String? _error;
   String _previewMode = 'overlay';
+  bool _qcEditMode = false;
   bool _busy = false;
   double _progress = 0;
   String _progressPhase = '';
@@ -213,6 +284,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       _result = null;
       _error = null;
       _previewMode = 'overlay';
+      _qcEditMode = false;
     });
   }
 
@@ -226,6 +298,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
     setState(() {
       _busy = true;
       _error = null;
+      _qcEditMode = false;
     });
     _setProgress(5, 'Chuẩn bị ảnh');
     try {
@@ -284,7 +357,8 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
     if (csv == null || csv.isEmpty) return;
     final file = await _writeTempFile(
         '${_safeStem(_fileName)}_measurements.csv', utf8.encode(csv));
-    await Share.shareXFiles([XFile(file.path)], text: 'Seed measurements CSV');
+    await Share.shareXFiles([XFile(file.path)],
+        text: 'SeedVision measurements CSV');
   }
 
   Future<void> _sharePng() async {
@@ -294,7 +368,16 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
     if (base64 == null || base64.isEmpty) return;
     final file = await _writeTempFile(
         '${_safeStem(_fileName)}_segmentation.png', base64Decode(base64));
-    await Share.shareXFiles([XFile(file.path)], text: 'Seed segmentation PNG');
+    await Share.shareXFiles([XFile(file.path)],
+        text: 'SeedVision segmentation PNG');
+  }
+
+  void _toggleMeasurementQc(int measurementId) {
+    final current = _result;
+    if (current == null) return;
+    final next = current.withToggledQc(measurementId);
+    setState(() => _result = next);
+    widget.onResultChanged(next);
   }
 
   @override
@@ -327,84 +410,86 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   icon: const Icon(Icons.photo_camera_outlined),
                   label: const Text('Camera'),
                 ),
-                ElevatedButton.icon(
-                  onPressed: _busy ? null : _analyze,
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.auto_awesome_motion_outlined),
-                  label: Text(_busy ? 'Đang xử lý' : 'Xử lý'),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _ReferenceImageSelector(
+              bytes: _selectedBytes,
+              imageSize: _selectedImageSize,
+              start: _referenceStart,
+              end: _referenceEnd,
+              enabled: !_busy && _selectedBytes != null,
+              onChanged: (start, end) {
+                setState(() {
+                  _referenceStart = start;
+                  _referenceEnd = end;
+                  _referencePixels.text =
+                      (end - start).distance.toStringAsFixed(1);
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _referencePixels,
+                    readOnly: true,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Vật mốc (px)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _referenceMm,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Vật mốc (mm)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
                 ),
               ],
             ),
-            if (_selectedBytes != null) ...[
-              const SizedBox(height: 14),
-              _ReferenceImageSelector(
-                bytes: _selectedBytes!,
-                imageSize: _selectedImageSize,
-                start: _referenceStart,
-                end: _referenceEnd,
-                enabled: !_busy,
-                onChanged: (start, end) {
-                  setState(() {
-                    _referenceStart = start;
-                    _referenceEnd = end;
-                    _referencePixels.text =
-                        (end - start).distance.toStringAsFixed(1);
-                  });
-                },
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _busy || _referenceStart == null
+                    ? null
+                    : () {
+                        setState(() {
+                          _referenceStart = null;
+                          _referenceEnd = null;
+                          _referencePixels.clear();
+                        });
+                      },
+                icon: const Icon(Icons.clear),
+                label: const Text('Xóa đường vật mốc'),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _referencePixels,
-                      readOnly: true,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(
-                        labelText: 'Vật mốc (px)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _referenceMm,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(
-                        labelText: 'Vật mốc (mm)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                ],
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _busy || _selectedBytes == null ? null : _analyze,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome_motion_outlined),
+                label: Text(_busy ? 'Đang xử lý' : 'Xử lý'),
               ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _busy
-                      ? null
-                      : () {
-                          setState(() {
-                            _referenceStart = null;
-                            _referenceEnd = null;
-                            _referencePixels.clear();
-                          });
-                        },
-                  icon: const Icon(Icons.clear),
-                  label: const Text('Xóa đường vật mốc'),
-                ),
-              ),
-            ],
+            ),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: TextStyle(color: Colors.red.shade700)),
@@ -433,63 +518,43 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
             ],
             if (result != null) ...[
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                      child: _ResultTile(
-                          label: 'Tổng số hạt đo được',
-                          value: '${result.count}')),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _ResultTile(
-                      label: 'ĐLC diện tích (báo cáo)',
-                      value: result.qcStdAreaMm2 == null
-                          ? '${result.qcStdAreaPx.toStringAsFixed(1)} px2'
-                          : '${result.qcStdAreaMm2!.toStringAsFixed(3)} mm2',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: _ResultTile(
-                      label: 'ĐLC chiều dài (báo cáo)',
-                      value: result.qcStdLengthMm == null
-                          ? '${result.qcStdLengthPx.toStringAsFixed(1)} px'
-                          : '${result.qcStdLengthMm!.toStringAsFixed(2)} mm',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _ResultTile(
-                      label: 'ĐLC chiều rộng (báo cáo)',
-                      value: result.qcStdWidthMm == null
-                          ? '${result.qcStdWidthPx.toStringAsFixed(1)} px'
-                          : '${result.qcStdWidthMm!.toStringAsFixed(2)} mm',
-                    ),
-                  ),
-                ],
-              ),
-              if (result.qcSuspectCount > 0) ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF4E5),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFF2C078)),
-                  ),
-                  child: Text(
-                    'QC phát hiện ${result.qcSuspectCount} vùng nghi nhiễu/outlier. '
-                    '${result.qcRobustUsedForReporting ? 'ĐLC báo cáo tính trên ${result.qcInlierCount} hạt sau QC.' : 'Tỷ lệ nghi ngờ cao; ĐLC báo cáo giữ nguyên SD thô, không tự loại vùng.'} '
-                    'hãy kiểm tra ảnh đánh số trước khi kết luận.'
-                    '${result.qcSuspectIdsLabel.isEmpty ? '' : ' ID nghi ngờ: ${result.qcSuspectIdsLabel}.'}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF4E5),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFF2C078)),
                 ),
-              ],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Các hạt nghi ngờ nhận dạng sai được tô màu đỏ.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _QcFactCard(
+                            label: 'Số hạt nghi ngờ nhận dạng sai',
+                            value: '${result.qcSuspectCount}',
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _QcFactCard(
+                            label: 'ID nghi ngờ',
+                            value: result.qcSuspectIdsLabel.isEmpty
+                                ? '-'
+                                : result.qcSuspectIdsLabel,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -498,13 +563,49 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   _previewChip(mode: 'overlay', label: 'Đánh dấu'),
                   _previewChip(mode: 'mask', label: 'Hình dạng'),
                   _previewChip(mode: 'labels', label: 'Đánh số'),
+                  _qcEditChip(),
                 ],
               ),
+              if (_qcEditMode) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF93C5FD)),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.touch_app_outlined,
+                        size: 18,
+                        color: Color(0xFF2563EB),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Chạm vào hạt để đổi giữa nghi ngờ và hợp lệ. Hạt nghi ngờ hiển thị bằng mask đỏ, không vẽ ô chữ nhật.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF1E3A8A),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               if (previewBase64.isNotEmpty)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(base64Decode(previewBase64)),
+                _QcEditablePreview(
+                  result: result,
+                  previewBytes: base64Decode(previewBase64),
+                  editMode: _qcEditMode,
+                  onToggle: _toggleMeasurementQc,
                 ),
               const SizedBox(height: 12),
               _SegmentationFacts(result: result),
@@ -537,6 +638,180 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       label: Text(label),
       selected: _previewMode == mode,
       onSelected: (_) => setState(() => _previewMode = mode),
+    );
+  }
+
+  Widget _qcEditChip() {
+    final active = _qcEditMode;
+    return FilterChip(
+      avatar: Icon(
+        active ? Icons.check_circle_outline : Icons.edit_outlined,
+        size: 18,
+        color: active ? const Color(0xFF9A3412) : AppTheme.primary,
+      ),
+      label: Text(active ? 'Xong sửa QC' : 'Sửa QC'),
+      selected: active,
+      onSelected: (_) => setState(() => _qcEditMode = !_qcEditMode),
+      selectedColor: const Color(0xFFFFEDD5),
+      checkmarkColor: const Color(0xFF9A3412),
+      side: BorderSide(
+        color: active ? const Color(0xFFF97316) : AppTheme.border,
+        width: active ? 1.4 : 1,
+      ),
+      labelStyle: TextStyle(
+        fontWeight: FontWeight.w700,
+        color: active ? const Color(0xFF9A3412) : AppTheme.textPrimary,
+      ),
+    );
+  }
+}
+
+class _QcEditablePreview extends StatelessWidget {
+  final GrainAnalysisResult result;
+  final Uint8List previewBytes;
+  final bool editMode;
+  final ValueChanged<int> onToggle;
+
+  const _QcEditablePreview({
+    required this.result,
+    required this.previewBytes,
+    required this.editMode,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final imageWidth = _asDouble(result.image['width']);
+    final imageHeight = _asDouble(result.image['height']);
+    if (imageWidth <= 0 || imageHeight <= 0) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(previewBytes),
+      );
+    }
+
+    final boxes = result.measurements
+        .where((measurement) =>
+            (_asDouble(measurement['length_px']) > 0 &&
+                _asDouble(measurement['width_px']) > 0) ||
+            (_asDouble(measurement['bbox_w']) > 0 &&
+                _asDouble(measurement['bbox_h']) > 0))
+        .toList();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final maxWidth = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width;
+          final displayWidth = math.max(1.0, maxWidth);
+          final displayHeight = displayWidth * imageHeight / imageWidth;
+          final scaleX = displayWidth / imageWidth;
+          final scaleY = displayHeight / imageHeight;
+
+          return SizedBox(
+            width: displayWidth,
+            height: displayHeight,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.memory(
+                  previewBytes,
+                  fit: BoxFit.fill,
+                  gaplessPlayback: true,
+                ),
+                for (final measurement in boxes)
+                  _QcMeasurementBox(
+                    measurement: measurement,
+                    editMode: editMode,
+                    scaleX: scaleX,
+                    scaleY: scaleY,
+                    onToggle: onToggle,
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _QcMeasurementBox extends StatelessWidget {
+  final Map<String, dynamic> measurement;
+  final bool editMode;
+  final double scaleX;
+  final double scaleY;
+  final ValueChanged<int> onToggle;
+
+  const _QcMeasurementBox({
+    required this.measurement,
+    required this.editMode,
+    required this.scaleX,
+    required this.scaleY,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final id = _asInt(measurement['id']);
+    if (!editMode) return const SizedBox.shrink();
+
+    final centerX = (_asDouble(measurement['centroid_x']) > 0
+            ? _asDouble(measurement['centroid_x'])
+            : _asDouble(measurement['bbox_x']) +
+                _asDouble(measurement['bbox_w']) / 2) *
+        scaleX;
+    final centerY = (_asDouble(measurement['centroid_y']) > 0
+            ? _asDouble(measurement['centroid_y'])
+            : _asDouble(measurement['bbox_y']) +
+                _asDouble(measurement['bbox_h']) / 2) *
+        scaleY;
+    final scale = (scaleX + scaleY) / 2;
+    final visibleWidth = math.max(
+      8.0,
+      math.max(_asDouble(measurement['length_px']),
+              _asDouble(measurement['bbox_w'])) *
+          scale,
+    );
+    final visibleHeight = math.max(
+      4.0,
+      math.max(
+            _asDouble(measurement['width_px']),
+            math.min(
+              _asDouble(measurement['bbox_w']),
+              _asDouble(measurement['bbox_h']),
+            ),
+          ) *
+          scale,
+    );
+    final hitWidth = math.max(visibleWidth, 26.0);
+    final hitHeight = math.max(visibleHeight, 22.0);
+    final angleRadians = _asDouble(measurement['angle_deg']) * math.pi / 180;
+
+    return Positioned(
+      left: centerX - hitWidth / 2,
+      top: centerY - hitHeight / 2,
+      width: hitWidth,
+      height: hitHeight,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: editMode ? () => onToggle(id) : null,
+        child: Center(
+          child: Transform.rotate(
+            angle: angleRadians,
+            child: Container(
+              width: visibleWidth,
+              height: visibleHeight,
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -633,7 +908,7 @@ class _SegmentationFactsState extends ConsumerState<_SegmentationFacts> {
 }
 
 class _ReferenceImageSelector extends StatefulWidget {
-  final Uint8List bytes;
+  final Uint8List? bytes;
   final Size? imageSize;
   final Offset? start;
   final Offset? end;
@@ -679,7 +954,14 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
   }
 
   Future<void> _decodePreviewImage() async {
-    final codec = await ui.instantiateImageCodec(widget.bytes);
+    final bytes = widget.bytes;
+    if (bytes == null) {
+      final previous = _previewImage;
+      if (mounted) setState(() => _previewImage = null);
+      previous?.dispose();
+      return;
+    }
+    final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     codec.dispose();
     if (!mounted) {
@@ -796,7 +1078,7 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                   Row(
                     children: [
                       const Text(
-                        'Thiết lập vật mốc quy đổi',
+                        'Hướng dẫn',
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
@@ -814,15 +1096,15 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
-                        tooltip: 'Hướng dẫn sử dụng',
+                        tooltip: 'Xem hướng dẫn',
                       ),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
                     hasLine
-                        ? 'Chạm đầu A/B để chọn chốt cần di chuyển, kéo thả để khớp vật mốc; dùng mũi tên để tinh chỉnh 1 px.'
-                        : 'Chạm lên vật mốc trên ảnh để đặt đoạn đo, sau đó kéo hai chốt để căn chỉnh chính xác.',
+                        ? 'Kéo chốt A hoặc chốt B để khớp chính xác hai mép vật mốc.'
+                        : 'Nhấn vào vùng bất kỳ trên ảnh để khởi tạo đoạn thẳng tham chiếu kích thước.',
                     style: const TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,
@@ -1006,7 +1288,9 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                     children: [
                       ColoredBox(
                         color: const Color(0xFFF8FAF7),
-                        child: Image.memory(widget.bytes, fit: BoxFit.contain),
+                        child: widget.bytes == null
+                            ? const _ImagePlaceholder()
+                            : Image.memory(widget.bytes!, fit: BoxFit.contain),
                       ),
                       CustomPaint(
                         painter: _ReferenceLinePainter(
@@ -1031,7 +1315,7 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
           Row(
             children: [
               ChoiceChip(
-                label: const Text('Đầu A'),
+                label: const Text('Chốt A'),
                 selected: _selectedHandle == 'start',
                 onSelected: widget.enabled
                     ? (_) => setState(() => _selectedHandle = 'start')
@@ -1039,7 +1323,7 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
               ),
               const SizedBox(width: 6),
               ChoiceChip(
-                label: const Text('Đầu B'),
+                label: const Text('Chốt B'),
                 selected: _selectedHandle == 'end',
                 onSelected: widget.enabled
                     ? (_) => setState(() => _selectedHandle = 'end')
@@ -1377,32 +1661,73 @@ class _StatTile extends StatelessWidget {
   }
 }
 
-class _ResultTile extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ResultTile({required this.label, required this.value});
+class _ImagePlaceholder extends StatelessWidget {
+  const _ImagePlaceholder();
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppTheme.bgDefault,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.border),
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.add_photo_alternate_outlined,
+            size: 42,
+            color: AppTheme.textSecondary.withValues(alpha: 0.45),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Chưa có ảnh',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Chọn ảnh hoặc chụp ảnh để bắt đầu',
+            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: const TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 12)),
-            const SizedBox(height: 6),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
-          ],
-        ),
+    );
+  }
+}
+
+class _QcFactCard extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _QcFactCard({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 74),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFF2C078)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
       ),
     );
   }
@@ -1467,24 +1792,10 @@ double _asDouble(dynamic value) {
   return double.tryParse(value?.toString() ?? '') ?? 0;
 }
 
-class _MiniArrowButton extends StatelessWidget {
-  final IconData icon;
-  const _MiniArrowButton({required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.all(2),
-      width: 24,
-      height: 24,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Icon(icon, size: 14, color: AppTheme.textPrimary),
-    );
-  }
+int _asInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? 0;
 }
 
 class _GuideSlide extends StatelessWidget {
@@ -1531,6 +1842,29 @@ class _GuideSlide extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GuideImage extends StatelessWidget {
+  final String assetPath;
+
+  const _GuideImage(this.assetPath);
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAF7),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Image.asset(
+          assetPath,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }
@@ -1599,359 +1933,34 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
               child: PageView(
                 controller: _pageController,
                 onPageChanged: (page) => setState(() => _currentPage = page),
-                children: [
+                children: const [
                   _GuideSlide(
-                    title: '1. Chuẩn bị ảnh',
+                    title: '1. Upload ảnh hạt và vật mốc',
                     description:
-                        'Đặt vật mốc biết kích thước (đồng xu, đoạn thước...) cạnh các hạt. Chụp sao cho cả vật mốc lẫn hạt đều nằm trong khung ảnh.',
-                    diagram: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        // Đồng xu
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Color(0xFFFBBF24),
-                                    Color(0xFFD97706)
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                border: Border.all(
-                                    color: const Color(0xFFB45309), width: 1.5),
-                              ),
-                              child: const Center(
-                                child: Text('500đ',
-                                    style: TextStyle(
-                                        fontSize: 8,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text('Vật mốc',
-                                style: TextStyle(
-                                    fontSize: 9,
-                                    color: AppTheme.textSecondary)),
-                          ],
-                        ),
-                        const SizedBox(width: 18),
-                        // Các hạt
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                for (final h in [18, 22, 14, 20])
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 4),
-                                    child: Container(
-                                      width: 11,
-                                      height: h.toDouble(),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFEAB308),
-                                        borderRadius: BorderRadius.circular(3),
-                                        border: Border.all(
-                                            color: const Color(0xFFCA8A04),
-                                            width: 1),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            const Text('Hạt cần đo',
-                                style: TextStyle(
-                                    fontSize: 9,
-                                    color: AppTheme.textSecondary)),
-                          ],
-                        ),
-                      ],
-                    ),
+                        'Chọn hoặc chụp ảnh có cả hạt cần đo và vật mốc có kích thước thật đã biết.',
+                    diagram:
+                        _GuideImage('assets/images/calibration_guide_1.png'),
                   ),
                   _GuideSlide(
-                    title: '2. Chạm để đặt đoạn đo',
+                    title: '2. Tạo đoạn đo bằng 2 chốt',
                     description:
-                        'Chạm bất kỳ vị trí nào trên vật mốc trong ảnh — đoạn A–B tự xuất hiện. Kéo chốt A hoặc B để khớp hai mép vật mốc.',
-                    diagram: SizedBox(
-                      width: 200,
-                      height: 100,
-                      child: Stack(
-                        children: [
-                          // Nền ảnh giả
-                          Positioned.fill(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF3F4F6),
-                                borderRadius: BorderRadius.circular(8),
-                                border:
-                                    Border.all(color: const Color(0xFFE5E7EB)),
-                              ),
-                            ),
-                          ),
-                          // Vật mốc
-                          Positioned(
-                            left: 20,
-                            top: 30,
-                            child: Container(
-                              width: 160,
-                              height: 30,
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade300,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.grey.shade400),
-                              ),
-                              child: const Center(
-                                child: Text('Vật mốc',
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.black54,
-                                        fontWeight: FontWeight.w500)),
-                              ),
-                            ),
-                          ),
-                          // Đường đo
-                          Positioned(
-                            left: 22,
-                            top: 44,
-                            child: Container(
-                                width: 156,
-                                height: 2,
-                                color: const Color(0xFF2563EB)),
-                          ),
-                          // Chốt A
-                          Positioned(
-                            left: 14,
-                            top: 37,
-                            child: Container(
-                              width: 16,
-                              height: 16,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF2563EB),
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF2563EB)
-                                        .withValues(alpha: 0.3),
-                                    blurRadius: 6,
-                                    spreadRadius: 2,
-                                  )
-                                ],
-                              ),
-                              child: const Center(
-                                child: Text('A',
-                                    style: TextStyle(
-                                        fontSize: 9,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                            ),
-                          ),
-                          // Chốt B
-                          Positioned(
-                            right: 14,
-                            top: 37,
-                            child: Container(
-                              width: 16,
-                              height: 16,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF2563EB),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Center(
-                                child: Text('B',
-                                    style: TextStyle(
-                                        fontSize: 9,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                            ),
-                          ),
-                          // Icon ngón tay chạm
-                          const Positioned(
-                            right: 8,
-                            bottom: 6,
-                            child: Icon(Icons.touch_app,
-                                size: 22, color: AppTheme.primary),
-                          ),
-                        ],
-                      ),
-                    ),
+                        'Chạm lên vật mốc để tạo đoạn thẳng gồm chốt A và chốt B.',
+                    diagram:
+                        _GuideImage('assets/images/calibration_guide_2.png'),
                   ),
                   _GuideSlide(
-                    title: '3. Kính lúp & tinh chỉnh',
+                    title: '3. Kéo thả chốt đo vật mốc',
                     description:
-                        'Khi kéo chốt A hoặc B, ô kính lúp phóng to vùng đang chỉnh. Dùng nút mũi tên ← → ↑ ↓ để dịch chuyển 1 pixel cho đến khi khớp mép.',
-                    diagram: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Kính lúp
-                        Container(
-                          width: 70,
-                          height: 70,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(6),
-                            border:
-                                Border.all(color: AppTheme.primary, width: 2),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppTheme.primary.withValues(alpha: 0.15),
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              )
-                            ],
-                          ),
-                          child: Stack(
-                            children: [
-                              // Ảnh giả phóng to
-                              Positioned.fill(
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(5),
-                                  child: Container(color: Colors.grey.shade200),
-                                ),
-                              ),
-                              // Đường đo trong kính lúp
-                              const Positioned(
-                                left: 10,
-                                right: 10,
-                                top: 34,
-                                child: SizedBox(
-                                    height: 2,
-                                    child:
-                                        ColoredBox(color: Color(0xFF2563EB))),
-                              ),
-                              // Crosshair
-                              const Center(
-                                child: Icon(Icons.add,
-                                    color: Colors.red, size: 18),
-                              ),
-                              // Nhãn A
-                              Positioned(
-                                top: 3,
-                                left: 3,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 3, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primary,
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: const Text('A',
-                                      style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 8,
-                                          fontWeight: FontWeight.bold)),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                                                // Nút mũi tên
-                                                const Column(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    _MiniArrowButton(icon: Icons.arrow_upward),
-                                                    Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        _MiniArrowButton(icon: Icons.arrow_back),
-                                                        SizedBox(width: 4),
-                                                        _MiniArrowButton(icon: Icons.arrow_forward),
-                                                      ],
-                                                    ),
-                                                    _MiniArrowButton(icon: Icons.arrow_downward),
-                                                    SizedBox(height: 2),
-                                                    Text('1 px/lần',
-                                                        style: TextStyle(
-                                                            fontSize: 8,
-                                                            color: AppTheme.textSecondary)),
-                          ],
-                        ),
-                      ],
-                    ),
+                        'Kéo từng chốt tới đúng hai mép vật mốc; có thể dùng nút mũi tên để tinh chỉnh từng pixel.',
+                    diagram:
+                        _GuideImage('assets/images/calibration_guide_3.png'),
                   ),
                   _GuideSlide(
-                    title: '4. Nhập kích thước thực (mm)',
+                    title: '4. Nhập kích thước thật',
                     description:
-                        'Nhập đúng chiều dài thực tế của vật mốc vào ô "Vật mốc (mm)". Hệ thống tự tính tỷ lệ và quy đổi kích thước hạt sang mm.',
-                    diagram: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 200,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border:
-                                Border.all(color: AppTheme.primary, width: 1.5),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.05),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
-                          ),
-                                                    child: const Row(
-                            children: [
-                              Icon(Icons.edit,
-                                  size: 14, color: AppTheme.primary),
-                              SizedBox(width: 6),
-                              Text(
-                                'Vật mốc (mm):',
-                                style: TextStyle(
-                                    fontSize: 11, fontWeight: FontWeight.w600),
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                '20',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppTheme.primary),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF0FDF4),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFF86EFAC)),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.check_circle_outline,
-                                  size: 13, color: Colors.green),
-                              SizedBox(width: 5),
-                              Text(
-                                'Hệ thống tự tính tỷ lệ mm/px',
-                                style: TextStyle(
-                                    fontSize: 10, color: Colors.green),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                        'Nhập chiều dài thật của vật mốc vào ô Vật mốc (mm), sau đó bấm Xử lý.',
+                    diagram:
+                        _GuideImage('assets/images/calibration_guide_4.png'),
                   ),
                 ],
               ),
