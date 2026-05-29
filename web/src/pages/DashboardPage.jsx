@@ -290,12 +290,12 @@ export default function DashboardPage() {
       value: summary
         ? `${formatMeasure(reportedStat('std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat('std_length_px', 'robust_std_length_px'), 'px')} × ${formatMeasure(reportedStat('std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat('std_width_px', 'robust_std_width_px'), 'px')}`
         : '-',
-      note: useRobustStats ? 'Sau QC (MAD)' : 'SD thô do nghi ngờ cao',
+      note: useRobustStats ? 'Sau kiểm tra hạt nghi ngờ' : 'Dùng SD thô vì hạt nghi ngờ cao',
     },
     {
       label: 'Độ lệch chuẩn diện tích',
       value: summary ? formatMeasure(reportedStat('std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat('std_area_px', 'robust_std_area_px'), 'px2') : '-',
-      note: useRobustStats ? 'Sau QC (MAD)' : 'SD thô do nghi ngờ cao',
+      note: useRobustStats ? 'Sau kiểm tra hạt nghi ngờ' : 'Dùng SD thô vì hạt nghi ngờ cao',
     },
   ];
 

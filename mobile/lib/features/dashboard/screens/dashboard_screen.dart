@@ -61,8 +61,11 @@ class _DashboardContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final horizontalPadding = screenWidth < 360 ? 12.0 : 20.0;
+
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(horizontalPadding),
       children: [
         if (historyError != null) ...[
           Text(historyError!, style: TextStyle(color: Colors.red.shade700)),
@@ -384,10 +387,12 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   Widget build(BuildContext context) {
     final result = _result;
     final previewBase64 = result?.previewWithFallback(_previewMode) ?? '';
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final cardPadding = screenWidth < 360 ? 12.0 : 18.0;
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: EdgeInsets.all(cardPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -528,16 +533,50 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Các hạt nghi ngờ nhận dạng sai được tô màu đỏ.',
-                      style: TextStyle(fontSize: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.fact_check_outlined,
+                          size: 20,
+                          color: Color(0xFF9A3412),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Kiểm tra chất lượng hạt (QC)',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF7C2D12),
+                                ),
+                              ),
+                              SizedBox(height: 3),
+                              Text(
+                                'Hạt màu đỏ là vùng hệ thống nghi có lỗi tách mask hoặc kích thước bất thường. Đây là gợi ý để người dùng kiểm tra lại, không phải kết luận loại hạt.',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'QC là gì?',
+                          icon: const Icon(Icons.help_outline, size: 20),
+                          color: const Color(0xFF9A3412),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: _showQcHelp,
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
                           child: _QcFactCard(
-                            label: 'Số hạt nghi ngờ nhận dạng sai',
+                            label: 'Hạt đang nghi ngờ',
                             value: '${result.qcSuspectCount}',
                           ),
                         ),
@@ -564,6 +603,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   _previewChip(mode: 'mask', label: 'Hình dạng'),
                   _previewChip(mode: 'labels', label: 'Đánh số'),
                   _qcEditChip(),
+                  _qcHelpChip(),
                 ],
               ),
               if (_qcEditMode) ...[
@@ -588,7 +628,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Chạm vào hạt để đổi giữa nghi ngờ và hợp lệ. Hạt nghi ngờ hiển thị bằng mask đỏ, không vẽ ô chữ nhật.',
+                          'Đang chỉnh hạt nghi ngờ: chạm trực tiếp vào hạt để đổi giữa nghi ngờ và hợp lệ. Thống kê và CSV sẽ cập nhật theo lựa chọn này.',
                           style: TextStyle(
                             fontSize: 12,
                             color: Color(0xFF1E3A8A),
@@ -649,7 +689,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
         size: 18,
         color: active ? const Color(0xFF9A3412) : AppTheme.primary,
       ),
-      label: Text(active ? 'Xong sửa QC' : 'Sửa QC'),
+      label: Text(active ? 'Xong chỉnh hạt' : 'Chỉnh hạt nghi ngờ'),
       selected: active,
       onSelected: (_) => setState(() => _qcEditMode = !_qcEditMode),
       selectedColor: const Color(0xFFFFEDD5),
@@ -661,6 +701,59 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       labelStyle: TextStyle(
         fontWeight: FontWeight.w700,
         color: active ? const Color(0xFF9A3412) : AppTheme.textPrimary,
+      ),
+    );
+  }
+
+  Widget _qcHelpChip() {
+    return ActionChip(
+      avatar: const Icon(Icons.help_outline, size: 18),
+      label: const Text('QC là gì?'),
+      onPressed: _showQcHelp,
+      side: const BorderSide(color: AppTheme.border),
+      labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+    );
+  }
+
+  void _showQcHelp() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline, color: AppTheme.primary),
+            SizedBox(width: 8),
+            Expanded(child: Text('QC là gì?')),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'QC là bước kiểm tra chất lượng kết quả sau khi AI tách từng hạt. Nó không phải một loại hạt mới.',
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Mask xanh là hạt đang được tính là hợp lệ. Mask đỏ là hạt hệ thống nghi có lỗi tách dính, tách thiếu hoặc kích thước lệch bất thường.',
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Nếu nhìn ảnh thấy hạt đỏ vẫn đúng, bật "Chỉnh hạt nghi ngờ" rồi chạm vào hạt đó để chuyển về hợp lệ. Nếu hạt xanh bị tách sai, chạm vào hạt đó để đánh dấu nghi ngờ.',
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Sau khi chỉnh, số hạt nghi ngờ, độ lệch chuẩn báo cáo và file CSV sẽ được tính lại cho kết quả hiện tại.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Đã hiểu'),
+          ),
+        ],
       ),
     );
   }
@@ -883,19 +976,19 @@ class _SegmentationFactsState extends ConsumerState<_SegmentationFacts> {
                       '${calibration['excluded_reference_object_count'] ?? 0}',
                 ),
                 _FactRow(
-                  label: 'ĐLC dài thô / sau QC',
+                  label: 'ĐLC dài thô / sau kiểm tra',
                   value:
                       '${_formatMeasureStat(widget.result.rawStdLengthMm, 'mm', widget.result.rawStdLengthPx, 'px')} / '
                       '${_formatMeasureStat(widget.result.qcStdLengthMm, 'mm', widget.result.qcStdLengthPx, 'px')}',
                 ),
                 _FactRow(
-                  label: 'ĐLC rộng thô / sau QC',
+                  label: 'ĐLC rộng thô / sau kiểm tra',
                   value:
                       '${_formatMeasureStat(widget.result.rawStdWidthMm, 'mm', widget.result.rawStdWidthPx, 'px')} / '
                       '${_formatMeasureStat(widget.result.qcStdWidthMm, 'mm', widget.result.qcStdWidthPx, 'px')}',
                 ),
                 _FactRow(
-                  label: 'Vùng nghi nhiễu (QC)',
+                  label: 'Hạt nghi ngờ sau kiểm tra',
                   value: '${widget.result.qcSuspectCount}',
                 ),
               ],
@@ -1119,245 +1212,310 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
           ],
         ),
         const SizedBox(height: 10),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            height: 280,
-            width: double.infinity,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final canvasSize = Size(constraints.maxWidth, 280);
-                final fittedRect = sourceSize == null
-                    ? Offset.zero & canvasSize
-                    : _containedRect(canvasSize, sourceSize);
+        LayoutBuilder(
+          builder: (context, outerConstraints) {
+            final availableWidth = outerConstraints.maxWidth.isFinite
+                ? outerConstraints.maxWidth
+                : MediaQuery.sizeOf(context).width;
+            final previewHeight = availableWidth < 340
+                ? 220.0
+                : (availableWidth > 620 ? 360.0 : 280.0);
 
-                Offset displayPoint(Offset imagePoint) => Offset(
-                      fittedRect.left +
-                          imagePoint.dx / sourceSize!.width * fittedRect.width,
-                      fittedRect.top +
-                          imagePoint.dy / sourceSize.height * fittedRect.height,
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                height: previewHeight,
+                width: double.infinity,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final canvasSize =
+                        Size(constraints.maxWidth, previewHeight);
+                    final fittedRect = sourceSize == null
+                        ? Offset.zero & canvasSize
+                        : _containedRect(canvasSize, sourceSize);
+
+                    Offset displayPoint(Offset imagePoint) => Offset(
+                          fittedRect.left +
+                              imagePoint.dx /
+                                  sourceSize!.width *
+                                  fittedRect.width,
+                          fittedRect.top +
+                              imagePoint.dy /
+                                  sourceSize.height *
+                                  fittedRect.height,
+                        );
+
+                    Offset? imagePoint(Offset localPoint) {
+                      if (sourceSize == null ||
+                          !fittedRect.contains(localPoint)) {
+                        return null;
+                      }
+                      return Offset(
+                        (localPoint.dx - fittedRect.left) /
+                            fittedRect.width *
+                            sourceSize.width,
+                        (localPoint.dy - fittedRect.top) /
+                            fittedRect.height *
+                            sourceSize.height,
+                      );
+                    }
+
+                    Offset? dragImagePoint(Offset fingerPoint) {
+                      final target = Offset(
+                        fingerPoint.dx
+                            .clamp(fittedRect.left, fittedRect.right)
+                            .toDouble(),
+                        fingerPoint.dy
+                            .clamp(fittedRect.top, fittedRect.bottom)
+                            .toDouble(),
+                      );
+                      final point = imagePoint(target);
+                      if (point == null) return null;
+                      setState(() {
+                        _fingerPosition = fingerPoint;
+                        _activeHandlePosition = target;
+                        _activeImagePoint = point;
+                      });
+                      return point;
+                    }
+
+                    return GestureDetector(
+                      onTapUp: widget.enabled && sourceSize != null
+                          ? (details) {
+                              if (widget.start != null && widget.end != null) {
+                                final distStart = (details.localPosition -
+                                        displayPoint(widget.start!))
+                                    .distance;
+                                final distEnd = (details.localPosition -
+                                        displayPoint(widget.end!))
+                                    .distance;
+                                if (math.min(distStart, distEnd) <=
+                                    _handleHitRadius) {
+                                  setState(() {
+                                    _selectedHandle =
+                                        distStart <= distEnd ? 'start' : 'end';
+                                  });
+                                  return;
+                                }
+                              }
+                              final point = imagePoint(details.localPosition);
+                              if (point == null) return;
+
+                              final halfLength =
+                                  math.min(56.0, fittedRect.width * 0.2);
+                              final left = Offset(
+                                (details.localPosition.dx - halfLength)
+                                    .clamp(fittedRect.left, fittedRect.right)
+                                    .toDouble(),
+                                details.localPosition.dy,
+                              );
+                              final right = Offset(
+                                (details.localPosition.dx + halfLength)
+                                    .clamp(fittedRect.left, fittedRect.right)
+                                    .toDouble(),
+                                details.localPosition.dy,
+                              );
+                              final start = imagePoint(left);
+                              final end = imagePoint(right);
+                              if (start != null && end != null) {
+                                setState(() => _selectedHandle = 'end');
+                                widget.onChanged(start, end);
+                              }
+                            }
+                          : null,
+                      onPanStart: widget.enabled
+                          ? (details) {
+                              final local = details.localPosition;
+                              if (widget.start != null && widget.end != null) {
+                                final startCanvas = displayPoint(widget.start!);
+                                final endCanvas = displayPoint(widget.end!);
+
+                                final distStart =
+                                    (local - startCanvas).distance;
+                                final distEnd = (local - endCanvas).distance;
+
+                                if (distStart < _handleHitRadius &&
+                                    distStart < distEnd) {
+                                  setState(() => _selectedHandle = 'start');
+                                  _dragTarget = _selectedHandle;
+                                } else if (distEnd < _handleHitRadius) {
+                                  setState(() => _selectedHandle = 'end');
+                                  _dragTarget = _selectedHandle;
+                                } else {
+                                  _dragTarget = null;
+                                }
+                              } else {
+                                final point = imagePoint(local);
+                                if (point == null) return;
+                                _dragTarget = 'new';
+                                setState(() => _selectedHandle = 'end');
+                                widget.onChanged(point, point);
+                              }
+                            }
+                          : null,
+                      onPanUpdate: widget.enabled
+                          ? (details) {
+                              final point =
+                                  _dragTarget == 'start' || _dragTarget == 'end'
+                                      ? dragImagePoint(details.localPosition)
+                                      : imagePoint(details.localPosition);
+                              if (point == null) return;
+
+                              if (_dragTarget == 'start') {
+                                if (widget.end != null) {
+                                  widget.onChanged(point, widget.end!);
+                                }
+                              } else if (_dragTarget == 'end') {
+                                if (widget.start != null) {
+                                  widget.onChanged(widget.start!, point);
+                                }
+                              } else if (_dragTarget == 'new') {
+                                if (widget.start != null) {
+                                  widget.onChanged(widget.start!, point);
+                                }
+                              }
+                            }
+                          : null,
+                      onPanEnd: widget.enabled
+                          ? (_) => setState(() {
+                                _dragTarget = null;
+                                _fingerPosition = null;
+                                _activeHandlePosition = null;
+                                _activeImagePoint = null;
+                              })
+                          : null,
+                      onPanCancel: widget.enabled
+                          ? () => setState(() {
+                                _dragTarget = null;
+                                _fingerPosition = null;
+                                _activeHandlePosition = null;
+                                _activeImagePoint = null;
+                              })
+                          : null,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ColoredBox(
+                            color: const Color(0xFFF8FAF7),
+                            child: widget.bytes == null
+                                ? const _ImagePlaceholder()
+                                : Image.memory(widget.bytes!,
+                                    fit: BoxFit.contain),
+                          ),
+                          CustomPaint(
+                            painter: _ReferenceLinePainter(
+                              fittedRect: fittedRect,
+                              imageSize: sourceSize,
+                              start: widget.start,
+                              end: widget.end,
+                              selectedHandle: _selectedHandle,
+                              fingerPosition: _fingerPosition,
+                              activeHandlePosition: _activeHandlePosition,
+                            ),
+                          ),
+                        ],
+                      ),
                     );
-
-                Offset? imagePoint(Offset localPoint) {
-                  if (sourceSize == null || !fittedRect.contains(localPoint)) {
-                    return null;
-                  }
-                  return Offset(
-                    (localPoint.dx - fittedRect.left) /
-                        fittedRect.width *
-                        sourceSize.width,
-                    (localPoint.dy - fittedRect.top) /
-                        fittedRect.height *
-                        sourceSize.height,
-                  );
-                }
-
-                Offset? dragImagePoint(Offset fingerPoint) {
-                  final target = Offset(
-                    fingerPoint.dx
-                        .clamp(fittedRect.left, fittedRect.right)
-                        .toDouble(),
-                    fingerPoint.dy
-                        .clamp(fittedRect.top, fittedRect.bottom)
-                        .toDouble(),
-                  );
-                  final point = imagePoint(target);
-                  if (point == null) return null;
-                  setState(() {
-                    _fingerPosition = fingerPoint;
-                    _activeHandlePosition = target;
-                    _activeImagePoint = point;
-                  });
-                  return point;
-                }
-
-                return GestureDetector(
-                  onTapUp: widget.enabled && sourceSize != null
-                      ? (details) {
-                          if (widget.start != null && widget.end != null) {
-                            final distStart = (details.localPosition -
-                                    displayPoint(widget.start!))
-                                .distance;
-                            final distEnd = (details.localPosition -
-                                    displayPoint(widget.end!))
-                                .distance;
-                            if (math.min(distStart, distEnd) <=
-                                _handleHitRadius) {
-                              setState(() {
-                                _selectedHandle =
-                                    distStart <= distEnd ? 'start' : 'end';
-                              });
-                              return;
-                            }
-                          }
-                          final point = imagePoint(details.localPosition);
-                          if (point == null) return;
-
-                          final halfLength =
-                              math.min(56.0, fittedRect.width * 0.2);
-                          final left = Offset(
-                            (details.localPosition.dx - halfLength)
-                                .clamp(fittedRect.left, fittedRect.right)
-                                .toDouble(),
-                            details.localPosition.dy,
-                          );
-                          final right = Offset(
-                            (details.localPosition.dx + halfLength)
-                                .clamp(fittedRect.left, fittedRect.right)
-                                .toDouble(),
-                            details.localPosition.dy,
-                          );
-                          final start = imagePoint(left);
-                          final end = imagePoint(right);
-                          if (start != null && end != null) {
-                            setState(() => _selectedHandle = 'end');
-                            widget.onChanged(start, end);
-                          }
-                        }
-                      : null,
-                  onPanStart: widget.enabled
-                      ? (details) {
-                          final local = details.localPosition;
-                          if (widget.start != null && widget.end != null) {
-                            final startCanvas = displayPoint(widget.start!);
-                            final endCanvas = displayPoint(widget.end!);
-
-                            final distStart = (local - startCanvas).distance;
-                            final distEnd = (local - endCanvas).distance;
-
-                            if (distStart < _handleHitRadius &&
-                                distStart < distEnd) {
-                              setState(() => _selectedHandle = 'start');
-                              _dragTarget = _selectedHandle;
-                            } else if (distEnd < _handleHitRadius) {
-                              setState(() => _selectedHandle = 'end');
-                              _dragTarget = _selectedHandle;
-                            } else {
-                              _dragTarget = null;
-                            }
-                          } else {
-                            final point = imagePoint(local);
-                            if (point == null) return;
-                            _dragTarget = 'new';
-                            setState(() => _selectedHandle = 'end');
-                            widget.onChanged(point, point);
-                          }
-                        }
-                      : null,
-                  onPanUpdate: widget.enabled
-                      ? (details) {
-                          final point =
-                              _dragTarget == 'start' || _dragTarget == 'end'
-                                  ? dragImagePoint(details.localPosition)
-                                  : imagePoint(details.localPosition);
-                          if (point == null) return;
-
-                          if (_dragTarget == 'start') {
-                            if (widget.end != null) {
-                              widget.onChanged(point, widget.end!);
-                            }
-                          } else if (_dragTarget == 'end') {
-                            if (widget.start != null) {
-                              widget.onChanged(widget.start!, point);
-                            }
-                          } else if (_dragTarget == 'new') {
-                            if (widget.start != null) {
-                              widget.onChanged(widget.start!, point);
-                            }
-                          }
-                        }
-                      : null,
-                  onPanEnd: widget.enabled
-                      ? (_) => setState(() {
-                            _dragTarget = null;
-                            _fingerPosition = null;
-                            _activeHandlePosition = null;
-                            _activeImagePoint = null;
-                          })
-                      : null,
-                  onPanCancel: widget.enabled
-                      ? () => setState(() {
-                            _dragTarget = null;
-                            _fingerPosition = null;
-                            _activeHandlePosition = null;
-                            _activeImagePoint = null;
-                          })
-                      : null,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ColoredBox(
-                        color: const Color(0xFFF8FAF7),
-                        child: widget.bytes == null
-                            ? const _ImagePlaceholder()
-                            : Image.memory(widget.bytes!, fit: BoxFit.contain),
-                      ),
-                      CustomPaint(
-                        painter: _ReferenceLinePainter(
-                          fittedRect: fittedRect,
-                          imageSize: sourceSize,
-                          start: widget.start,
-                          end: widget.end,
-                          selectedHandle: _selectedHandle,
-                          fingerPosition: _fingerPosition,
-                          activeHandlePosition: _activeHandlePosition,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
+                  },
+                ),
+              ),
+            );
+          },
         ),
         if (hasLine) ...[
           const SizedBox(height: 8),
-          Row(
-            children: [
-              ChoiceChip(
-                label: const Text('Chốt A'),
-                selected: _selectedHandle == 'start',
-                onSelected: widget.enabled
-                    ? (_) => setState(() => _selectedHandle = 'start')
-                    : null,
-              ),
-              const SizedBox(width: 6),
-              ChoiceChip(
-                label: const Text('Chốt B'),
-                selected: _selectedHandle == 'end',
-                onSelected: widget.enabled
-                    ? (_) => setState(() => _selectedHandle = 'end')
-                    : null,
-              ),
-              const Spacer(),
-              _NudgeButton(
-                icon: Icons.arrow_back,
-                onPressed: widget.enabled
-                    ? () => nudgeSelected(const Offset(-1, 0))
-                    : null,
-              ),
-              _NudgeButton(
-                icon: Icons.arrow_upward,
-                onPressed: widget.enabled
-                    ? () => nudgeSelected(const Offset(0, -1))
-                    : null,
-              ),
-              _NudgeButton(
-                icon: Icons.arrow_downward,
-                onPressed: widget.enabled
-                    ? () => nudgeSelected(const Offset(0, 1))
-                    : null,
-              ),
-              _NudgeButton(
-                icon: Icons.arrow_forward,
-                onPressed: widget.enabled
-                    ? () => nudgeSelected(const Offset(1, 0))
-                    : null,
-              ),
-            ],
+          _ReferenceHandleControls(
+            enabled: widget.enabled,
+            selectedHandle: _selectedHandle,
+            onSelectStart: () => setState(() => _selectedHandle = 'start'),
+            onSelectEnd: () => setState(() => _selectedHandle = 'end'),
+            onNudgeLeft: () => nudgeSelected(const Offset(-1, 0)),
+            onNudgeUp: () => nudgeSelected(const Offset(0, -1)),
+            onNudgeDown: () => nudgeSelected(const Offset(0, 1)),
+            onNudgeRight: () => nudgeSelected(const Offset(1, 0)),
           ),
         ],
       ],
+    );
+  }
+}
+
+class _ReferenceHandleControls extends StatelessWidget {
+  final bool enabled;
+  final String selectedHandle;
+  final VoidCallback onSelectStart;
+  final VoidCallback onSelectEnd;
+  final VoidCallback onNudgeLeft;
+  final VoidCallback onNudgeUp;
+  final VoidCallback onNudgeDown;
+  final VoidCallback onNudgeRight;
+
+  const _ReferenceHandleControls({
+    required this.enabled,
+    required this.selectedHandle,
+    required this.onSelectStart,
+    required this.onSelectEnd,
+    required this.onNudgeLeft,
+    required this.onNudgeUp,
+    required this.onNudgeDown,
+    required this.onNudgeRight,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = [
+      ChoiceChip(
+        label: const Text('Chốt A'),
+        selected: selectedHandle == 'start',
+        onSelected: enabled ? (_) => onSelectStart() : null,
+      ),
+      ChoiceChip(
+        label: const Text('Chốt B'),
+        selected: selectedHandle == 'end',
+        onSelected: enabled ? (_) => onSelectEnd() : null,
+      ),
+    ];
+    final nudges = [
+      _NudgeButton(
+        icon: Icons.arrow_back,
+        onPressed: enabled ? onNudgeLeft : null,
+      ),
+      _NudgeButton(
+        icon: Icons.arrow_upward,
+        onPressed: enabled ? onNudgeUp : null,
+      ),
+      _NudgeButton(
+        icon: Icons.arrow_downward,
+        onPressed: enabled ? onNudgeDown : null,
+      ),
+      _NudgeButton(
+        icon: Icons.arrow_forward,
+        onPressed: enabled ? onNudgeRight : null,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 420;
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(spacing: 6, runSpacing: 6, children: chips),
+              const SizedBox(height: 4),
+              Wrap(spacing: 4, runSpacing: 4, children: nudges),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            ...chips.expand((chip) => [chip, const SizedBox(width: 6)]),
+            const Spacer(),
+            ...nudges,
+          ],
+        );
+      },
     );
   }
 }
@@ -1647,13 +1805,22 @@ class _StatTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label,
-                style: const TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 13)),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+              ),
+            ),
             const SizedBox(height: 8),
-            Text(value,
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            Text(
+              value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
           ],
         ),
       ),
@@ -1743,13 +1910,52 @@ class _FactRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Expanded(
-              child: Text(label,
-                  style: const TextStyle(color: AppTheme.textSecondary))),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 360 || value.length > 28;
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  softWrap: true,
+                  style: const TextStyle(color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  softWrap: true,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 5,
+                child: Text(
+                  label,
+                  softWrap: true,
+                  style: const TextStyle(color: AppTheme.textSecondary),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                flex: 4,
+                child: Text(
+                  value,
+                  softWrap: true,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Alert,
+  AlertTitle,
   Box,
   Button,
   Card,
@@ -16,7 +17,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { HelpOutline, Close, Edit, Check, Mouse, CameraAlt, Straighten } from '@mui/icons-material';
+import { HelpOutline, Close, Edit, Check } from '@mui/icons-material';
 
 const PREVIEW_MODES = [
   ['overlay', 'Đánh dấu'],
@@ -24,18 +25,66 @@ const PREVIEW_MODES = [
   ['labels', 'Đánh số'],
 ];
 
+const CALIBRATION_GUIDE_SLIDES = [
+  {
+    title: '1. Upload ảnh hạt và vật mốc',
+    description: 'Chọn hoặc chụp ảnh có cả hạt cần đo và vật mốc có kích thước thật đã biết.',
+    image: '/images/calibration_guide_1.png',
+  },
+  {
+    title: '2. Tạo đoạn đo bằng 2 chốt',
+    description: 'Kéo chuột trên vật mốc để tạo đoạn thẳng gồm chốt A và chốt B.',
+    image: '/images/calibration_guide_2.png',
+  },
+  {
+    title: '3. Kéo thả chốt đo vật mốc',
+    description: 'Kéo từng chốt tới đúng hai mép vật mốc; có thể dùng nút mũi tên để tinh chỉnh.',
+    image: '/images/calibration_guide_3.png',
+  },
+  {
+    title: '4. Nhập kích thước thật',
+    description: 'Nhập chiều dài thật của vật mốc vào ô Vật mốc (mm), sau đó bấm Xử lý.',
+    image: '/images/calibration_guide_4.png',
+  },
+];
+
 const SlideContent = ({ title, description, diagram }) => (
   <Stack alignItems="center" spacing={2} sx={{ px: 2, py: 1, textAlign: 'center', height: '100%' }}>
     <Typography variant="subtitle1" fontWeight={750} color="primary">
       {title}
     </Typography>
-    <Typography variant="body2" color="text.secondary" sx={{ height: 48, lineHeight: 1.45 }}>
+    <Typography variant="body2" color="text.secondary" sx={{ minHeight: 48, lineHeight: 1.45 }}>
       {description}
     </Typography>
-    <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 110, mt: 1 }}>
+    <Box sx={{ flexGrow: 1, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 260, mt: 1 }}>
       {diagram}
     </Box>
   </Stack>
+);
+
+const GuideImage = ({ src, alt }) => (
+  <Box
+    sx={{
+      width: '100%',
+      maxWidth: 460,
+      height: { xs: 300, sm: 420 },
+      borderRadius: 2,
+      overflow: 'hidden',
+      border: '1px solid',
+      borderColor: 'divider',
+      bgcolor: '#F8FAF7',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}
+  >
+    <Box
+      component="img"
+      src={src}
+      alt={alt}
+      sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+    />
+  </Box>
 );
 
 export const DashboardPreviewPanel = ({
@@ -70,6 +119,7 @@ export const DashboardPreviewPanel = ({
   onToggleMeasurementQc,
 }) => {
   const [guideOpen, setGuideOpen] = useState(false);
+  const [qcGuideOpen, setQcGuideOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [draggingHandle, setDraggingHandle] = useState(null);
 
@@ -98,142 +148,7 @@ export const DashboardPreviewPanel = ({
     return startDistance <= endDistance ? 'start' : 'end';
   };
 
-  // Diagram: bước 0 — chụp ảnh có vật mốc
-  const DiagramStep0 = () => (
-    <Stack spacing={1.5} alignItems="center">
-      <Stack direction="row" spacing={2} alignItems="flex-end" justifyContent="center">
-        {/* Vật mốc: đồng xu */}
-        <Stack alignItems="center" spacing={0.5}>
-          <Box sx={{
-            width: 38, height: 38, borderRadius: '50%',
-            background: 'linear-gradient(135deg, #FBBF24, #D97706)',
-            border: '2px solid #B45309',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
-            <Typography sx={{ fontSize: 8, color: 'white', fontWeight: 'bold', lineHeight: 1 }}>500đ</Typography>
-          </Box>
-          <Typography variant="caption" sx={{ fontSize: 9, color: 'text.secondary' }}>Vật mốc</Typography>
-        </Stack>
-        {/* Các hạt */}
-        <Stack alignItems="center" spacing={0.5}>
-          <Stack direction="row" spacing={0.5}>
-            {[14, 18, 12, 16].map((h, i) => (
-              <Box key={i} sx={{ width: 10, height: h, borderRadius: 1, bgcolor: '#EAB308', border: '1px solid #CA8A04' }} />
-            ))}
-          </Stack>
-          <Typography variant="caption" sx={{ fontSize: 9, color: 'text.secondary' }}>Hạt cần đo</Typography>
-        </Stack>
-      </Stack>
-      <Stack direction="row" spacing={0.75} alignItems="center">
-        <CameraAlt sx={{ fontSize: 16, color: 'text.secondary' }} />
-        <Typography variant="caption" sx={{ fontSize: 10, color: 'text.secondary' }}>Chụp cùng một khung ảnh</Typography>
-      </Stack>
-    </Stack>
-  );
-
-  // Diagram: bước 1 — kéo thả chuột từ trái sang phải
-  const DiagramStep1 = () => (
-    <Box sx={{ position: 'relative', width: 200, height: 90, bgcolor: '#F3F4F6', borderRadius: 2, border: '1px solid #E5E7EB', overflow: 'hidden' }}>
-      {/* Vật mốc */}
-      <Box sx={{ position: 'absolute', left: 20, top: 28, width: 160, height: 34, bgcolor: '#D1D5DB', borderRadius: 1, border: '1px dashed #9CA3AF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Typography sx={{ fontSize: 9, color: '#6B7280', fontWeight: 600 }}>Vật mốc (đồng xu / thước)</Typography>
-      </Box>
-      {/* Đường đo */}
-      <Box sx={{ position: 'absolute', left: 22, top: 44, width: 156, height: 2, bgcolor: '#2563EB' }} />
-      {/* Chốt A */}
-      <Box sx={{ position: 'absolute', left: 14, top: 37, width: 16, height: 16, borderRadius: '50%', bgcolor: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 0 4px rgba(37,99,235,0.18)' }}>
-        <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>A</Typography>
-      </Box>
-      {/* Chốt B */}
-      <Box sx={{ position: 'absolute', right: 14, top: 37, width: 16, height: 16, borderRadius: '50%', bgcolor: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Typography sx={{ color: 'white', fontSize: 8, fontWeight: 'bold' }}>B</Typography>
-      </Box>
-      {/* Mũi tên hướng kéo */}
-      <Mouse sx={{ position: 'absolute', left: 8, bottom: 6, fontSize: 16, color: '#6B7280' }} />
-      <Typography sx={{ position: 'absolute', left: 26, bottom: 8, fontSize: 9, color: '#6B7280' }}>Kéo chuột để tạo đoạn tham chiếu</Typography>
-    </Box>
-  );
-
-  // Diagram: bước 2 — kéo chốt để căn lại
-  const DiagramStep2 = () => (
-    <Stack spacing={1.25} sx={{ width: '100%', maxWidth: 210 }}>
-      <Stack direction="row" spacing={1.25} alignItems="flex-start">
-        <Box sx={{ mt: 0.25, width: 18, height: 18, borderRadius: '50%', bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <Typography sx={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>1</Typography>
-        </Box>
-        <Typography variant="caption" sx={{ lineHeight: 1.45 }}>
-          Kéo <Box component="span" sx={{ fontWeight: 700 }}>chốt A</Box> hoặc <Box component="span" sx={{ fontWeight: 700 }}>chốt B</Box> sát mép vật mốc.
-        </Typography>
-      </Stack>
-      <Stack direction="row" spacing={1.25} alignItems="flex-start">
-        <Box sx={{ mt: 0.25, width: 18, height: 18, borderRadius: '50%', bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <Typography sx={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>2</Typography>
-        </Box>
-        <Typography variant="caption" sx={{ lineHeight: 1.45 }}>
-          Số <Box component="span" sx={{ fontWeight: 700 }}>px</Box> tự cập nhật khi di chuyển chốt.
-        </Typography>
-      </Stack>
-      <Stack direction="row" spacing={1.25} alignItems="flex-start">
-        <Box sx={{ mt: 0.25, width: 18, height: 18, borderRadius: '50%', bgcolor: 'success.main', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <Check sx={{ color: 'white', fontSize: 12 }} />
-        </Box>
-        <Typography variant="caption" sx={{ lineHeight: 1.45, color: 'text.secondary' }}>
-          Xóa đoạn tham chiếu nếu cần đặt lại từ đầu.
-        </Typography>
-      </Stack>
-    </Stack>
-  );
-
-  // Diagram: bước 3 — nhập mm
-  const DiagramStep3 = () => (
-    <Stack spacing={1} alignItems="center">
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.25, bgcolor: 'background.paper', borderRadius: 1.5, border: '1.5px solid', borderColor: 'primary.main', width: 190 }}>
-        <Edit sx={{ color: 'primary.main', fontSize: 14 }} />
-        <Typography variant="body2" fontWeight={600} sx={{ flexGrow: 1 }}>
-          Kích thước vật mốc (mm):
-        </Typography>
-      </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, bgcolor: '#F0FDF4', borderRadius: 1.5, border: '1px solid #86EFAC', width: 190 }}>
-        <Straighten sx={{ color: 'success.main', fontSize: 14 }} />
-        <Typography variant="body2" fontWeight={700} color="success.dark">20</Typography>
-        <Typography variant="caption" color="text.secondary">mm (ví dụ: đồng xu 500đ ≈ 20 mm)</Typography>
-      </Box>
-      <Stack direction="row" spacing={0.5} alignItems="center">
-        <Check sx={{ color: 'success.main', fontSize: 14 }} />
-        <Typography variant="caption" color="text.secondary">Hệ thống tự tính tỷ lệ mm/px</Typography>
-      </Stack>
-    </Stack>
-  );
-
-  const renderSlideDiagram = (step) => {
-    switch (step) {
-      case 0: return <DiagramStep0 />;
-      case 1: return <DiagramStep1 />;
-      case 2: return <DiagramStep2 />;
-      case 3: return <DiagramStep3 />;
-      default: return null;
-    }
-  };
-
-  const getSlideTitle = (step) => {
-    switch (step) {
-      case 0: return '1. Chụp kèm vật mốc';
-      case 1: return '2. Tạo đoạn tham chiếu';
-      case 2: return '3. Kéo chốt để căn chính xác';
-      case 3: return '4. Nhập kích thước thực tế (mm)';
-      default: return '';
-    }
-  };
-
-  const getSlideDescription = (step) => {
-    switch (step) {
-      case 0: return 'Đặt vật mốc có kích thước biết trước cạnh hạt và chụp chung trong một khung ảnh.';
-      case 1: return 'Kéo chuột dọc theo vật mốc để tạo đoạn tham chiếu.';
-      case 2: return 'Kéo chốt A hoặc chốt B sát hai mép vật mốc.';
-      case 3: return 'Nhập kích thước thực tế của vật mốc để quy đổi kết quả sang mm.';
-      default: return '';
-    }
-  };
+  const currentGuideSlide = CALIBRATION_GUIDE_SLIDES[currentStep] ?? CALIBRATION_GUIDE_SLIDES[0];
 
   const imageWidth = Number(result?.image?.width) || imageRef.current?.naturalWidth || 1;
   const imageHeight = Number(result?.image?.height) || imageRef.current?.naturalHeight || 1;
@@ -299,20 +214,36 @@ export const DashboardPreviewPanel = ({
                     {label}
                   </Button>
                 ))}
-                <Button
-                  size="small"
-                  color={qcEditMode ? 'warning' : 'primary'}
-                  variant={qcEditMode ? 'contained' : 'outlined'}
-                  startIcon={qcEditMode ? <Check fontSize="small" /> : <Edit fontSize="small" />}
-                  onClick={onToggleQcEditMode}
-                  sx={{ fontWeight: 750 }}
-                >
-                  {qcEditMode ? 'Xong sửa QC' : 'Sửa QC'}
-                </Button>
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <Button
+                    size="small"
+                    color={qcEditMode ? 'warning' : 'primary'}
+                    variant={qcEditMode ? 'contained' : 'outlined'}
+                    startIcon={qcEditMode ? <Check fontSize="small" /> : <Edit fontSize="small" />}
+                    onClick={onToggleQcEditMode}
+                    sx={{ fontWeight: 750 }}
+                  >
+                    {qcEditMode ? 'Xong chỉnh hạt' : 'Chỉnh hạt nghi ngờ'}
+                  </Button>
+                  <Tooltip title="Giải thích QC và cách chỉnh hạt nghi ngờ" arrow>
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={() => setQcGuideOpen(true)}
+                      aria-label="QC là gì?"
+                      sx={{ border: '1px solid', borderColor: 'divider' }}
+                    >
+                      <HelpOutline fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
               </Stack>
               {qcEditMode && (
-                <Alert severity="info" sx={{ py: 0.5 }}>
-                  Click vào hạt để đổi giữa nghi ngờ và hợp lệ. Hạt nghi ngờ hiển thị bằng mask đỏ, không vẽ ô chữ nhật.
+                <Alert severity="info" sx={{ py: 0.75 }}>
+                  <AlertTitle sx={{ mb: 0.25, fontWeight: 750 }}>
+                    Đang chỉnh kết quả kiểm tra hạt
+                  </AlertTitle>
+                  Hạt màu đỏ là vùng hệ thống nghi có lỗi tách mask hoặc kích thước bất thường. Click trực tiếp vào hạt để đổi giữa "nghi ngờ" và "hợp lệ"; thống kê và CSV sẽ cập nhật theo lựa chọn này.
                 </Alert>
               )}
             </Stack>
@@ -551,7 +482,7 @@ export const DashboardPreviewPanel = ({
       <Dialog
         open={guideOpen}
         onClose={() => setGuideOpen(false)}
-        maxWidth="xs"
+        maxWidth="sm"
         fullWidth
         PaperProps={{
           sx: { borderRadius: 3, p: 2 }
@@ -571,11 +502,11 @@ export const DashboardPreviewPanel = ({
 
         <Divider sx={{ mb: 2 }} />
 
-        <Box sx={{ minHeight: 220, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <Box sx={{ minHeight: { xs: 390, sm: 520 }, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <SlideContent
-            title={getSlideTitle(currentStep)}
-            description={getSlideDescription(currentStep)}
-            diagram={renderSlideDiagram(currentStep)}
+            title={currentGuideSlide.title}
+            description={currentGuideSlide.description}
+            diagram={<GuideImage src={currentGuideSlide.image} alt={currentGuideSlide.title} />}
           />
         </Box>
 
@@ -613,6 +544,51 @@ export const DashboardPreviewPanel = ({
               {currentStep === 3 ? 'Bắt đầu' : 'Tiếp theo'}
             </Button>
           </Stack>
+        </Box>
+      </Dialog>
+
+      <Dialog
+        open={qcGuideOpen}
+        onClose={() => setQcGuideOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 3, p: 2 }
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <HelpOutline color="primary" sx={{ fontSize: 22 }} />
+            <Typography variant="h6" fontWeight={750} sx={{ fontSize: '1rem' }}>
+              QC là gì?
+            </Typography>
+          </Stack>
+          <IconButton size="small" onClick={() => setQcGuideOpen(false)} sx={{ color: 'text.secondary' }}>
+            <Close fontSize="small" />
+          </IconButton>
+        </Box>
+
+        <Divider sx={{ mb: 2 }} />
+
+        <Stack spacing={1.5}>
+          <Alert severity="info">
+            QC là bước kiểm tra chất lượng kết quả sau khi AI tách từng hạt. Nó không phải một loại hạt mới.
+          </Alert>
+          <Typography variant="body2" color="text.secondary">
+            Mask xanh là hạt đang được tính là hợp lệ. Mask đỏ là hạt hệ thống nghi có lỗi tách dính, tách thiếu, hoặc kích thước lệch bất thường so với nhóm còn lại.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Nếu nhìn ảnh thấy hạt đỏ vẫn được tách đúng, bật "Chỉnh hạt nghi ngờ" rồi click vào hạt đó để chuyển về hợp lệ. Nếu một hạt xanh bị tách sai, click vào hạt đó để đánh dấu nghi ngờ.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Sau khi chỉnh, số hạt nghi ngờ, độ lệch chuẩn báo cáo và file CSV sẽ được tính lại cho kết quả hiện tại.
+          </Typography>
+        </Stack>
+
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+          <Button variant="contained" onClick={() => setQcGuideOpen(false)}>
+            Đã hiểu
+          </Button>
         </Box>
       </Dialog>
     </>

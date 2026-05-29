@@ -332,7 +332,8 @@ export default function StoragePage() {
                   <ResultRow label="Tổng số hạt đo được" value={detailResult.summary?.count ?? 0} />
                   <ResultRow label="ĐLC chiều dài (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(detailResult.summary, 'std_length_px', 'robust_std_length_px'), 'px')} />
                   <ResultRow label="ĐLC chiều rộng (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(detailResult.summary, 'std_width_px', 'robust_std_width_px'), 'px')} />
-                  <ResultRow label="Vùng nghi nhiễu (QC)" value={String(detailResult.summary?.qc?.suspect_count ?? 0)} />
+                  <ResultRow label="ĐLC diện tích (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat(detailResult.summary, 'std_area_px', 'robust_std_area_px'), 'px2')} />
+                  <ResultRow label="Hạt nghi ngờ sau kiểm tra" value={String(detailResult.summary?.qc?.suspect_count ?? 0)} />
                   <ResultRow label="Tỷ lệ thước đo" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'Chưa thiết lập'} />
                   
                   <Divider sx={{ my: 1 }} />
@@ -394,15 +395,15 @@ export default function StoragePage() {
 const ResultRow = ({ label, value }) => (
   <Box sx={{
     display: 'grid',
-    gridTemplateColumns: 'minmax(92px, max-content) minmax(0, 1fr)',
+    gridTemplateColumns: { xs: '1fr', sm: 'minmax(92px, max-content) minmax(0, 1fr)' },
     alignItems: 'start',
-    gap: 2,
+    gap: { xs: 0.25, sm: 2 },
   }}>
-    <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>{label}</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>{label}</Typography>
     <Typography
       variant="body2"
       fontWeight={650}
-      textAlign="right"
+      textAlign={{ xs: 'left', sm: 'right' }}
       sx={{ minWidth: 0, overflowWrap: 'anywhere' }}
     >
       {value}

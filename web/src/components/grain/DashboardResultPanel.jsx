@@ -50,8 +50,8 @@ export const DashboardResultPanel = ({
               <ResultRow label="Tổng số hạt đo được" value={result.segmentation?.segment_count ?? result.summary?.count ?? '-'} />
               {(result.summary?.qc?.suspect_count ?? 0) > 0 && (
                 <Alert severity="warning">
-                  QC phát hiện {result.summary.qc.suspect_count} vùng nghi nhiễu/outlier. {result.summary.qc.robust_used_for_reporting !== false ? `ĐLC báo cáo tính trên ${result.summary.qc.inlier_count} hạt sau QC.` : 'Tỷ lệ nghi ngờ cao; ĐLC báo cáo giữ nguyên SD thô, không tự loại vùng.'} Kiểm tra ảnh đánh số trước khi kết luận.
-                  {result.summary.qc.suspect_ids?.length ? ` ID nghi ngờ: ${result.summary.qc.suspect_ids.slice(0, 8).map((id) => `#${id}`).join(', ')}${result.summary.qc.suspect_ids.length > 8 ? ', ...' : ''}.` : ''}
+                  Hệ thống đang nghi {result.summary.qc.suspect_count} hạt có thể bị tách mask sai hoặc có kích thước bất thường. {result.summary.qc.robust_used_for_reporting !== false ? `Độ lệch chuẩn báo cáo được tính trên ${result.summary.qc.inlier_count} hạt hợp lệ sau kiểm tra.` : 'Tỷ lệ hạt nghi ngờ cao, nên hệ thống giữ độ lệch chuẩn thô và cần người dùng xem lại ảnh.'} Có thể dùng nút "Chỉnh hạt nghi ngờ" ở khung ảnh để sửa thủ công.
+                  {result.summary.qc.suspect_ids?.length ? ` ID hạt nghi ngờ: ${result.summary.qc.suspect_ids.slice(0, 8).map((id) => `#${id}`).join(', ')}${result.summary.qc.suspect_ids.length > 8 ? ', ...' : ''}.` : ''}
                 </Alert>
               )}
               
@@ -84,14 +84,18 @@ export const DashboardResultPanel = ({
                     value={String(result.segmentation?.mask_filter?.excluded_reference_object_count ?? 0)}
                   />
                   <ResultRow
-                    label="ĐLC dài thô / sau QC"
+                    label="ĐLC dài thô / sau kiểm tra"
                     value={`${formatMeasure(result.summary?.std_length_mm, 'mm', result.summary?.std_length_px, 'px')} / ${formatMeasure(result.summary?.robust_std_length_mm, 'mm', result.summary?.robust_std_length_px, 'px')}`}
                   />
                   <ResultRow
-                    label="ĐLC rộng thô / sau QC"
+                    label="ĐLC rộng thô / sau kiểm tra"
                     value={`${formatMeasure(result.summary?.std_width_mm, 'mm', result.summary?.std_width_px, 'px')} / ${formatMeasure(result.summary?.robust_std_width_mm, 'mm', result.summary?.robust_std_width_px, 'px')}`}
                   />
-                  <ResultRow label="Vùng nghi nhiễu (QC)" value={String(result.summary?.qc?.suspect_count ?? 0)} />
+                  <ResultRow
+                    label="ĐLC diện tích thô / sau kiểm tra"
+                    value={`${formatMeasure(result.summary?.std_area_mm2, 'mm2', result.summary?.std_area_px, 'px2')} / ${formatMeasure(result.summary?.robust_std_area_mm2, 'mm2', result.summary?.robust_std_area_px, 'px2')}`}
+                  />
+                  <ResultRow label="Hạt nghi ngờ sau kiểm tra" value={String(result.summary?.qc?.suspect_count ?? 0)} />
                 </Stack>
               </Collapse>
 

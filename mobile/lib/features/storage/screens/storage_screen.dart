@@ -311,7 +311,8 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
                   'ĐLC diện tích (báo cáo)',
                   _formatMeasure(
                       result.qcStdAreaMm2, 'mm2', result.qcStdAreaPx, 'px2')),
-              _detailRow('Vùng nghi nhiễu (QC)', '${result.qcSuspectCount}'),
+              _detailRow(
+                  'Hạt nghi ngờ sau kiểm tra', '${result.qcSuspectCount}'),
               _detailRow(
                   'Tỷ lệ thước đo',
                   result.calibration['enabled'] == true
