@@ -32,15 +32,23 @@ def refine_instances_post(
     """
     enable_grabcut   = bool_param(params, "enableGrabCut")
     enable_edge_snap = bool_param(params, "enableEdgeSnap")
+    enable_boundary_refine = bool_param(params, "enableBoundaryRefine")
     smooth_sigma     = float_param(params, "maskContourSmooth")
 
-    if not (enable_grabcut or enable_edge_snap or smooth_sigma > 0):
+    if not (enable_boundary_refine or enable_grabcut or enable_edge_snap or smooth_sigma > 0):
         return instances
 
-    padding      = int_param(params, "samBoxPadding")
+    padding      = max(int_param(params, "samBoxPadding"), int_param(params, "boundaryRefinePadding"))
     grabcut_iter = int_param(params, "grabCutIter")
     snap_radius  = int_param(params, "edgeSnapRadius")
     snap_sigma   = float_param(params, "edgeSnapSigma")
+    boundary_radius = int_param(params, "boundaryRefineRadius")
+    boundary_max_area_change = float_param(params, "boundaryRefineMaxAreaChange")
+    enable_morph_split = bool_param(params, "enableMorphSplit")
+    morph_min_area = int_param(params, "morphSplitMinArea")
+    morph_kernel = int_param(params, "morphSplitKernel")
+    morph_max_components = int_param(params, "morphSplitMaxComponents")
+    morph_min_component_area_ratio = float_param(params, "morphSplitMinComponentAreaRatio")
 
     height, width = rgb.shape[:2]
     refined: list[InstanceMask] = []
@@ -69,6 +77,14 @@ def refine_instances_post(
 
         orig_area = int(np.count_nonzero(crop_mask))
 
+        if enable_boundary_refine:
+            crop_mask = _boundary_refine_crop(
+                crop_rgb,
+                crop_mask,
+                search_radius=boundary_radius,
+                max_area_change=boundary_max_area_change,
+            )
+
         if enable_grabcut:
             crop_mask = _grabcut_refine_crop(crop_rgb, crop_mask, iter_count=grabcut_iter)
             # Safety: if area changed by more than 60%, revert
@@ -87,25 +103,117 @@ def refine_instances_post(
         if smooth_sigma > 0:
             crop_mask = _smooth_contour_crop(crop_mask, sigma=smooth_sigma)
 
-        # Paste refined crop back into a full-size mask
-        if not np.any(crop_mask):
-            refined.append(instance)
-            continue
-
-        full_mask = original_mask.copy()
-        full_mask[y1:y2, x1:x2] = crop_mask
-
-        refined.append(
-            InstanceMask(
-                mask=full_mask.astype(bool),
-                confidence=instance.confidence,
-                class_id=instance.class_id,
-                class_name=instance.class_name,
-                source=instance.source,
+        split_masks = [crop_mask]
+        if enable_morph_split:
+            split_masks = _split_touching_mask_crop(
+                crop_mask,
+                min_area=morph_min_area,
+                kernel_size=morph_kernel,
+                max_components=morph_max_components,
+                min_component_area_ratio=morph_min_component_area_ratio,
             )
-        )
+
+        added = False
+        for split_mask in split_masks:
+            if not np.any(split_mask):
+                continue
+            full_mask = np.zeros_like(original_mask, dtype=np.uint8)
+            full_mask[y1:y2, x1:x2] = split_mask
+            if np.count_nonzero(full_mask) == 0:
+                continue
+            refined.append(
+                InstanceMask(
+                    mask=full_mask.astype(bool),
+                    confidence=instance.confidence,
+                    class_id=instance.class_id,
+                    class_name=instance.class_name,
+                    source=instance.source,
+                )
+            )
+            added = True
+        if not added:
+            refined.append(instance)
 
     return refined
+
+
+# ---------------------------------------------------------------------------
+# Local image-aware boundary refinement
+# ---------------------------------------------------------------------------
+
+def _boundary_refine_crop(
+    crop_rgb: np.ndarray,
+    crop_mask: np.ndarray,
+    *,
+    search_radius: int,
+    max_area_change: float,
+) -> np.ndarray:
+    """Refine a coarse YOLO mask using local foreground/background colors."""
+    original = (crop_mask > 0).astype(np.uint8)
+    orig_area = int(np.count_nonzero(original))
+    if orig_area < 20:
+        return original
+
+    k = max(3, int(search_radius) * 2 + 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    support = cv2.dilate(original, kernel, iterations=1)
+    core_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    core = cv2.erode(original, core_kernel, iterations=1)
+    if int(np.count_nonzero(core)) < max(8, int(orig_area * 0.2)):
+        core = original
+
+    bg_ring = np.logical_and(support > 0, original == 0)
+    if int(np.count_nonzero(bg_ring)) < 12:
+        bg_ring = original == 0
+    if int(np.count_nonzero(bg_ring)) < 12:
+        return original
+
+    rgb_float = crop_rgb.astype(np.float32)
+    fg_pixels = rgb_float[core.astype(bool)]
+    bg_pixels = rgb_float[bg_ring.astype(bool)]
+    if len(fg_pixels) < 8 or len(bg_pixels) < 8:
+        return original
+
+    fg_center = np.median(fg_pixels, axis=0)
+    bg_center = np.median(bg_pixels, axis=0)
+    fg_scale = np.median(np.abs(fg_pixels - fg_center), axis=0) + 12.0
+    bg_scale = np.median(np.abs(bg_pixels - bg_center), axis=0) + 12.0
+
+    fg_dist = np.sqrt(np.sum(((rgb_float - fg_center) / fg_scale) ** 2, axis=2))
+    bg_dist = np.sqrt(np.sum(((rgb_float - bg_center) / bg_scale) ** 2, axis=2))
+    refined = np.logical_and(support > 0, fg_dist <= bg_dist * 0.98).astype(np.uint8)
+    refined[core.astype(bool)] = 1
+    refined = _keep_main_components_near_original(refined, original)
+
+    new_area = int(np.count_nonzero(refined))
+    if new_area <= 0:
+        return original
+    allowed = max(0.05, min(1.0, float(max_area_change)))
+    area_ratio = new_area / max(orig_area, 1)
+    if area_ratio < (1.0 - allowed) or area_ratio > (1.0 + allowed):
+        return original
+    overlap = int(np.count_nonzero(np.logical_and(refined > 0, original > 0)))
+    union = int(np.count_nonzero(np.logical_or(refined > 0, original > 0)))
+    if union == 0 or overlap / union < 0.55:
+        return original
+    return refined
+
+
+def _keep_main_components_near_original(mask: np.ndarray, original: np.ndarray) -> np.ndarray:
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    if n_labels <= 2:
+        return mask.astype(np.uint8)
+    kept = np.zeros_like(mask, dtype=np.uint8)
+    min_area = max(8, int(np.count_nonzero(original) * 0.08))
+    for label_id in range(1, n_labels):
+        component = labels == label_id
+        area = int(stats[label_id, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+        if np.count_nonzero(np.logical_and(component, original > 0)) == 0:
+            continue
+        kept[component] = 1
+    return kept if np.any(kept) else mask.astype(np.uint8)
 
 
 # ---------------------------------------------------------------------------
@@ -266,3 +374,44 @@ def _smooth_pts(pts: np.ndarray, sigma: float) -> np.ndarray:
     sy = cv2.GaussianBlur(padded[:, 1].reshape(-1, 1).astype(np.float32),
                            (1, ksize), sigma).ravel()
     return np.stack([sx, sy], axis=1)[pad: pad + n]
+
+
+def _split_touching_mask_crop(
+    crop_mask: np.ndarray,
+    *,
+    min_area: int,
+    kernel_size: int,
+    max_components: int,
+    min_component_area_ratio: float,
+) -> list[np.ndarray]:
+    """Split a possibly merged mask by erode->components->dilate on crop."""
+    area = int(np.count_nonzero(crop_mask))
+    if area < max(1, min_area):
+        return [crop_mask]
+
+    k = max(1, int(kernel_size))
+    if k % 2 == 0:
+        k += 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+
+    eroded = cv2.erode(crop_mask.astype(np.uint8), kernel, iterations=1)
+    n_components, component_labels = cv2.connectedComponents(eroded, connectivity=8)
+    split_count = n_components - 1
+    if split_count < 2 or split_count > max(2, max_components):
+        return [crop_mask]
+
+    min_part_area = max(1, int(round(area * max(0.0, min_component_area_ratio))))
+    results: list[np.ndarray] = []
+    for label_id in range(1, n_components):
+        seed = (component_labels == label_id).astype(np.uint8)
+        if not np.any(seed):
+            continue
+        part = cv2.dilate(seed, kernel, iterations=1)
+        part = np.logical_and(part > 0, crop_mask > 0).astype(np.uint8)
+        if int(np.count_nonzero(part)) < min_part_area:
+            continue
+        results.append(part)
+
+    if len(results) < 2:
+        return [crop_mask]
+    return results

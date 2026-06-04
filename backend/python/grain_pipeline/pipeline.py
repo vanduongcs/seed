@@ -28,7 +28,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     sam_enabled = bool_param(params, "enableSamRefine")
     sam_candidate_limit = int_param(params, "samCandidateLimit")
     use_sam = sam_enabled and len(yolo_instances) <= sam_candidate_limit
-    sam_model = str(params.get("samModel") or "mobile_sam_decoder.onnx")
+    sam_model = str(params.get("samModel") or "previous_model/mobile_sam_decoder.onnx")
     if use_sam and is_mobile_sam_model(sam_model):
         instances = refine_instances_with_mobile_sam(segment_input, yolo_instances, params)
         refiner_name = "MobileSAM ONNX"
@@ -46,7 +46,12 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     instances = refine_instances_post(segment_input, instances, params)
 
     # ── Stage 4: filter & measure ────────────────────────────────────────────
-    labels, measurements, excluded_reference_object_count = filter_and_measure(instances, params, prepared.scale)
+    labels, measurements, excluded_reference_object_count = filter_and_measure(
+        instances,
+        params,
+        prepared.scale,
+        segment_input,
+    )
     seed_candidate_count = sum(1 for item in instances if is_seed_instance(item))
     ref_candidate_count = len(instances) - seed_candidate_count
 
@@ -86,7 +91,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "refiner":                 refiner_name,
             "refiner_applied":         use_sam,
             "refiner_skip_reason":     refiner_skip_reason,
-            "refiner_encoder_model":   str(params.get("samEncoderModel") or "mobile_sam_encoder.onnx"),
+            "refiner_encoder_model":   str(params.get("samEncoderModel") or "previous_model/mobile_sam_encoder.onnx"),
             "refiner_model":           sam_model,
             "refiner_candidate_limit": sam_candidate_limit,
             "refiner_imgsz":           int_param(params, "samImgSize"),
@@ -100,6 +105,28 @@ def analyze_image(image_path: Path, params: dict) -> dict:
                 "edge_snap_enabled": bool_param(params, "enableEdgeSnap"),
                 "edge_snap_radius": int_param(params, "edgeSnapRadius"),
                 "contour_smooth":   float_param(params, "maskContourSmooth"),
+                "boundary_refine_enabled": bool_param(params, "enableBoundaryRefine"),
+                "boundary_refine_padding": int_param(params, "boundaryRefinePadding"),
+                "boundary_refine_radius": int_param(params, "boundaryRefineRadius"),
+                "boundary_refine_max_area_change": float_param(params, "boundaryRefineMaxAreaChange"),
+                "morph_split_enabled": bool_param(params, "enableMorphSplit"),
+                "morph_split_min_area": int_param(params, "morphSplitMinArea"),
+                "morph_split_kernel": int_param(params, "morphSplitKernel"),
+                "morph_split_max_components": int_param(params, "morphSplitMaxComponents"),
+                "morph_split_min_component_area_ratio": float_param(params, "morphSplitMinComponentAreaRatio"),
+                "skin_reject_enabled": bool_param(params, "enableSkinReject"),
+                "skin_reject_ratio": float_param(params, "skinRejectRatio"),
+                "strong_skin_reject_ratio": float_param(params, "strongSkinRejectRatio"),
+                "adaptive_thresholds_enabled": bool_param(params, "enableAdaptiveThresholds"),
+                "adaptive_min_candidates": int_param(params, "adaptiveMinCandidates"),
+                "adaptive_mad_z": float_param(params, "adaptiveMadZ"),
+                "dynamic_area_multiplier": float_param(params, "dynamicAreaMultiplier"),
+                "merged_seed_split_enabled": bool_param(params, "enableMergedSeedSplit"),
+                "merged_split_area_ratio": float_param(params, "mergedSplitAreaRatio"),
+                "merged_split_length_ratio": float_param(params, "mergedSplitLengthRatio"),
+                "merged_split_width_ratio": float_param(params, "mergedSplitWidthRatio"),
+                "merged_split_mad_z": float_param(params, "mergedSplitMadZ"),
+                "merged_split_max_parts": int_param(params, "mergedSplitMaxParts"),
             },
             "confidence":              float_param(params, "yoloConf"),
             "iou":                     float_param(params, "yoloIou"),

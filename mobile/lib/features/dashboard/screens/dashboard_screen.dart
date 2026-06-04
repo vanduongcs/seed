@@ -13,9 +13,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../grain/providers/grain_runs_provider.dart';
 import '../../grain/services/grain_analysis_api.dart';
+import '../../grain/widgets/grain_stats_charts.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -48,7 +50,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-class _DashboardContent extends StatelessWidget {
+class _DashboardContent extends ConsumerWidget {
   final String? historyError;
   final GrainAnalysisResult? sessionResult;
   final ValueChanged<GrainAnalysisResult?> onSessionResultChanged;
@@ -60,7 +62,8 @@ class _DashboardContent extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final horizontalPadding = screenWidth < 360 ? 12.0 : 20.0;
 
@@ -74,36 +77,41 @@ class _DashboardContent extends StatelessWidget {
         _BackendAnalysisCard(onResultChanged: onSessionResultChanged),
         if (sessionResult case final result?) ...[
           const SizedBox(height: 18),
-          _StatTile(label: 'Tổng số hạt', value: '${result.count}'),
+          _StatTile(
+            label: appText(language, 'Tổng số hạt', 'Total grains'),
+            value: '${result.count}',
+          ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: _StatTile(
-                  label: 'Số hạt chắc chắn',
+                  label:
+                      appText(language, 'Số hạt chắc chắn', 'Confirmed grains'),
                   value: '${result.qcInlierCount}',
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _StatTile(
-                  label: 'Số hạt nghi ngờ',
+                  label: appText(language, 'Số hạt nghi ngờ', 'Suspect grains'),
                   value: '${result.qcSuspectCount}',
                 ),
               ),
             ],
           ),
           const SizedBox(height: 18),
-          const Text(
-            'Giá trị trung bình',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          Text(
+            appText(language, 'Giá trị trung bình', 'Average values'),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
                 child: _StatTile(
-                  label: 'Chiều dài trung bình',
+                  label: appText(
+                      language, 'Chiều dài trung bình', 'Average length'),
                   value: _formatMeasureStat(
                     result.meanLengthMm,
                     'mm',
@@ -115,7 +123,8 @@ class _DashboardContent extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: _StatTile(
-                  label: 'Chiều rộng trung bình',
+                  label: appText(
+                      language, 'Chiều rộng trung bình', 'Average width'),
                   value: _formatMeasureStat(
                     result.meanWidthMm,
                     'mm',
@@ -128,7 +137,7 @@ class _DashboardContent extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _StatTile(
-            label: 'Diện tích trung bình',
+            label: appText(language, 'Diện tích trung bình', 'Average area'),
             value: _formatMeasureStat(
               result.meanAreaMm2,
               'mm2',
@@ -137,16 +146,16 @@ class _DashboardContent extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
-          const Text(
-            'Độ lệch chuẩn',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          Text(
+            appText(language, 'Độ lệch chuẩn', 'Standard deviation'),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
                 child: _StatTile(
-                  label: 'ĐLC chiều dài',
+                  label: appText(language, 'ĐLC chiều dài', 'Length SD'),
                   value: _formatMeasureStat(
                     result.qcStdLengthMm,
                     'mm',
@@ -158,7 +167,7 @@ class _DashboardContent extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: _StatTile(
-                  label: 'ĐLC chiều rộng',
+                  label: appText(language, 'ĐLC chiều rộng', 'Width SD'),
                   value: _formatMeasureStat(
                     result.qcStdWidthMm,
                     'mm',
@@ -171,7 +180,7 @@ class _DashboardContent extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _StatTile(
-            label: 'ĐLC diện tích',
+            label: appText(language, 'ĐLC diện tích', 'Area SD'),
             value: _formatMeasureStat(
               result.qcStdAreaMm2,
               'mm2',
@@ -179,6 +188,8 @@ class _DashboardContent extends StatelessWidget {
               'px2',
             ),
           ),
+          const SizedBox(height: 18),
+          GrainStatsCharts(result: result),
         ],
       ],
     );
@@ -196,6 +207,19 @@ String _formatMeasureStat(double? primary, String primaryUnit, double? fallback,
   return '_';
 }
 
+String _localizedProgressPhase(AppLanguage language, String phase) {
+  if (language == AppLanguage.vi) return phase;
+  return switch (phase) {
+    'Chuẩn bị ảnh' => 'Preparing image',
+    'Đang nhận dạng hạt' => 'Detecting grains',
+    'Đo kích thước' => 'Measuring size',
+    'Lưu kết quả' => 'Saving result',
+    'Hoàn tất' => 'Complete',
+    'Đang xử lý' => 'Processing',
+    _ => phase,
+  };
+}
+
 class _BackendAnalysisCard extends ConsumerStatefulWidget {
   final ValueChanged<GrainAnalysisResult?> onResultChanged;
 
@@ -206,7 +230,8 @@ class _BackendAnalysisCard extends ConsumerStatefulWidget {
       _BackendAnalysisCardState();
 }
 
-class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
+class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
+    with AutomaticKeepAliveClientMixin<_BackendAnalysisCard> {
   static const _previewCacheWidth = 1200;
 
   final _picker = ImagePicker();
@@ -229,13 +254,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
   Timer? _progressTimer;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      widget.onResultChanged(null);
-    });
-  }
+  bool get wantKeepAlive => true;
 
   @override
   void dispose() {
@@ -307,7 +326,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
     try {
       _setProgress(
         20,
-        'Khởi chạy mô hình cục bộ',
+        'Chuẩn bị nhận dạng trên thiết bị',
       );
       _setProgress(
         50,
@@ -377,17 +396,30 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
         text: 'SeedVision segmentation PNG');
   }
 
-  void _toggleMeasurementQc(int measurementId) {
-    final current = _result;
-    if (current == null) return;
-    final next = current.withToggledQc(measurementId);
+  Future<void> _applyEditedResult(GrainAnalysisResult next) async {
     setState(() => _result = next);
     widget.onResultChanged(next);
+    await _api.persistEditedRun(next);
+    ref.invalidate(grainRunsProvider);
+  }
+
+  Future<void> _confirmSuspect(int measurementId) async {
+    final current = _result;
+    if (current == null) return;
+    await _applyEditedResult(current.withConfirmedGrain(measurementId));
+  }
+
+  Future<void> _deleteSuspect(int measurementId) async {
+    final current = _result;
+    if (current == null) return;
+    await _applyEditedResult(current.withDeletedMeasurement(measurementId));
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final result = _result;
+    final language = ref.watch(appLanguageProvider);
     final previewBase64 = result?.previewWithFallback(_previewMode) ?? '';
     final screenWidth = MediaQuery.sizeOf(context).width;
     final cardPadding = screenWidth < 360 ? 12.0 : 18.0;
@@ -398,11 +430,6 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Xử lý ảnh',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
             Wrap(
               spacing: 10,
               runSpacing: 10,
@@ -410,7 +437,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 OutlinedButton.icon(
                   onPressed: _busy ? null : () => _pick(ImageSource.gallery),
                   icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Chọn ảnh'),
+                  label: Text(appText(language, 'Chọn ảnh', 'Choose image')),
                 ),
                 OutlinedButton.icon(
                   onPressed: _busy ? null : () => _pick(ImageSource.camera),
@@ -426,6 +453,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
               start: _referenceStart,
               end: _referenceEnd,
               enabled: !_busy && _selectedBytes != null,
+              onPickImage: _busy ? null : () => _pick(ImageSource.gallery),
               onChanged: (start, end) {
                 setState(() {
                   _referenceStart = start;
@@ -444,9 +472,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                     readOnly: true,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Vật mốc (px)',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText:
+                          appText(language, 'Kích thước (px)', 'Size (px)'),
+                      border: const OutlineInputBorder(),
                       isDense: true,
                     ),
                   ),
@@ -457,9 +486,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                     controller: _referenceMm,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Vật mốc (mm)',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText:
+                          appText(language, 'Kích thước (mm)', 'Size (mm)'),
+                      border: const OutlineInputBorder(),
                       isDense: true,
                     ),
                   ),
@@ -479,7 +509,8 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                         });
                       },
                 icon: const Icon(Icons.clear),
-                label: const Text('Xóa đường vật mốc'),
+                label: Text(
+                    appText(language, 'Xóa vật mốc', 'Clear reference marker')),
               ),
             ),
             const SizedBox(height: 6),
@@ -494,7 +525,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.auto_awesome_motion_outlined),
-                label: Text(_busy ? 'Đang xử lý' : 'Xử lý'),
+                label: Text(_busy
+                    ? appText(language, 'Đang xử lý', 'Processing')
+                    : appText(language, 'Xử lý', 'Analyze')),
               ),
             ),
             if (_error != null) ...[
@@ -507,7 +540,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 children: [
                   Expanded(
                     child: Text(
-                      _progressPhase.isEmpty ? 'Đang xử lý' : _progressPhase,
+                      _progressPhase.isEmpty
+                          ? appText(language, 'Đang xử lý', 'Processing')
+                          : _localizedProgressPhase(language, _progressPhase),
                       style: const TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 12,
@@ -535,21 +570,21 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    const Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.fact_check_outlined,
                           size: 20,
                           color: Color(0xFF9A3412),
                         ),
-                        const SizedBox(width: 8),
-                        const Expanded(
+                        SizedBox(width: 8),
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Kiểm tra chất lượng hạt (QC)',
+                                'Kiểm tra chất lượng hạt',
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w800,
@@ -558,18 +593,11 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                               ),
                               SizedBox(height: 3),
                               Text(
-                                'Hạt màu đỏ là vùng hệ thống nghi có lỗi tách mask hoặc kích thước bất thường. Đây là gợi ý để người dùng kiểm tra lại, không phải kết luận loại hạt.',
+                                'Hạt màu đỏ là vùng hệ thống nghi có lỗi tách vùng ảnh hoặc kích thước bất thường. Đây là gợi ý để người dùng kiểm tra lại, không phải kết luận loại hạt.',
                                 style: TextStyle(fontSize: 12),
                               ),
                             ],
                           ),
-                        ),
-                        IconButton(
-                          tooltip: 'QC là gì?',
-                          icon: const Icon(Icons.help_outline, size: 20),
-                          color: const Color(0xFF9A3412),
-                          visualDensity: VisualDensity.compact,
-                          onPressed: _showQcHelp,
                         ),
                       ],
                     ),
@@ -578,14 +606,16 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                       children: [
                         Expanded(
                           child: _QcFactCard(
-                            label: 'Hạt đang nghi ngờ',
+                            label: appText(language, 'Hạt đang nghi ngờ',
+                                'Suspect grains'),
                             value: '${result.qcSuspectCount}',
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: _QcFactCard(
-                            label: 'ID nghi ngờ',
+                            label:
+                                appText(language, 'ID nghi ngờ', 'Suspect IDs'),
                             value: result.qcSuspectIdsLabel.isEmpty
                                 ? '-'
                                 : result.qcSuspectIdsLabel,
@@ -601,11 +631,19 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _previewChip(mode: 'overlay', label: 'Đánh dấu'),
-                  _previewChip(mode: 'mask', label: 'Hình dạng'),
-                  _previewChip(mode: 'labels', label: 'Đánh số'),
+                  _previewChip(
+                    mode: 'overlay',
+                    label: appText(language, 'Đánh dấu', 'Overlay'),
+                  ),
+                  _previewChip(
+                    mode: 'mask',
+                    label: appText(language, 'Hình dạng', 'Mask'),
+                  ),
+                  _previewChip(
+                    mode: 'labels',
+                    label: appText(language, 'Đánh số', 'Labels'),
+                  ),
                   _qcEditChip(),
-                  _qcHelpChip(),
                 ],
               ),
               if (_qcEditMode) ...[
@@ -619,19 +657,23 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: const Color(0xFF93C5FD)),
                   ),
-                  child: const Row(
+                  child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.touch_app_outlined,
                         size: 18,
                         color: Color(0xFF2563EB),
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Đang chỉnh hạt nghi ngờ: chạm trực tiếp vào hạt để đổi giữa nghi ngờ và hợp lệ. Thống kê và CSV sẽ cập nhật theo lựa chọn này.',
-                          style: TextStyle(
+                          appText(
+                            language,
+                            'Đang chỉnh hạt nghi ngờ: dùng bảng ID dưới ảnh. Tích xanh để xác nhận là hạt thật, X đỏ để xóa hẳn nhận dạng sai khỏi kết quả.',
+                            'Editing suspect grains: use the ID table below the image. Tap the green check to confirm a real grain, or the red X to remove a wrong detection.',
+                          ),
+                          style: const TextStyle(
                             fontSize: 12,
                             color: Color(0xFF1E3A8A),
                           ),
@@ -647,10 +689,15 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   result: result,
                   previewBytes: base64Decode(previewBase64),
                   editMode: _qcEditMode,
-                  onToggle: _toggleMeasurementQc,
                 ),
-              const SizedBox(height: 12),
-              _SegmentationFacts(result: result),
+              if (_qcEditMode) ...[
+                const SizedBox(height: 10),
+                _SuspectDecisionTable(
+                  result: result,
+                  onConfirm: _confirmSuspect,
+                  onDelete: _deleteSuspect,
+                ),
+              ],
               const SizedBox(height: 12),
               Wrap(
                 spacing: 10,
@@ -659,12 +706,12 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
                   ElevatedButton.icon(
                     onPressed: _shareCsv,
                     icon: const Icon(Icons.table_view_outlined),
-                    label: const Text('Export CSV'),
+                    label: Text(appText(language, 'Export CSV', 'Export CSV')),
                   ),
                   OutlinedButton.icon(
                     onPressed: _sharePng,
                     icon: const Icon(Icons.image_outlined),
-                    label: const Text('Export PNG'),
+                    label: Text(appText(language, 'Export PNG', 'Export PNG')),
                   ),
                 ],
               ),
@@ -685,13 +732,16 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
 
   Widget _qcEditChip() {
     final active = _qcEditMode;
+    final language = ref.watch(appLanguageProvider);
     return FilterChip(
       avatar: Icon(
         active ? Icons.check_circle_outline : Icons.edit_outlined,
         size: 18,
         color: active ? const Color(0xFF9A3412) : AppTheme.primary,
       ),
-      label: Text(active ? 'Xong chỉnh hạt' : 'Chỉnh hạt nghi ngờ'),
+      label: Text(active
+          ? appText(language, 'Xong chỉnh hạt', 'Finish editing')
+          : appText(language, 'Chỉnh hạt nghi ngờ', 'Edit suspect grains')),
       selected: active,
       onSelected: (_) => setState(() => _qcEditMode = !_qcEditMode),
       selectedColor: const Color(0xFFFFEDD5),
@@ -706,72 +756,17 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard> {
       ),
     );
   }
-
-  Widget _qcHelpChip() {
-    return ActionChip(
-      avatar: const Icon(Icons.help_outline, size: 18),
-      label: const Text('QC là gì?'),
-      onPressed: _showQcHelp,
-      side: const BorderSide(color: AppTheme.border),
-      labelStyle: const TextStyle(fontWeight: FontWeight.w700),
-    );
-  }
-
-  void _showQcHelp() {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.help_outline, color: AppTheme.primary),
-            SizedBox(width: 8),
-            Expanded(child: Text('QC là gì?')),
-          ],
-        ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'QC là bước kiểm tra chất lượng kết quả sau khi AI tách từng hạt. Nó không phải một loại hạt mới.',
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Mask xanh là hạt đang được tính là hợp lệ. Mask đỏ là hạt hệ thống nghi có lỗi tách dính, tách thiếu hoặc kích thước lệch bất thường.',
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Nếu nhìn ảnh thấy hạt đỏ vẫn đúng, bật "Chỉnh hạt nghi ngờ" rồi chạm vào hạt đó để chuyển về hợp lệ. Nếu hạt xanh bị tách sai, chạm vào hạt đó để đánh dấu nghi ngờ.',
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Sau khi chỉnh, số hạt nghi ngờ, độ lệch chuẩn báo cáo và file CSV sẽ được tính lại cho kết quả hiện tại.',
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Đã hiểu'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _QcEditablePreview extends StatelessWidget {
   final GrainAnalysisResult result;
   final Uint8List previewBytes;
   final bool editMode;
-  final ValueChanged<int> onToggle;
 
   const _QcEditablePreview({
     required this.result,
     required this.previewBytes,
     required this.editMode,
-    required this.onToggle,
   });
 
   @override
@@ -822,7 +817,6 @@ class _QcEditablePreview extends StatelessWidget {
                     editMode: editMode,
                     scaleX: scaleX,
                     scaleY: scaleY,
-                    onToggle: onToggle,
                   ),
               ],
             ),
@@ -838,20 +832,20 @@ class _QcMeasurementBox extends StatelessWidget {
   final bool editMode;
   final double scaleX;
   final double scaleY;
-  final ValueChanged<int> onToggle;
 
   const _QcMeasurementBox({
     required this.measurement,
     required this.editMode,
     required this.scaleX,
     required this.scaleY,
-    required this.onToggle,
   });
 
   @override
   Widget build(BuildContext context) {
     final id = _asInt(measurement['id']);
-    if (!editMode) return const SizedBox.shrink();
+    if (!editMode || measurement['qc_outlier'] != true) {
+      return const SizedBox.shrink();
+    }
 
     final centerX = (_asDouble(measurement['centroid_x']) > 0
             ? _asDouble(measurement['centroid_x'])
@@ -863,46 +857,31 @@ class _QcMeasurementBox extends StatelessWidget {
             : _asDouble(measurement['bbox_y']) +
                 _asDouble(measurement['bbox_h']) / 2) *
         scaleY;
-    final scale = (scaleX + scaleY) / 2;
-    final visibleWidth = math.max(
-      8.0,
-      math.max(_asDouble(measurement['length_px']),
-              _asDouble(measurement['bbox_w'])) *
-          scale,
-    );
-    final visibleHeight = math.max(
-      4.0,
-      math.max(
-            _asDouble(measurement['width_px']),
-            math.min(
-              _asDouble(measurement['bbox_w']),
-              _asDouble(measurement['bbox_h']),
-            ),
-          ) *
-          scale,
-    );
-    final hitWidth = math.max(visibleWidth, 26.0);
-    final hitHeight = math.max(visibleHeight, 22.0);
-    final angleRadians = _asDouble(measurement['angle_deg']) * math.pi / 180;
-
     return Positioned(
-      left: centerX - hitWidth / 2,
-      top: centerY - hitHeight / 2,
-      width: hitWidth,
-      height: hitHeight,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: editMode ? () => onToggle(id) : null,
+      left: centerX - 15,
+      top: centerY - 15,
+      width: 30,
+      height: 30,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFFDC2626),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x55000000),
+              blurRadius: 4,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
         child: Center(
-          child: Transform.rotate(
-            angle: angleRadians,
-            child: Container(
-              width: visibleWidth,
-              height: visibleHeight,
-              decoration: BoxDecoration(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(999),
-              ),
+          child: Text(
+            '#$id',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ),
@@ -911,87 +890,141 @@ class _QcMeasurementBox extends StatelessWidget {
   }
 }
 
-class _SegmentationFacts extends ConsumerStatefulWidget {
+class _SuspectDecisionTable extends StatelessWidget {
   final GrainAnalysisResult result;
+  final Future<void> Function(int id) onConfirm;
+  final Future<void> Function(int id) onDelete;
 
-  const _SegmentationFacts({required this.result});
-
-  @override
-  ConsumerState<_SegmentationFacts> createState() => _SegmentationFactsState();
-}
-
-class _SegmentationFactsState extends ConsumerState<_SegmentationFacts> {
-  bool _expanded = false;
+  const _SuspectDecisionTable({
+    required this.result,
+    required this.onConfirm,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final segmentation = widget.result.segmentation;
-    final calibration = widget.result.calibration;
-    final confidence = _asDouble(segmentation['confidence']);
-    final iou = _asDouble(segmentation['iou']);
+    final suspects = [
+      for (final measurement in result.measurements)
+        if (measurement['qc_outlier'] == true) measurement,
+    ];
 
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        title: Text(
-          _expanded ? 'Ẩn thông số kỹ thuật' : 'Hiển thị thông số kỹ thuật',
-          style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary),
-        ),
-        onExpansionChanged: (val) => setState(() => _expanded = val),
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppTheme.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: const BoxDecoration(
-              border:
-                  Border(left: BorderSide(color: AppTheme.border, width: 2)),
+              color: Color(0xFFF8FAFC),
+              border: Border(bottom: BorderSide(color: AppTheme.border)),
             ),
-            child: Column(
+            child: const Row(
               children: [
-                _FactRow(
-                    label: 'Phương thức phân tích',
-                    value: segmentation['execution'] == 'mobile_onnxruntime'
-                        ? 'Phân đoạn instance YOLO ONNX trên thiết bị'
-                        : 'Phân đoạn instance YOLO ONNX trên server'),
-                if (confidence > 0)
-                  _FactRow(
-                      label: 'Độ tin cậy nhận dạng',
-                      value: '${(confidence * 100).toStringAsFixed(0)}%'),
-                if (iou > 0)
-                  _FactRow(
-                      label: 'Độ khớp mặt nạ (IoU)',
-                      value: '${(iou * 100).toStringAsFixed(0)}%'),
-                _FactRow(
-                    label: 'Quét phân mảnh (Tiled)',
-                    value: segmentation['tiled_inference'] == true
-                        ? 'Đang bật'
-                        : 'Đang tắt'),
-                _FactRow(
-                  label: 'Tỷ lệ thước đo',
-                  value: calibration['enabled'] == true
-                      ? '${_asDouble(calibration['mm_per_pixel']).toStringAsFixed(5)} mm/px'
-                      : 'Chưa thiết lập',
+                Expanded(
+                  flex: 2,
+                  child:
+                      Text('ID', style: TextStyle(fontWeight: FontWeight.w800)),
                 ),
-                _FactRow(
-                  label: 'Vật mốc đã loại khỏi thống kê',
-                  value:
-                      '${calibration['excluded_reference_object_count'] ?? 0}',
+                Expanded(
+                  flex: 3,
+                  child: Text('Kích thước',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
                 ),
-                _FactRow(
-                  label: 'ĐLC dài thô / sau kiểm tra',
-                  value:
-                      '${_formatMeasureStat(widget.result.rawStdLengthMm, 'mm', widget.result.rawStdLengthPx, 'px')} / '
-                      '${_formatMeasureStat(widget.result.qcStdLengthMm, 'mm', widget.result.qcStdLengthPx, 'px')}',
+                SizedBox(
+                  width: 92,
+                  child: Text(
+                    'Quyết định',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
                 ),
-                _FactRow(
-                  label: 'ĐLC rộng thô / sau kiểm tra',
-                  value:
-                      '${_formatMeasureStat(widget.result.rawStdWidthMm, 'mm', widget.result.rawStdWidthPx, 'px')} / '
-                      '${_formatMeasureStat(widget.result.qcStdWidthMm, 'mm', widget.result.qcStdWidthPx, 'px')}',
+              ],
+            ),
+          ),
+          if (suspects.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Không còn hạt nghi ngờ cần xử lý.',
+                  style: TextStyle(color: AppTheme.textSecondary),
                 ),
-                _FactRow(
-                  label: 'Hạt nghi ngờ sau kiểm tra',
-                  value: '${widget.result.qcSuspectCount}',
+              ),
+            )
+          else
+            for (final measurement in suspects)
+              _SuspectDecisionRow(
+                measurement: measurement,
+                onConfirm: onConfirm,
+                onDelete: onDelete,
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SuspectDecisionRow extends StatelessWidget {
+  final Map<String, dynamic> measurement;
+  final Future<void> Function(int id) onConfirm;
+  final Future<void> Function(int id) onDelete;
+
+  const _SuspectDecisionRow({
+    required this.measurement,
+    required this.onConfirm,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final id = _asInt(measurement['id']);
+    final lengthMm = _asDouble(measurement['length_mm']);
+    final widthMm = _asDouble(measurement['width_mm']);
+    final lengthPx = _asDouble(measurement['length_px']);
+    final widthPx = _asDouble(measurement['width_px']);
+    final sizeText = lengthMm > 0 && widthMm > 0
+        ? '${lengthMm.toStringAsFixed(2)} x ${widthMm.toStringAsFixed(2)} mm'
+        : '${lengthPx.toStringAsFixed(1)} x ${widthPx.toStringAsFixed(1)} px';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppTheme.border)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text('#$id',
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              sizeText,
+              style: const TextStyle(color: AppTheme.textSecondary),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          SizedBox(
+            width: 92,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: 'Xác nhận đây là hạt thật',
+                  icon:
+                      const Icon(Icons.check_circle, color: Color(0xFF16A34A)),
+                  onPressed: () => onConfirm(id),
+                ),
+                IconButton(
+                  tooltip: 'Xóa nhận dạng sai khỏi kết quả',
+                  icon: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
+                  onPressed: () => onDelete(id),
                 ),
               ],
             ),
@@ -1008,6 +1041,7 @@ class _ReferenceImageSelector extends StatefulWidget {
   final Offset? start;
   final Offset? end;
   final bool enabled;
+  final VoidCallback? onPickImage;
   final void Function(Offset start, Offset end) onChanged;
 
   const _ReferenceImageSelector({
@@ -1016,6 +1050,7 @@ class _ReferenceImageSelector extends StatefulWidget {
     required this.start,
     required this.end,
     required this.enabled,
+    required this.onPickImage,
     required this.onChanged,
   });
 
@@ -1025,7 +1060,7 @@ class _ReferenceImageSelector extends StatefulWidget {
 }
 
 class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
-  static const _handleHitRadius = 36.0;
+  static const _handleHitRadius = 52.0;
 
   String? _dragTarget;
   String _selectedHandle = 'end';
@@ -1086,10 +1121,31 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
             point.dy.clamp(0, sourceSize.height - 1).toDouble(),
           );
       if (_selectedHandle == 'start') {
-        widget.onChanged(clamp(widget.start! + delta), widget.end!);
+        final next = clamp(widget.start! + delta);
+        setState(() {
+          _fingerPosition = null;
+          _activeHandlePosition = null;
+          _activeImagePoint = next;
+        });
+        widget.onChanged(next, widget.end!);
       } else {
-        widget.onChanged(widget.start!, clamp(widget.end! + delta));
+        final next = clamp(widget.end! + delta);
+        setState(() {
+          _fingerPosition = null;
+          _activeHandlePosition = null;
+          _activeImagePoint = next;
+        });
+        widget.onChanged(widget.start!, next);
       }
+    }
+
+    void selectHandle(String handle) {
+      setState(() {
+        _selectedHandle = handle;
+        _fingerPosition = null;
+        _activeHandlePosition = null;
+        _activeImagePoint = handle == 'start' ? widget.start : widget.end;
+      });
     }
 
     void showGuideModal() {
@@ -1101,8 +1157,7 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
     }
 
     Widget buildFixedMagnifierBox() {
-      final isMagnifierActive = _activeHandlePosition != null &&
-          _activeImagePoint != null &&
+      final isMagnifierActive = _activeImagePoint != null &&
           sourceSize != null &&
           _previewImage != null;
 
@@ -1137,24 +1192,12 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                   selectedHandle: _selectedHandle,
                   targetImagePoint: _activeImagePoint!,
                 )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.zoom_in,
-                      size: 24,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.5),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Kính lúp',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
+              : Center(
+                  child: Icon(
+                    Icons.zoom_in,
+                    size: 28,
+                    color: AppTheme.textSecondary.withValues(alpha: 0.55),
+                  ),
                 ),
         ),
       );
@@ -1282,6 +1325,8 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                     }
 
                     return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.bytes == null ? widget.onPickImage : null,
                       onTapUp: widget.enabled && sourceSize != null
                           ? (details) {
                               if (widget.start != null && widget.end != null) {
@@ -1293,10 +1338,8 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                                     .distance;
                                 if (math.min(distStart, distEnd) <=
                                     _handleHitRadius) {
-                                  setState(() {
-                                    _selectedHandle =
-                                        distStart <= distEnd ? 'start' : 'end';
-                                  });
+                                  selectHandle(
+                                      distStart <= distEnd ? 'start' : 'end');
                                   return;
                                 }
                               }
@@ -1336,11 +1379,11 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                                     (local - startCanvas).distance;
                                 final distEnd = (local - endCanvas).distance;
 
-                                if (distStart < _handleHitRadius &&
+                                if (distStart <= _handleHitRadius &&
                                     distStart < distEnd) {
                                   setState(() => _selectedHandle = 'start');
                                   _dragTarget = _selectedHandle;
-                                } else if (distEnd < _handleHitRadius) {
+                                } else if (distEnd <= _handleHitRadius) {
                                   setState(() => _selectedHandle = 'end');
                                   _dragTarget = _selectedHandle;
                                 } else {
@@ -1431,8 +1474,8 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
           _ReferenceHandleControls(
             enabled: widget.enabled,
             selectedHandle: _selectedHandle,
-            onSelectStart: () => setState(() => _selectedHandle = 'start'),
-            onSelectEnd: () => setState(() => _selectedHandle = 'end'),
+            onSelectStart: () => selectHandle('start'),
+            onSelectEnd: () => selectHandle('end'),
             onNudgeLeft: () => nudgeSelected(const Offset(-1, 0)),
             onNudgeUp: () => nudgeSelected(const Offset(0, -1)),
             onNudgeDown: () => nudgeSelected(const Offset(0, 1)),
@@ -1738,7 +1781,7 @@ class _ReferenceLinePainter extends CustomPainter {
 
     final paintLine = Paint()
       ..color = const Color(0xFF2563EB)
-      ..strokeWidth = 2.0
+      ..strokeWidth = 2.6
       ..strokeCap = StrokeCap.round;
 
     final paintHandleInner = Paint()
@@ -1766,21 +1809,21 @@ class _ReferenceLinePainter extends CustomPainter {
     final selectedPoint = selectedHandle == 'start' ? a : b;
     for (final point in [a, b]) {
       if (point == selectedPoint) {
-        canvas.drawCircle(point, 11, paintHandleOuter);
+        canvas.drawCircle(point, 20, paintHandleOuter);
       }
-      canvas.drawCircle(point, 5, paintHandleInner);
-      canvas.drawCircle(point, 5, paintBorder);
+      canvas.drawCircle(point, 9, paintHandleInner);
+      canvas.drawCircle(point, 9, paintBorder);
     }
-    canvas.drawCircle(selectedPoint, 12, paintSelected);
+    canvas.drawCircle(selectedPoint, 22, paintSelected);
 
     final finger = fingerPosition;
     final target = activeHandlePosition;
     if (finger != null && target != null) {
-      canvas.drawCircle(target, 12, paintSelected);
+      canvas.drawCircle(target, 22, paintSelected);
       canvas.drawLine(
-          target.translate(-10, 0), target.translate(10, 0), paintLeader);
+          target.translate(-16, 0), target.translate(16, 0), paintLeader);
       canvas.drawLine(
-          target.translate(0, -10), target.translate(0, 10), paintLeader);
+          target.translate(0, -16), target.translate(0, 16), paintLeader);
     }
   }
 
@@ -1904,67 +1947,6 @@ class _QcFactCard extends StatelessWidget {
   }
 }
 
-class _FactRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _FactRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 360 || value.length > 28;
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  softWrap: true,
-                  style: const TextStyle(color: AppTheme.textSecondary),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  softWrap: true,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ],
-            );
-          }
-
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 5,
-                child: Text(
-                  label,
-                  softWrap: true,
-                  style: const TextStyle(color: AppTheme.textSecondary),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Flexible(
-                flex: 4,
-                child: Text(
-                  value,
-                  softWrap: true,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
 Future<File> _writeTempFile(String name, List<int> bytes) async {
   final dir = await getTemporaryDirectory();
   final file = File('${dir.path}/$name');
@@ -1985,7 +1967,7 @@ String _friendlyError(Object error) {
     if (error.type == DioExceptionType.connectionTimeout ||
         error.type == DioExceptionType.receiveTimeout ||
         error.type == DioExceptionType.connectionError) {
-      return 'Không kết nối được backend hoặc worker xử lý quá lâu. Kiểm tra server, Wi-Fi và Python dependencies.';
+      return 'Không xử lý được ảnh vì kết nối không ổn định hoặc hệ thống phản hồi quá lâu. Kiểm tra Wi-Fi rồi thử lại.';
     }
   }
   if (error is TimeoutException) {
@@ -2175,7 +2157,7 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                   _GuideSlide(
                     title: '4. Nhập kích thước thật',
                     description:
-                        'Nhập chiều dài thật của vật mốc vào ô Vật mốc (mm), sau đó bấm Xử lý.',
+                        'Nhập chiều dài thật của vật mốc vào ô Kích thước (mm), sau đó bấm Xử lý.',
                     diagram:
                         _GuideImage('assets/images/calibration_guide_4.png'),
                   ),

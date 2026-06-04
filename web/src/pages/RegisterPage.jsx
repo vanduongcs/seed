@@ -2,16 +2,19 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Box, Button, TextField, Typography,
-  InputAdornment, IconButton, Alert, CircularProgress,
+  InputAdornment, IconButton, Alert, CircularProgress, ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import { Email, Lock, Person, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuthStore } from '@/store/auth.store.js';
 import { api } from '@/api/axios.js';
+import { languages, useLanguage } from '@/i18n.jsx';
 import { syncGuestRuns } from '@/utils/guestRuns.js';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const { language, setLanguage, text } = useLanguage();
 
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [showPass, setShowPass] = useState(false);
@@ -27,14 +30,17 @@ export default function RegisterPage() {
 
     // Client-side simple validations
     if (form.name.trim().length < 2) {
-      setError('Họ và tên ít nhất phải có 2 ký tự');
+      setError(text(
+        'Họ và tên ít nhất phải có 2 ký tự',
+        'Full name must have at least 2 characters'
+      ));
       setLoading(false);
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(form.email)) {
-      setError('Định dạng email không hợp lệ');
+      setError(text('Định dạng email không hợp lệ', 'Invalid email format'));
       setLoading(false);
       return;
     }
@@ -45,7 +51,10 @@ export default function RegisterPage() {
       await syncGuestRuns(data.data.user?._id || data.data.user?.id).catch(() => {});
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.message || 'Đăng ký thất bại. Vui lòng thử lại.');
+      setError(err.response?.data?.message || text(
+        'Đăng ký thất bại. Vui lòng thử lại.',
+        'Registration failed. Please try again.'
+      ));
     } finally {
       setLoading(false);
     }
@@ -88,6 +97,23 @@ export default function RegisterPage() {
         boxShadow: '0 24px 60px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.03)',
         zIndex: 1,
       }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={language}
+            onChange={(_, nextLanguage) => {
+              if (nextLanguage) setLanguage(nextLanguage);
+            }}
+          >
+            {languages.map((item) => (
+              <ToggleButton key={item.code} value={item.code} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                {item.code.toUpperCase()}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Box>
+
         {/* Elegant Sprout/Seed Brand Logo */}
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3.5 }}>
           <Box sx={{
@@ -112,7 +138,7 @@ export default function RegisterPage() {
 
         {/* Header - Only "Đăng ký" as requested */}
         <Typography variant="h4" fontWeight={850} sx={{ color: '#1B2C21', letterSpacing: '-0.8px', mb: 4, textAlign: 'center' }}>
-          Đăng ký
+          {text('Đăng ký', 'Sign up')}
         </Typography>
 
         {error && (
@@ -131,13 +157,13 @@ export default function RegisterPage() {
         <Box component="form" autoComplete="off" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.8 }}>
           {/* Name field */}
           <Box>
-            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>HỌ VÀ TÊN</Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>{text('HỌ VÀ TÊN', 'FULL NAME')}</Typography>
             <TextField
               id="register-name"
               name="name"
               type="text"
               autoComplete="off"
-              placeholder="Nhập họ và tên của bạn"
+              placeholder={text('Nhập họ và tên của bạn', 'Enter your full name')}
               value={form.name}
               onChange={handleChange}
               required
@@ -163,7 +189,7 @@ export default function RegisterPage() {
 
           {/* Email field */}
           <Box>
-            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>ĐỊA CHỈ EMAIL</Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>{text('ĐỊA CHỈ EMAIL', 'EMAIL ADDRESS')}</Typography>
             <TextField
               id="register-email"
               name="email"
@@ -195,11 +221,11 @@ export default function RegisterPage() {
 
           {/* Password field */}
           <Box>
-            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>MẬT KHẨU</Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>{text('MẬT KHẨU', 'PASSWORD')}</Typography>
             <TextField
               id="register-password"
               name="password"
-              placeholder="Nhập mật khẩu"
+              placeholder={text('Nhập mật khẩu', 'Enter password')}
               autoComplete="new-password"
               type={showPass ? 'text' : 'password'}
               value={form.password}
@@ -242,7 +268,7 @@ export default function RegisterPage() {
             sx={{
               mt: 1.5,
               height: '48px',
-              borderRadius: '10px',
+              borderRadius: 1,
               backgroundColor: '#2F6B4F',
               fontSize: '0.98rem',
               fontWeight: 700,
@@ -264,14 +290,14 @@ export default function RegisterPage() {
               }
             }}
           >
-            {loading ? <CircularProgress size={22} sx={{ color: '#FFFFFF' }} /> : 'Đăng ký'}
+            {loading ? <CircularProgress size={22} sx={{ color: '#FFFFFF' }} /> : text('Đăng ký', 'Sign up')}
           </Button>
         </Box>
 
         <Typography variant="body2" align="center" mt={4} sx={{ color: '#6B7C72' }}>
-          Đã có tài khoản?{' '}
+          {text('Đã có tài khoản?', 'Already have an account?')}{' '}
           <Link to="/login" style={{ color: '#2F6B4F', textDecoration: 'none', fontWeight: 700, marginLeft: '4px' }}>
-            Đăng nhập ngay
+            {text('Đăng nhập ngay', 'Log in now')}
           </Link>
         </Typography>
       </Box>

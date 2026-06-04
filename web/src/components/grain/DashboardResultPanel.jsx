@@ -1,9 +1,5 @@
-import { useState } from 'react';
-import { Alert, Box, Button, Card, CardContent, Divider, Stack, Typography, Collapse } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import { Alert, Box, Button, Card, CardContent, Divider, Stack, Typography } from '@mui/material';
 
-import { formatAnalysisMethod, formatMeasure, formatNumber } from './format.js';
 import { ResultRow } from './ResultRow.jsx';
 
 export const DashboardResultPanel = ({
@@ -14,14 +10,6 @@ export const DashboardResultPanel = ({
   onDownloadCsv,
   onDownloadPng,
 }) => {
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  // Format decimal confidence/iou values into clean percentages
-  const formatPercent = (val) => {
-    const num = Number(val);
-    return Number.isFinite(num) && num > 0 ? `${(num * 100).toFixed(0)}%` : '-';
-  };
-
   return (
     <Stack spacing={2}>
       <Card>
@@ -39,65 +27,23 @@ export const DashboardResultPanel = ({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent sx={{ p: 2.5 }}>
-          <Typography variant="h6" fontWeight={700} mb={0.5}>Kết quả phân tích</Typography>
-          <Box mb={2} />
+      {result && (
+        <Card>
+          <CardContent sx={{ p: 2.5 }}>
+            <Typography variant="h6" fontWeight={700} mb={0.5}>Kết quả phân tích</Typography>
+            <Box mb={2} />
 
-          {result ? (
             <Stack spacing={1.2}>
               <ResultRow label="Mã lần quét" value={result.run?.id ? result.run.id.slice(-8).toUpperCase() : '-'} />
               <ResultRow label="Tổng số hạt đo được" value={result.segmentation?.segment_count ?? result.summary?.count ?? '-'} />
               {(result.summary?.qc?.suspect_count ?? 0) > 0 && (
                 <Alert severity="warning">
-                  Hệ thống đang nghi {result.summary.qc.suspect_count} hạt có thể bị tách mask sai hoặc có kích thước bất thường. {result.summary.qc.robust_used_for_reporting !== false ? `Độ lệch chuẩn báo cáo được tính trên ${result.summary.qc.inlier_count} hạt hợp lệ sau kiểm tra.` : 'Tỷ lệ hạt nghi ngờ cao, nên hệ thống giữ độ lệch chuẩn thô và cần người dùng xem lại ảnh.'} Có thể dùng nút "Chỉnh hạt nghi ngờ" ở khung ảnh để sửa thủ công.
+                  Hệ thống đang nghi {result.summary.qc.suspect_count} hạt có thể bị tách vùng ảnh sai hoặc có kích thước bất thường. {result.summary.qc.robust_used_for_reporting !== false ? `Độ lệch chuẩn báo cáo được tính trên ${result.summary.qc.inlier_count} hạt hợp lệ sau kiểm tra.` : 'Tỷ lệ hạt nghi ngờ cao, nên hệ thống giữ độ lệch chuẩn thô và cần người dùng xem lại ảnh.'} Có thể dùng nút "Chỉnh hạt nghi ngờ" ở khung ảnh để sửa thủ công.
                   {result.summary.qc.suspect_ids?.length ? ` ID hạt nghi ngờ: ${result.summary.qc.suspect_ids.slice(0, 8).map((id) => `#${id}`).join(', ')}${result.summary.qc.suspect_ids.length > 8 ? ', ...' : ''}.` : ''}
                 </Alert>
               )}
-              
-              <Divider sx={{ my: 1 }} />
-              
-              <Button
-                size="small"
-                variant="text"
-                endIcon={showAdvanced ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                sx={{ alignSelf: 'flex-start', mb: 1, textTransform: 'none', color: 'text.secondary' }}
-              >
-                {showAdvanced ? 'Ẩn thông số kỹ thuật' : 'Hiển thị thông số kỹ thuật'}
-              </Button>
 
-              <Collapse in={showAdvanced}>
-                <Stack spacing={1.2} sx={{ pl: 1.5, borderLeft: '2px solid', borderColor: 'divider', mb: 1.5 }}>
-                  <ResultRow label="Phương thức phân tích" value={formatAnalysisMethod(result.segmentation)} />
-                  <ResultRow label="Độ tin cậy nhận dạng" value={formatPercent(result.segmentation?.confidence)} />
-                  <ResultRow label="Độ khớp mặt nạ (IoU)" value={formatPercent(result.segmentation?.iou)} />
-                  <ResultRow label="Quét phân mảnh (Tiled)" value={result.segmentation?.tiled_inference ? 'Đang bật' : 'Đang tắt'} />
-                  {result.segmentation?.tiled_inference && (
-                    <ResultRow
-                      label="Kích thước ô quét / Độ đè"
-                      value={`${result.segmentation?.tile_size ?? '-'} px / ${formatPercent(result.segmentation?.tile_overlap)}`}
-                    />
-                  )}
-                  <ResultRow
-                    label="Vật mốc đã loại khỏi thống kê"
-                    value={String(result.segmentation?.mask_filter?.excluded_reference_object_count ?? 0)}
-                  />
-                  <ResultRow
-                    label="ĐLC dài thô / sau kiểm tra"
-                    value={`${formatMeasure(result.summary?.std_length_mm, 'mm', result.summary?.std_length_px, 'px')} / ${formatMeasure(result.summary?.robust_std_length_mm, 'mm', result.summary?.robust_std_length_px, 'px')}`}
-                  />
-                  <ResultRow
-                    label="ĐLC rộng thô / sau kiểm tra"
-                    value={`${formatMeasure(result.summary?.std_width_mm, 'mm', result.summary?.std_width_px, 'px')} / ${formatMeasure(result.summary?.robust_std_width_mm, 'mm', result.summary?.robust_std_width_px, 'px')}`}
-                  />
-                  <ResultRow
-                    label="ĐLC diện tích thô / sau kiểm tra"
-                    value={`${formatMeasure(result.summary?.std_area_mm2, 'mm2', result.summary?.std_area_px, 'px2')} / ${formatMeasure(result.summary?.robust_std_area_mm2, 'mm2', result.summary?.robust_std_area_px, 'px2')}`}
-                  />
-                  <ResultRow label="Hạt nghi ngờ sau kiểm tra" value={String(result.summary?.qc?.suspect_count ?? 0)} />
-                </Stack>
-              </Collapse>
+              <Divider sx={{ my: 1 }} />
 
               <Divider />
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} pt={1}>
@@ -109,11 +55,9 @@ export const DashboardResultPanel = ({
                 </Button>
               </Stack>
             </Stack>
-          ) : (
-            <Alert severity="info">Chưa có kết quả. Vui lòng tải ảnh lên hoặc kết nối camera và bấm Chạy xử lý.</Alert>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </Stack>
   );
 };

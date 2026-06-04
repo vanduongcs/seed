@@ -2,17 +2,20 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Box, Button, TextField, Typography,
-  InputAdornment, IconButton, Alert, CircularProgress,
+  InputAdornment, IconButton, Alert, CircularProgress, ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import { Email, Lock, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuthStore } from '@/store/auth.store.js';
 import { api } from '@/api/axios.js';
+import { languages, useLanguage } from '@/i18n.jsx';
 import { syncGuestRuns } from '@/utils/guestRuns.js';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
   const continueAsGuest = useAuthStore((s) => s.continueAsGuest);
+  const { language, setLanguage, text } = useLanguage();
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPass, setShowPass] = useState(false);
@@ -29,7 +32,7 @@ export default function LoginPage() {
     // Client-side quick email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(form.email)) {
-      setError('Định dạng email không hợp lệ');
+      setError(text('Định dạng email không hợp lệ', 'Invalid email format'));
       setLoading(false);
       return;
     }
@@ -40,7 +43,10 @@ export default function LoginPage() {
       await syncGuestRuns(data.data.user?._id || data.data.user?.id).catch(() => {});
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.message || 'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.');
+      setError(err.response?.data?.message || text(
+        'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.',
+        'Login failed. Please check your information.'
+      ));
     } finally {
       setLoading(false);
     }
@@ -89,6 +95,24 @@ export default function LoginPage() {
         zIndex: 1,
       }}>
         {/* Elegant Sprout/Seed Brand Logo */}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={language}
+            onChange={(_, nextLanguage) => {
+              if (nextLanguage) setLanguage(nextLanguage);
+            }}
+          >
+            {languages.map((item) => (
+              <ToggleButton key={item.code} value={item.code} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                {item.code.toUpperCase()}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Box>
+
+        {/* Elegant Sprout/Seed Brand Logo */}
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3.5 }}>
           <Box sx={{
             display: 'flex',
@@ -112,7 +136,7 @@ export default function LoginPage() {
 
         {/* Header - Only "Đăng nhập" as requested */}
         <Typography variant="h4" fontWeight={850} sx={{ color: '#1B2C21', letterSpacing: '-0.8px', mb: 4, textAlign: 'center' }}>
-          Đăng nhập
+          {text('Đăng nhập', 'Log in')}
         </Typography>
 
         {error && (
@@ -131,7 +155,7 @@ export default function LoginPage() {
         <Box component="form" autoComplete="off" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 3.2 }}>
           {/* Email field */}
           <Box>
-            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>ĐỊA CHỈ EMAIL</Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>{text('ĐỊA CHỈ EMAIL', 'EMAIL ADDRESS')}</Typography>
             <TextField
               id="login-email"
               name="email"
@@ -163,11 +187,11 @@ export default function LoginPage() {
 
           {/* Password field */}
           <Box>
-            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>MẬT KHẨU</Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ color: '#4D5C52', mb: 0.9, fontSize: '0.88rem', letterSpacing: '0.3px' }}>{text('MẬT KHẨU', 'PASSWORD')}</Typography>
             <TextField
               id="login-password"
               name="password"
-              placeholder="Nhập mật khẩu"
+              placeholder={text('Nhập mật khẩu', 'Enter password')}
               autoComplete="new-password"
               type={showPass ? 'text' : 'password'}
               value={form.password}
@@ -210,7 +234,7 @@ export default function LoginPage() {
             sx={{
               mt: 1.5,
               height: '48px',
-              borderRadius: '10px',
+              borderRadius: 1,
               backgroundColor: '#2F6B4F',
               fontSize: '0.98rem',
               fontWeight: 700,
@@ -232,7 +256,7 @@ export default function LoginPage() {
               }
             }}
           >
-            {loading ? <CircularProgress size={22} sx={{ color: '#FFFFFF' }} /> : 'Đăng nhập'}
+            {loading ? <CircularProgress size={22} sx={{ color: '#FFFFFF' }} /> : text('Đăng nhập', 'Log in')}
           </Button>
           <Button
             type="button"
@@ -240,16 +264,16 @@ export default function LoginPage() {
             fullWidth
             disabled={loading}
             onClick={handleContinueAsGuest}
-            sx={{ height: '48px', borderRadius: '10px', textTransform: 'none', fontWeight: 700 }}
+            sx={{ height: '48px', borderRadius: 1, textTransform: 'none', fontWeight: 700 }}
           >
-            Tiếp tục không đăng nhập
+            {text('Tiếp tục không đăng nhập', 'Continue without login')}
           </Button>
         </Box>
 
         <Typography variant="body2" align="center" mt={4.5} sx={{ color: '#6B7C72' }}>
-          Chưa có tài khoản?{' '}
+          {text('Chưa có tài khoản?', 'No account yet?')}{' '}
           <Link to="/register" style={{ color: '#2F6B4F', textDecoration: 'none', fontWeight: 700, marginLeft: '4px' }}>
-            Đăng ký ngay
+            {text('Đăng ký ngay', 'Sign up now')}
           </Link>
         </Typography>
       </Box>

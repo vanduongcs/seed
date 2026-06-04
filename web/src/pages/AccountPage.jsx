@@ -75,7 +75,7 @@ export default function AccountPage() {
     <Box sx={{ maxWidth: 860 }}>
       <Typography variant="h5" fontWeight={700} mb={0.75}>Tài khoản</Typography>
       <Typography variant="body2" color="text.secondary" mb={2.5}>
-        Thông tin người dùng được đọc và cập nhật qua backend, dùng chung cho web và mobile.
+        Thông tin người dùng được dùng chung cho web và mobile.
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

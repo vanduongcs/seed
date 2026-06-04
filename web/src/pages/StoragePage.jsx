@@ -6,7 +6,6 @@ import {
   Card,
   CardContent,
   CircularProgress,
-  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -20,15 +19,14 @@ import {
 import {
   DeleteOutline,
   DownloadOutlined,
-  ExpandLess,
-  ExpandMore,
   ImageOutlined,
   RefreshOutlined,
   VisibilityOutlined,
 } from '@mui/icons-material';
 
 import { api } from '@/api/axios.js';
-import { formatAnalysisMethod, formatMeasure, safeStem } from '@/components/grain/format.js';
+import { formatMeasure, formatNumber, safeStem } from '@/components/grain/format.js';
+import { GrainStatsCharts } from '@/components/grain/GrainStatsCharts.jsx';
 import { useAuthStore } from '@/store/auth.store.js';
 import { deleteGuestRun, readGuestRuns } from '@/utils/guestRuns.js';
 
@@ -108,7 +106,6 @@ export default function StoragePage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [detailPreviewMode, setDetailPreviewMode] = useState('overlay');
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const loadRuns = async () => {
     setLoading(true);
@@ -207,7 +204,7 @@ export default function StoragePage() {
           <Typography variant="h5" fontWeight={700} mb={0.75}>Lưu trữ</Typography>
           {isGuest && (
             <Typography variant="body2" color="text.secondary">
-              Dữ liệu đang được lưu trữ cục bộ. Đăng nhập để đồng bộ lên server.
+              Dữ liệu đang được lưu trên thiết bị này. Đăng nhập để đồng bộ lên tài khoản của bạn.
             </Typography>
           )}
         </Box>
@@ -267,7 +264,7 @@ export default function StoragePage() {
         <Alert severity="info">Chưa có dữ liệu.</Alert>
       )}
 
-      <Dialog open={Boolean(selected)} onClose={() => { setSelected(null); setShowAdvanced(false); }} maxWidth="lg" fullWidth>
+      <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="lg" fullWidth>
         <DialogTitle>Chi tiết xử lý {detailRun ? shortRunId(detailRun.id) : ''}</DialogTitle>
         <DialogContent dividers>
           {detailResult && (
@@ -335,31 +332,14 @@ export default function StoragePage() {
                   <ResultRow label="ĐLC diện tích (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat(detailResult.summary, 'std_area_px', 'robust_std_area_px'), 'px2')} />
                   <ResultRow label="Hạt nghi ngờ sau kiểm tra" value={String(detailResult.summary?.qc?.suspect_count ?? 0)} />
                   <ResultRow label="Tỷ lệ thước đo" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'Chưa thiết lập'} />
-                  
-                  <Divider sx={{ my: 1 }} />
-                  
-                  <Button
-                    size="small"
-                    variant="text"
-                    endIcon={showAdvanced ? <ExpandLess /> : <ExpandMore />}
-                    onClick={() => setShowAdvanced(!showAdvanced)}
-                    sx={{ alignSelf: 'flex-start', mb: 0.5, textTransform: 'none', color: 'text.secondary', p: 0 }}
-                  >
-                    {showAdvanced ? 'Ẩn thông số kỹ thuật' : 'Hiển thị thông số kỹ thuật'}
-                  </Button>
 
-                  <Collapse in={showAdvanced}>
-                    <Stack spacing={1.2} sx={{ pl: 1.5, borderLeft: '2px solid', borderColor: 'divider', my: 1 }}>
-                      <ResultRow label="Phương thức phân tích" value={formatAnalysisMethod(detailResult.segmentation)} />
-                      {detailResult.segmentation?.confidence && (
-                        <ResultRow label="Độ tin cậy nhận dạng" value={`${(Number(detailResult.segmentation.confidence) * 100).toFixed(0)}%`} />
-                      )}
-                      {detailResult.segmentation?.iou && (
-                        <ResultRow label="Độ khớp mặt nạ (IoU)" value={`${(Number(detailResult.segmentation.iou) * 100).toFixed(0)}%`} />
-                      )}
-                    </Stack>
-                  </Collapse>
-
+                  <Divider sx={{ my: 0.5 }} />
+                  <Box>
+                    <Typography variant="subtitle2" fontWeight={800} mb={0.75}>
+                      Tóm tắt kích thước đã lưu
+                    </Typography>
+                    <GrainStatsCharts result={detailResult} compact />
+                  </Box>
                   <Divider />
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap flexWrap="wrap" pt={1}>
                     <Button

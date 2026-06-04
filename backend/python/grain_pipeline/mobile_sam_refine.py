@@ -42,10 +42,10 @@ def refine_instances_with_mobile_sam(
         return []
 
     encoder_path = _resolve_model(
-        str(params.get("samEncoderModel") or "mobile_sam_encoder.onnx").strip()
+        str(params.get("samEncoderModel") or "previous_model/mobile_sam_encoder.onnx").strip()
     )
     decoder_path = _resolve_model(
-        str(params.get("samModel") or "mobile_sam_decoder.onnx").strip()
+        str(params.get("samModel") or "previous_model/mobile_sam_decoder.onnx").strip()
     )
     encoder = _session(encoder_path)
     decoder = _session(decoder_path)

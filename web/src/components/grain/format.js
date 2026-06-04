@@ -15,6 +15,6 @@ export const safeStem = (name = 'seed-image') => (
 
 export const formatAnalysisMethod = (segmentation = {}) => (
   segmentation.execution === 'mobile_onnxruntime'
-    ? 'Phân đoạn instance YOLO ONNX trên thiết bị'
-    : 'Phân đoạn instance YOLO ONNX trên server'
+    ? 'Xử lý trực tiếp trên thiết bị'
+    : 'Xử lý qua hệ thống trực tuyến'
 );

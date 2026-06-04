@@ -46,19 +46,20 @@ def label_rgb(labels: np.ndarray, measurements: list[dict] | None = None) -> np.
             cX = int(M["m10"] / M["m00"])
             cY = int(M["m01"] / M["m00"])
 
-            # Dynamic font scale based on grain size
+            # Dynamic font scale based on grain size, tuned for phone previews.
             area = M["m00"]
-            font_scale = max(0.35, min(0.65, (area / 8000.0) ** 0.5))
+            font_scale = max(0.75, min(1.25, (area / 4500.0) ** 0.5))
 
             text = str(int(label_id))
-            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)[0]
+            thickness = 2
+            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
             text_x = cX - text_size[0] // 2
             text_y = cY + text_size[1] // 2
 
             # Draw black drop shadow outline for high contrast
-            cv2.putText(output, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(output, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 5, cv2.LINE_AA)
             # Draw white main text.
-            cv2.putText(output, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.putText(output, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
     return output
 

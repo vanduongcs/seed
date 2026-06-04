@@ -65,9 +65,9 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/api/mobile/version', (_req, res) => {
-  const latestBuildNumber = parseInt(process.env.MOBILE_LATEST_BUILD_NUMBER || '3', 10);
+  const latestBuildNumber = parseInt(process.env.MOBILE_LATEST_BUILD_NUMBER || '9', 10);
   const minSupportedBuildNumber = parseInt(process.env.MOBILE_MIN_SUPPORTED_BUILD_NUMBER || '2', 10);
-  const latestVersionName = process.env.MOBILE_LATEST_VERSION_NAME || '1.0.2';
+  const latestVersionName = process.env.MOBILE_LATEST_VERSION_NAME || '1.0.8';
   const playStoreUrl = process.env.MOBILE_PLAY_STORE_URL ||
     'https://play.google.com/store/apps/details?id=vn.mekonglab.seedvision';
 

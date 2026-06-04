@@ -25,7 +25,12 @@ PALETTE = [tuple(color) for color in settings().get("palette", [])]
 PIPELINE_NAME = settings().get("pipeline", "yolo8_nano_segment")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = BACKEND_ROOT / "model"
-MODEL_CANDIDATES = ("best.onnx", "best.pt")
+MODEL_CANDIDATES = (
+    "main_model/best.onnx",
+    "main_model/best.pt",
+    "best.onnx",
+    "best.pt",
+)
 
 
 def int_param(params: dict, name: str, default: int | None = None, low: int | None = None, high: int | None = None) -> int:

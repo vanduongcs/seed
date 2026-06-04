@@ -27,6 +27,25 @@ class LocalGrainRunStore {
     await _write(runs);
   }
 
+  Future<void> updateResult(String runId, Map<String, dynamic> result) async {
+    final runs = await readAll();
+    var changed = false;
+    for (final item in runs) {
+      final rawResult = item['result'];
+      if (rawResult is! Map) continue;
+      final run = rawResult['run'];
+      final storedRunId = run is Map ? run['id']?.toString() ?? '' : '';
+      final clientRunId = item['clientRunId']?.toString() ?? '';
+      if (storedRunId == runId || clientRunId == runId) {
+        item['result'] = result;
+        item['updatedAt'] = DateTime.now().toIso8601String();
+        item['pendingSync'] = true;
+        changed = true;
+      }
+    }
+    if (changed) await _write(runs);
+  }
+
   Future<List<Map<String, dynamic>>> readVisible({
     required bool isGuest,
     String? userId,

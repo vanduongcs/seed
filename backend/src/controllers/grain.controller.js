@@ -134,7 +134,14 @@ export const importOfflineGrainRuns = async (req, res) => {
           clientRunId,
         });
         if (existing) {
-          imported.push(serializeRunSummary(existing));
+          const updated = await updateExistingRunArtifact({
+            run: existing,
+            userId: req.user.userId,
+            result,
+            sourceFileName: item.sourceFileName || result.run?.sourceFileName,
+            importedFromMobile: true,
+          });
+          imported.push(serializeRunSummary(updated));
           continue;
         }
       }
@@ -233,6 +240,84 @@ export const getGrainRun = async (req, res) => {
   }
 };
 
+export const updateGrainRunResult = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return sendError(res, 'Mã xử lý không hợp lệ', 400);
+    }
+
+    const result = sanitizeImportedResult(req.body?.result || req.body);
+    if (!Array.isArray(result.measurements)) {
+      return sendError(res, 'Kết quả cập nhật thiếu danh sách hạt', 400);
+    }
+
+    const run = await GrainAnalysisRun.findOne({
+      _id: req.params.id,
+      userId: req.user.userId,
+    }).select('+artifactPath');
+
+    if (!run) return sendError(res, 'Không tìm thấy lần xử lý', 404);
+
+    result.run = {
+      ...(result.run || {}),
+      id: run._id.toString(),
+      sourceFileName: run.sourceFileName,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await updateExistingRunArtifact({
+      run,
+      userId: req.user.userId,
+      result,
+      manuallyEdited: true,
+    });
+
+    return sendSuccess(res, {
+      run: serializeRunSummary(run),
+      result,
+    }, 'Đã cập nhật kết quả xử lý');
+  } catch (err) {
+    return sendError(res, err.message || 'Cập nhật kết quả xử lý thất bại', err.statusCode || 500);
+  }
+};
+
+const updateExistingRunArtifact = async ({
+  run,
+  userId,
+  result,
+  sourceFileName,
+  importedFromMobile = false,
+  manuallyEdited = false,
+}) => {
+  const artifactPath = await writeGrainRunArtifact({
+    userId,
+    runId: run._id.toString(),
+    result,
+  });
+  const [artifactStat, artifactChecksum] = await Promise.all([
+    statGrainRunArtifact(artifactPath).catch(() => null),
+    checksumGrainRunArtifact(artifactPath).catch(() => ''),
+  ]);
+
+  if (sourceFileName) run.sourceFileName = String(sourceFileName);
+  run.image = result.image || {};
+  run.summary = result.summary || {};
+  run.segmentation = result.segmentation || {};
+  run.calibration = result.calibration || {};
+  run.features = result.features || {};
+  run.artifactPath = artifactPath;
+  run.artifactMeta = {
+    ...(run.artifactMeta || {}),
+    schemaVersion: 2,
+    checksumSha256: artifactChecksum || '',
+    sizeBytes: artifactStat?.sizeBytes || 0,
+    ...(importedFromMobile ? { importedFromMobile: true } : {}),
+    ...(manuallyEdited ? { manuallyEdited: true } : {}),
+  };
+  await run.save();
+  return run;
+};
+
 export const deleteGrainRun = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -283,6 +368,7 @@ const serializeRunResult = (run) => ({
   sam_mask_png_base64: '',
   mask_png_base64: '',
   labels_png_base64: '',
+  label_map_png_base64: '',
   stages: {
     input: 'original_png_base64',
     preprocessed: 'preprocessed_png_base64',
@@ -318,6 +404,7 @@ const compactAnalyzeResponse = (result) => ({
   preprocessed_png_base64: result.preprocessed_png_base64 || '',
   mask_png_base64: result.mask_png_base64 || '',
   labels_png_base64: result.labels_png_base64 || '',
+  label_map_png_base64: result.label_map_png_base64 || '',
 });
 
 const sanitizeImportedResult = (raw) => {
@@ -337,6 +424,7 @@ const sanitizeImportedResult = (raw) => {
     sam_mask_png_base64: result.sam_mask_png_base64 || result.previews?.samMask || '',
     mask_png_base64: result.mask_png_base64 || result.previews?.mask || '',
     labels_png_base64: result.labels_png_base64 || result.previews?.labels || '',
+    label_map_png_base64: result.label_map_png_base64 || result.previews?.labelMap || '',
   };
 };
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert,
   AlertTitle,
@@ -17,7 +17,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { HelpOutline, Close, Edit, Check } from '@mui/icons-material';
+import { HelpOutline, Close, Edit, Check, CheckCircle, Cancel } from '@mui/icons-material';
 
 const PREVIEW_MODES = [
   ['overlay', 'Đánh dấu'],
@@ -43,7 +43,7 @@ const CALIBRATION_GUIDE_SLIDES = [
   },
   {
     title: '4. Nhập kích thước thật',
-    description: 'Nhập chiều dài thật của vật mốc vào ô Vật mốc (mm), sau đó bấm Xử lý.',
+    description: 'Nhập chiều dài thật của vật mốc vào ô Kích thước (mm), sau đó bấm Xử lý.',
     image: '/images/calibration_guide_4.webp',
   },
 ];
@@ -118,12 +118,18 @@ export const DashboardPreviewPanel = ({
   progressPhase,
   qcEditMode,
   onToggleQcEditMode,
-  onToggleMeasurementQc,
+  onConfirmSuspect,
+  onDeleteSuspect,
 }) => {
   const [guideOpen, setGuideOpen] = useState(false);
   const [qcGuideOpen, setQcGuideOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const fileInputRef = useRef(null);
   const [draggingHandle, setDraggingHandle] = useState(null);
+
+  const openFilePicker = () => {
+    if (!processing) fileInputRef.current?.click();
+  };
 
   const handleNext = () => {
     if (currentStep < 3) {
@@ -168,6 +174,14 @@ export const DashboardPreviewPanel = ({
       width: (Math.max(Number(measurement.length_px) || 0, Number(measurement.bbox_w) || 0) / imageWidth) * 100,
       height: (Math.max(Number(measurement.width_px) || 0, Math.min(Number(measurement.bbox_h) || 0, Number(measurement.bbox_w) || 0)) / imageHeight) * 100,
       angle: Number(measurement.angle_deg) || 0,
+    }));
+  const suspectMeasurements = (result?.measurements || [])
+    .filter((measurement) => measurement.qc_outlier === true)
+    .map((measurement) => ({
+      id: measurement.id,
+      length: Number(measurement.length_mm || measurement.length_px || 0),
+      width: Number(measurement.width_mm || measurement.width_px || 0),
+      unit: measurement.length_mm ? 'mm' : 'px',
     }));
 
   return (
@@ -245,7 +259,7 @@ export const DashboardPreviewPanel = ({
                   <AlertTitle sx={{ mb: 0.25, fontWeight: 750 }}>
                     Đang chỉnh kết quả kiểm tra hạt
                   </AlertTitle>
-                  Hạt màu đỏ là vùng hệ thống nghi có lỗi tách mask hoặc kích thước bất thường. Click trực tiếp vào hạt để đổi giữa "nghi ngờ" và "hợp lệ"; thống kê và CSV sẽ cập nhật theo lựa chọn này.
+                  Hạt màu đỏ là vùng hệ thống nghi có lỗi tách vùng ảnh hoặc kích thước bất thường. Dùng bảng ID bên dưới ảnh: tích xanh để xác nhận là hạt thật, X đỏ để xóa hẳn nhận dạng sai khỏi kết quả.
                 </Alert>
               )}
             </Stack>
@@ -263,7 +277,10 @@ export const DashboardPreviewPanel = ({
             overflow: 'hidden',
             mb: 2,
             position: 'relative',
-          }}>
+            cursor: !displayImage && !cameraActive && !processing ? 'pointer' : 'default',
+          }}
+            onClick={!displayImage && !cameraActive ? openFilePicker : undefined}
+          >
             {displayImage ? (
               <Box
                 sx={{ position: 'relative', width: '100%', height: 360, display: 'grid', placeItems: 'center', touchAction: calibrationImage ? 'none' : 'auto' }}
@@ -316,42 +333,37 @@ export const DashboardPreviewPanel = ({
                     sx={{ maxWidth: '100%', maxHeight: 360, objectFit: 'contain', userSelect: 'none' }}
                   />
                   {result && measurementMasks.map((mask) => {
-                    if (!qcEditMode) return null;
+                    if (!qcEditMode || !mask.outlier) return null;
                     return (
                       <Tooltip
                         key={mask.id}
-                        title={`${mask.outlier ? 'Bỏ nghi ngờ' : 'Đánh dấu nghi ngờ'} #${mask.id}`}
+                        title={`Hạt nghi ngờ #${mask.id}`}
                         arrow
                       >
                         <Box
-                          component="button"
-                          type="button"
-                          onPointerDown={(event) => {
-                            if (!qcEditMode) return;
-                            event.stopPropagation();
-                            onToggleMeasurementQc(mask.id);
-                          }}
                           sx={{
                             position: 'absolute',
                             left: `${mask.centerX}%`,
                             top: `${mask.centerY}%`,
-                            width: `${mask.width}%`,
-                            height: `${mask.height}%`,
-                            minWidth: 10,
-                            minHeight: 6,
-                            border: 0,
-                            bgcolor: 'transparent',
-                            borderRadius: '999px',
-                            clipPath: 'ellipse(50% 50% at 50% 50%)',
-                            transform: `translate(-50%, -50%) rotate(${mask.angle}deg)`,
+                            minWidth: 24,
+                            height: 24,
+                            px: 0.5,
+                            border: '2px solid #fff',
+                            bgcolor: '#dc2626',
+                            color: '#fff',
+                            borderRadius: 999,
+                            transform: 'translate(-50%, -50%)',
                             transformOrigin: '50% 50%',
-                            cursor: qcEditMode ? 'pointer' : 'default',
-                            pointerEvents: 'auto',
-                            p: 0,
-                            opacity: 0,
-                            outline: 'none',
+                            pointerEvents: 'none',
+                            display: 'grid',
+                            placeItems: 'center',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            boxShadow: '0 1px 4px rgba(0,0,0,0.28)',
                           }}
-                        />
+                        >
+                          #{mask.id}
+                        </Box>
                       </Tooltip>
                     );
                   })}
@@ -404,11 +416,68 @@ export const DashboardPreviewPanel = ({
           {fileName && (
             <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>{fileName}</Typography>
           )}
+          {result && qcEditMode && (
+            <Box sx={{ mb: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
+              <Box sx={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(72px, 1fr) minmax(96px, 1fr) 96px',
+                gap: 1,
+                px: 1.25,
+                py: 0.75,
+                bgcolor: '#F8FAFC',
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+              }}>
+                <Typography variant="caption" fontWeight={800}>ID</Typography>
+                <Typography variant="caption" fontWeight={800}>Kích thước</Typography>
+                <Typography variant="caption" fontWeight={800} textAlign="center">Quyết định</Typography>
+              </Box>
+              {suspectMeasurements.length ? suspectMeasurements.map((measurement) => (
+                <Box
+                  key={measurement.id}
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(72px, 1fr) minmax(96px, 1fr) 96px',
+                    gap: 1,
+                    alignItems: 'center',
+                    px: 1.25,
+                    py: 0.75,
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                    '&:last-child': { borderBottom: 0 },
+                  }}
+                >
+                  <Typography variant="body2" fontWeight={800}>#{measurement.id}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {measurement.length > 0 && measurement.width > 0
+                      ? `${measurement.length.toFixed(measurement.unit === 'mm' ? 2 : 1)} x ${measurement.width.toFixed(measurement.unit === 'mm' ? 2 : 1)} ${measurement.unit}`
+                      : '-'}
+                  </Typography>
+                  <Stack direction="row" spacing={0.5} justifyContent="center">
+                    <Tooltip title="Xác nhận đây là hạt thật" arrow>
+                      <IconButton size="small" color="success" onClick={() => onConfirmSuspect(measurement.id)}>
+                        <CheckCircle fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Xóa nhận dạng sai khỏi kết quả" arrow>
+                      <IconButton size="small" color="error" onClick={() => onDeleteSuspect(measurement.id)}>
+                        <Cancel fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                </Box>
+              )) : (
+                <Typography variant="body2" color="text.secondary" sx={{ px: 1.25, py: 1 }}>
+                  Không còn hạt nghi ngờ cần xử lý.
+                </Typography>
+              )}
+            </Box>
+          )}
           {previewUrl && (
             <Box sx={{ mb: 1.5 }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
                 <TextField
-                  label="Kích thước vật mốc (mm)"
+                  label="Kích thước (mm)"
                   type="number"
                   size="small"
                   value={calibration.referenceMm}
@@ -441,7 +510,7 @@ export const DashboardPreviewPanel = ({
             </Button>
             <Button variant="outlined" component="label">
               Import ảnh
-              <input hidden type="file" accept="image/jpeg,image/png" onChange={onFile} />
+              <input ref={fileInputRef} hidden type="file" accept="image/jpeg,image/png" onChange={onFile} />
             </Button>
             <Button
               variant="outlined"
@@ -582,7 +651,7 @@ export const DashboardPreviewPanel = ({
             QC là bước kiểm tra chất lượng kết quả sau khi AI tách từng hạt. Nó không phải một loại hạt mới.
           </Alert>
           <Typography variant="body2" color="text.secondary">
-            Mask xanh là hạt đang được tính là hợp lệ. Mask đỏ là hạt hệ thống nghi có lỗi tách dính, tách thiếu, hoặc kích thước lệch bất thường so với nhóm còn lại.
+            Vùng xanh là hạt đang được tính là hợp lệ. Vùng đỏ là hạt hệ thống nghi có lỗi tách dính, tách thiếu, hoặc kích thước lệch bất thường so với nhóm còn lại.
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Nếu nhìn ảnh thấy hạt đỏ vẫn được tách đúng, bật "Chỉnh hạt nghi ngờ" rồi click vào hạt đó để chuyển về hợp lệ. Nếu một hạt xanh bị tách sai, click vào hạt đó để đánh dấu nghi ngờ.

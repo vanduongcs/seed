@@ -49,6 +49,20 @@ const readStoredGuestRuns = () => {
 
 export const readGuestRuns = () => readStoredGuestRuns().filter((item) => !item.ownerUserId);
 
+export const updateGuestRunResult = ({ clientRunId, result }) => {
+  if (!clientRunId || !result) return;
+  const next = readStoredGuestRuns().map((item) => (
+    item.clientRunId === clientRunId
+      ? {
+          ...item,
+          result,
+          updatedAt: new Date().toISOString(),
+        }
+      : item
+  ));
+  localStorage.setItem(GUEST_RUNS_KEY, JSON.stringify(next));
+};
+
 export const deleteGuestRun = (clientRunId) => {
   const next = readStoredGuestRuns().filter((item) => item.clientRunId !== clientRunId);
   localStorage.setItem(GUEST_RUNS_KEY, JSON.stringify(next));

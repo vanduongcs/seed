@@ -5,6 +5,7 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
 set "MOBILE_DIR=%ROOT%\mobile"
 set "OUT_DIR=%ROOT%\artifacts\releases"
+set "CURRENT_DIR=%ROOT%\artifacts\release-current"
 set "KEY_PROPS=%MOBILE_DIR%\android\key.properties"
 set "APK_SRC=%MOBILE_DIR%\build\app\outputs\flutter-apk\app-release.apk"
 set "AAB_SRC=%MOBILE_DIR%\build\app\outputs\bundle\release\app-release.aab"
@@ -47,12 +48,6 @@ if not exist "%KEY_PROPS%" (
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$props=@{}; Get-Content -LiteralPath '%KEY_PROPS%' | Where-Object { $_ -match '^\s*[^#=]+\s*=' } | ForEach-Object { $k,$v=$_.Split('=',2); $props[$k.Trim()]=$v.Trim() }; if (-not $props.storeFile) { Write-Host 'ERROR: key.properties is missing storeFile.'; exit 2 }; $store=Join-Path (Split-Path -Parent '%KEY_PROPS%') $props.storeFile; if (-not (Test-Path -LiteralPath $store)) { Write-Host ('ERROR: Keystore file not found: ' + $store); exit 3 }"
 if errorlevel 1 exit /b 1
-
-for /f "tokens=2 delims= " %%v in ('findstr /B "version:" "%MOBILE_DIR%\pubspec.yaml"') do set "APP_VERSION=%%v"
-if not defined APP_VERSION set "APP_VERSION=unknown"
-set "APP_VERSION=%APP_VERSION:+=-%"
-
-for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "BUILD_ID=%%t"
 
 if /I "%~1"=="clean" (
   echo Running flutter clean...
@@ -103,16 +98,18 @@ if not exist "%AAB_SRC%" (
 )
 
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
+if not exist "%CURRENT_DIR%" mkdir "%CURRENT_DIR%"
 
 copy /Y "%APK_SRC%" "%OUT_DIR%\seedvision-release.apk" >nul
 copy /Y "%AAB_SRC%" "%OUT_DIR%\seedvision-release.aab" >nul
-copy /Y "%APK_SRC%" "%OUT_DIR%\seedvision-%APP_VERSION%-%BUILD_ID%.apk" >nul
-copy /Y "%AAB_SRC%" "%OUT_DIR%\seedvision-%APP_VERSION%-%BUILD_ID%.aab" >nul
+copy /Y "%APK_SRC%" "%CURRENT_DIR%\Seed.apk" >nul
+copy /Y "%AAB_SRC%" "%CURRENT_DIR%\Seed.aab" >nul
 
 echo.
 echo === Export complete ===
 echo Install APK : %OUT_DIR%\seedvision-release.apk
 echo Play AAB    : %OUT_DIR%\seedvision-release.aab
-echo Versioned   : seedvision-%APP_VERSION%-%BUILD_ID%.apk/.aab
+echo Easy pick   : %CURRENT_DIR%\Seed.apk
+echo Play upload : %CURRENT_DIR%\Seed.aab
 echo.
 exit /b 0

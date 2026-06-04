@@ -7,10 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/i18n/app_language.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../grain/providers/grain_runs_provider.dart';
 import '../../grain/services/grain_analysis_api.dart';
+import '../../grain/widgets/grain_stats_charts.dart';
 
 class StorageScreen extends ConsumerWidget {
   const StorageScreen({super.key});
@@ -19,6 +21,7 @@ class StorageScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final runsState = ref.watch(grainRunsProvider);
     final isGuest = ref.watch(guestModeProvider).value ?? false;
+    final language = ref.watch(appLanguageProvider);
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -45,12 +48,12 @@ class StorageScreen extends ConsumerWidget {
             if (index == 0) return _Header(isGuest: isGuest);
             if (index == 1) return const SizedBox(height: 18);
             if (runs.isEmpty) {
-              return const Card(
+              return Card(
                 child: Padding(
-                  padding: EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
                   child: Text(
-                    'Chưa có dữ liệu',
-                    style: TextStyle(color: AppTheme.textSecondary),
+                    appText(language, 'Chưa có dữ liệu', 'No data yet'),
+                    style: const TextStyle(color: AppTheme.textSecondary),
                   ),
                 ),
               );
@@ -67,20 +70,29 @@ class StorageScreen extends ConsumerWidget {
   }
 }
 
-class _Header extends StatelessWidget {
+class _Header extends ConsumerWidget {
   final bool isGuest;
 
   const _Header({required this.isGuest});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           isGuest
-              ? 'Dữ liệu đang được lưu trữ cục bộ. Đăng nhập để đồng bộ lên server.'
-              : 'Các lần xử lý đã đồng bộ với tài khoản của bạn trên server.',
+              ? appText(
+                  language,
+                  'Dữ liệu đang được lưu trên thiết bị này. Đăng nhập để đồng bộ lên tài khoản của bạn.',
+                  'Data is saved on this device. Log in to sync it to your account.',
+                )
+              : appText(
+                  language,
+                  'Các lần xử lý đã đồng bộ với tài khoản của bạn.',
+                  'Analyses are synced with your account.',
+                ),
           style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
       ],
@@ -88,17 +100,17 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _RunCard extends StatefulWidget {
+class _RunCard extends ConsumerStatefulWidget {
   final GrainRun run;
   final VoidCallback onTap;
 
   const _RunCard({required this.run, required this.onTap});
 
   @override
-  State<_RunCard> createState() => _RunCardState();
+  ConsumerState<_RunCard> createState() => _RunCardState();
 }
 
-class _RunCardState extends State<_RunCard> {
+class _RunCardState extends ConsumerState<_RunCard> {
   Future<Uint8List?>? _remoteOverlay;
 
   @override
@@ -131,6 +143,7 @@ class _RunCardState extends State<_RunCard> {
   @override
   Widget build(BuildContext context) {
     final overlayBytes = _decodePreview(widget.run.overlayBase64);
+    final language = ref.watch(appLanguageProvider);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -191,14 +204,36 @@ class _RunCardState extends State<_RunCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${widget.run.count} hạt - ${_formatDate(widget.run.createdAt)}',
+                      '${widget.run.count} ${appText(language, 'hạt', 'grains')}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.schedule_outlined,
+                          size: 15,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            '${appText(language, 'Thực hiện', 'Created')}: ${_formatDate(widget.run.createdAt)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
                     Text(
-                      'ĐLC: ${_formatPair(widget.run.qcStdLengthMm, widget.run.qcStdWidthMm, widget.run.qcStdLengthPx, widget.run.qcStdWidthPx)}',
+                      '${appText(language, 'ĐLC', 'SD')}: ${_formatPair(widget.run.qcStdLengthMm, widget.run.qcStdWidthMm, widget.run.qcStdLengthPx, widget.run.qcStdWidthPx)}',
                       style: const TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 14,
@@ -207,7 +242,7 @@ class _RunCardState extends State<_RunCard> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'TB: ${_formatPair(widget.run.meanLengthMm, widget.run.meanWidthMm, widget.run.meanLengthPx, widget.run.meanWidthPx)}',
+                      '${appText(language, 'TB', 'Avg')}: ${_formatPair(widget.run.meanLengthMm, widget.run.meanWidthMm, widget.run.meanLengthPx, widget.run.meanWidthPx)}',
                       style: const TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 14,
@@ -258,18 +293,17 @@ Future<void> _openRunDetail(BuildContext context, String runId) async {
   }
 }
 
-class _RunDetailDialog extends StatefulWidget {
+class _RunDetailDialog extends ConsumerStatefulWidget {
   final GrainRunDetail detail;
 
   const _RunDetailDialog({required this.detail});
 
   @override
-  State<_RunDetailDialog> createState() => _RunDetailDialogState();
+  ConsumerState<_RunDetailDialog> createState() => _RunDetailDialogState();
 }
 
-class _RunDetailDialogState extends State<_RunDetailDialog> {
+class _RunDetailDialogState extends ConsumerState<_RunDetailDialog> {
   String _previewMode = 'overlay';
-  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -277,6 +311,7 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
     final run = widget.detail.run;
     final preview = result.previewWithFallback(_previewMode);
     final name = run['sourceFileName']?.toString() ?? 'seed-image';
+    final language = ref.watch(appLanguageProvider);
 
     return AlertDialog(
       title: Text('Run ${_shortId(run['id']?.toString() ?? '')}'),
@@ -293,10 +328,10 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _chip('original', 'Ảnh gốc'),
-                  _chip('overlay', 'Đánh dấu'),
-                  _chip('mask', 'Hình dạng'),
-                  _chip('labels', 'Đánh số'),
+                  _chip('original', appText(language, 'Ảnh gốc', 'Original')),
+                  _chip('overlay', appText(language, 'Đánh dấu', 'Overlay')),
+                  _chip('mask', appText(language, 'Hình dạng', 'Mask')),
+                  _chip('labels', appText(language, 'Đánh số', 'Labels')),
                 ],
               ),
               const SizedBox(height: 12),
@@ -309,69 +344,43 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
                   ),
                 ),
               const SizedBox(height: 12),
-              _detailRow('Tổng số hạt đo được', '${result.count}'),
               _detailRow(
-                  'ĐLC chiều dài (báo cáo)',
+                  appText(
+                      language, 'Tổng số hạt đo được', 'Total measured grains'),
+                  '${result.count}'),
+              _detailRow(
+                  appText(language, 'ĐLC chiều dài (báo cáo)',
+                      'Length SD (reported)'),
                   _formatMeasure(
                       result.qcStdLengthMm, 'mm', result.qcStdLengthPx, 'px')),
               _detailRow(
-                  'ĐLC chiều rộng (báo cáo)',
+                  appText(language, 'ĐLC chiều rộng (báo cáo)',
+                      'Width SD (reported)'),
                   _formatMeasure(
                       result.qcStdWidthMm, 'mm', result.qcStdWidthPx, 'px')),
               _detailRow(
-                  'ĐLC diện tích (báo cáo)',
+                  appText(language, 'ĐLC diện tích (báo cáo)',
+                      'Area SD (reported)'),
                   _formatMeasure(
                       result.qcStdAreaMm2, 'mm2', result.qcStdAreaPx, 'px2')),
               _detailRow(
-                  'Hạt nghi ngờ sau kiểm tra', '${result.qcSuspectCount}'),
+                  appText(language, 'Hạt nghi ngờ sau kiểm tra',
+                      'Suspect grains after QC'),
+                  '${result.qcSuspectCount}'),
               _detailRow(
-                  'Tỷ lệ thước đo',
+                  appText(language, 'Tỷ lệ thước đo', 'Scale ratio'),
                   result.calibration['enabled'] == true
                       ? '${_asDouble(result.calibration['mm_per_pixel']).toStringAsFixed(5)} mm/px'
-                      : 'Chưa thiết lập'),
-              const Divider(),
-              Theme(
-                data: Theme.of(context)
-                    .copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  title: Text(
-                    _expanded
-                        ? 'Ẩn thông số kỹ thuật'
-                        : 'Hiển thị thông số kỹ thuật',
-                    style: const TextStyle(
-                        fontSize: 14, color: AppTheme.textSecondary),
-                  ),
-                  onExpansionChanged: (val) => setState(() => _expanded = val),
-                  children: [
-                    Container(
-                      padding:
-                          const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-                      decoration: const BoxDecoration(
-                        border: Border(
-                            left: BorderSide(color: AppTheme.border, width: 2)),
-                      ),
-                      child: Column(
-                        children: [
-                          _detailRow(
-                            'Phương thức phân tích',
-                            result.segmentation['execution'] ==
-                                    'mobile_onnxruntime'
-                                ? 'Phân đoạn instance YOLO ONNX trên thiết bị'
-                                : 'Phân đoạn instance YOLO ONNX trên server',
-                          ),
-                          if (_asDouble(result.segmentation['confidence']) > 0)
-                            _detailRow('Độ tin cậy nhận dạng',
-                                '${(_asDouble(result.segmentation['confidence']) * 100).toStringAsFixed(0)}%'),
-                          if (_asDouble(result.segmentation['iou']) > 0)
-                            _detailRow('Độ khớp mặt nạ (IoU)',
-                                '${(_asDouble(result.segmentation['iou']) * 100).toStringAsFixed(0)}%'),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                      : appText(language, 'Chưa thiết lập', 'Not set')),
+              const SizedBox(height: 10),
+              Text(
+                appText(language, 'Tóm tắt kích thước đã lưu',
+                    'Saved size summary'),
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
+              const SizedBox(height: 8),
+              GrainStatsCharts(result: result, compact: true),
+              const Divider(),
             ],
           ),
         ),
@@ -379,20 +388,21 @@ class _RunDetailDialogState extends State<_RunDetailDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Đóng'),
+          child: Text(appText(language, 'Đóng', 'Close')),
         ),
         TextButton.icon(
           onPressed:
               result.csv.isEmpty ? null : () => _shareCsv(name, result.csv),
           icon: const Icon(Icons.table_view_outlined),
-          label: const Text('Xuất CSV'),
+          label: Text(appText(language, 'Xuất CSV', 'Export CSV')),
         ),
         TextButton.icon(
           onPressed: _segmentationPng(result).isEmpty
               ? null
               : () => _sharePng(name, _segmentationPng(result)),
           icon: const Icon(Icons.image_outlined),
-          label: const Text('Xuất ảnh kết quả'),
+          label: Text(
+              appText(language, 'Xuất ảnh kết quả', 'Export result image')),
         ),
       ],
     );

@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/i18n/app_language.dart';
 import '../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -33,13 +34,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     await ref.read(authProvider.notifier).login(email, password);
     final state = ref.read(authProvider);
     if (state.hasError && mounted) {
+      final language = ref.read(appLanguageProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
             children: [
               const Icon(Icons.error_outline, color: Colors.white),
               const SizedBox(width: 10),
-              Expanded(child: Text('Đăng nhập thất bại: ${state.error}')),
+              Expanded(
+                child: Text(
+                  '${appText(language, 'Đăng nhập thất bại', 'Login failed')}: ${state.error}',
+                ),
+              ),
             ],
           ),
           backgroundColor: const Color(0xFFD92D20),
@@ -62,6 +68,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(authProvider);
     final isLoading = state.isLoading;
+    final language = ref.watch(appLanguageProvider);
 
     return Scaffold(
       body: Container(
@@ -146,10 +153,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           const SizedBox(height: 24),
 
                           // Header - Only "Đăng nhập" as requested
-                          const Text(
-                            'Đăng nhập',
+                          Text(
+                            appText(language, 'Đăng nhập', 'Log in'),
                             textAlign: TextAlign.center,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 28,
                               fontWeight: FontWeight.w900,
                               color: Color(0xFF1B2C21),
@@ -159,11 +166,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           const SizedBox(height: 36),
 
                           // Email field label
-                          const Padding(
-                            padding: EdgeInsets.only(left: 2, bottom: 8),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 2, bottom: 8),
                             child: Text(
-                              'ĐỊA CHỈ EMAIL',
-                              style: TextStyle(
+                              appText(
+                                  language, 'ĐỊA CHỈ EMAIL', 'EMAIL ADDRESS'),
+                              style: const TextStyle(
                                 fontWeight: FontWeight.w700,
                                 fontSize: 11,
                                 color: Color(0xFF4D5C52),
@@ -208,12 +216,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                             validator: (value) {
                               if (value == null || value.trim().isEmpty) {
-                                return 'Vui lòng nhập địa chỉ email';
+                                return appText(
+                                  language,
+                                  'Vui lòng nhập địa chỉ email',
+                                  'Please enter your email address',
+                                );
                               }
                               final emailRegex =
                                   RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
                               if (!emailRegex.hasMatch(value.trim())) {
-                                return 'Định dạng email không hợp lệ';
+                                return appText(
+                                  language,
+                                  'Định dạng email không hợp lệ',
+                                  'Invalid email format',
+                                );
                               }
                               return null;
                             },
@@ -221,11 +237,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           const SizedBox(height: 20),
 
                           // Password field label
-                          const Padding(
-                            padding: EdgeInsets.only(left: 2, bottom: 8),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 2, bottom: 8),
                             child: Text(
-                              'MẬT KHẨU',
-                              style: TextStyle(
+                              appText(language, 'MẬT KHẨU', 'PASSWORD'),
+                              style: const TextStyle(
                                 fontWeight: FontWeight.w700,
                                 fontSize: 11,
                                 color: Color(0xFF4D5C52),
@@ -242,7 +258,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             style: const TextStyle(
                                 fontSize: 14.5, color: Color(0xFF1B2C21)),
                             decoration: InputDecoration(
-                              hintText: 'Nhập mật khẩu của bạn',
+                              hintText: appText(
+                                language,
+                                'Nhập mật khẩu của bạn',
+                                'Enter your password',
+                              ),
                               hintStyle: const TextStyle(
                                   color: Color(0xFF6B7C72), fontSize: 14),
                               prefixIcon: const Icon(Icons.lock_outline_rounded,
@@ -282,7 +302,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return 'Vui lòng nhập mật khẩu';
+                                return appText(
+                                  language,
+                                  'Vui lòng nhập mật khẩu',
+                                  'Please enter your password',
+                                );
                               }
                               return null;
                             },
@@ -304,7 +328,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 shadowColor: const Color(0x332F6B4F),
                                 elevation: 2,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
                               child: isLoading
@@ -316,9 +340,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         strokeWidth: 2.5,
                                       ),
                                     )
-                                  : const Text(
-                                      'Đăng nhập',
-                                      style: TextStyle(
+                                  : Text(
+                                      appText(language, 'Đăng nhập', 'Log in'),
+                                      style: const TextStyle(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w800,
                                         letterSpacing: 0.3,
@@ -334,15 +358,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   isLoading ? null : _continueWithoutLogin,
                               style: OutlinedButton.styleFrom(
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                                 side:
                                     const BorderSide(color: Color(0xFF2F6B4F)),
                               ),
                               icon: const Icon(Icons.phone_android_outlined),
-                              label: const Text(
-                                'Tiếp tục không đăng nhập',
-                                style: TextStyle(fontWeight: FontWeight.w700),
+                              label: Text(
+                                appText(
+                                  language,
+                                  'Tiếp tục không đăng nhập',
+                                  'Continue without login',
+                                ),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700),
                               ),
                             ),
                           ),
@@ -351,18 +380,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           // Toggle screen
                           GestureDetector(
                             onTap: () => context.go('/register'),
-                            child: const Text.rich(
+                            child: Text.rich(
                               TextSpan(
                                 children: [
                                   TextSpan(
-                                    text: 'Chưa có tài khoản? ',
-                                    style: TextStyle(
+                                    text: appText(
+                                        language,
+                                        'Chưa có tài khoản? ',
+                                        'No account yet? '),
+                                    style: const TextStyle(
                                         color: Color(0xFF6B7C72),
                                         fontSize: 13.5),
                                   ),
                                   TextSpan(
-                                    text: 'Đăng ký ngay',
-                                    style: TextStyle(
+                                    text: appText(language, 'Đăng ký ngay',
+                                        'Sign up now'),
+                                    style: const TextStyle(
                                       color: Color(0xFF2F6B4F),
                                       fontWeight: FontWeight.w800,
                                       fontSize: 13.5,

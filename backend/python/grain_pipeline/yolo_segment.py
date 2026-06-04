@@ -125,9 +125,14 @@ def _predict_single_image(
 
     input_name = session.get_inputs()[0].name
     outputs = session.run(None, {input_name: blob})
-    # output0: [1, 4+nc+32, N]  output1: [1, 32, mh, mw]
-    output0 = outputs[0][0]   # [4+nc+32, N]
+    # output0: [1, 4+nc+32, N] with cxcywh boxes, or [1, N, 4+nc+32]
+    # with xyxy boxes for newer end-to-end YOLO exports. output1: [1, 32, mh, mw]
+    output0 = outputs[0][0]   # [4+nc+32, N] or [N, 4+nc+32]
     protos   = outputs[1][0]  # [32, mh, mw]
+    boxes_are_xyxy = False
+    if output0.ndim == 2 and output0.shape[0] > output0.shape[1]:
+        output0 = output0.T
+        boxes_are_xyxy = True
 
     return _decode_yolo_seg(
         output0, protos,
@@ -138,6 +143,7 @@ def _predict_single_image(
         iou_thr=iou_thr,
         max_det=max_det,
         source=source,
+        boxes_are_xyxy=boxes_are_xyxy,
     )
 
 
@@ -159,6 +165,7 @@ def _decode_yolo_seg(
     iou_thr: float,
     max_det: int,
     source: str,
+    boxes_are_xyxy: bool = False,
 ) -> list[InstanceMask]:
     """Decode raw YOLO-seg ONNX tensors into InstanceMask objects."""
     # output0 layout: [cx, cy, w, h, cls0, ..., clsN, coeff0, ..., coeff31]
@@ -184,10 +191,10 @@ def _decode_yolo_seg(
     coeffs       = coeffs[:, keep]
 
     # Convert cx,cy,w,h → x1,y1,x2,y2
-    boxes_xyxy = _cxcywh_to_xyxy(boxes_raw.T)   # [M, 4]
+    boxes_xyxy = boxes_raw.T if boxes_are_xyxy else _cxcywh_to_xyxy(boxes_raw.T)
 
     # NMS
-    indices = _nms(boxes_xyxy, class_scores, iou_thr, max_det)
+    indices = _nms(boxes_xyxy, class_scores, class_ids, iou_thr, max_det)
     if len(indices) == 0:
         return []
 
@@ -278,6 +285,7 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 def _nms(
     boxes: np.ndarray,
     scores: np.ndarray,
+    class_ids: np.ndarray,
     iou_thr: float,
     max_det: int,
 ) -> list[int]:
@@ -299,7 +307,8 @@ def _nms(
         iy2 = np.minimum(y2[i], y2[rest])
         inter = np.maximum(0, ix2 - ix1) * np.maximum(0, iy2 - iy1)
         iou   = inter / np.maximum(areas[i] + areas[rest] - inter, 1e-6)
-        order = rest[iou < iou_thr]
+        same_class = class_ids[rest] == class_ids[i]
+        order = rest[np.logical_or(~same_class, iou < iou_thr)]
 
     return kept
 

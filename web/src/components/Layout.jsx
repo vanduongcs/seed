@@ -3,25 +3,26 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar, Box, Drawer, IconButton, List, ListItem,
   ListItemButton, ListItemText, Toolbar,
-  Typography, Avatar, Button, Divider, alpha,
+  Typography, Avatar, Button, Divider, alpha, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import { Menu as MenuIcon } from '@mui/icons-material';
 import { api } from '@/api/axios.js';
 import { useAuthStore } from '@/store/auth.store.js';
+import { languages, useLanguage } from '@/i18n.jsx';
 
 const DRAWER_WIDTH = 260;
-
-const accountNavItems = [
-  { label: 'Trang chủ', path: '/dashboard' },
-  { label: 'Lưu trữ', path: '/storage' },
-  { label: 'Tài khoản', path: '/account' },
-];
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, isGuest, logout } = useAuthStore();
+  const { language, setLanguage, text } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
+  const accountNavItems = [
+    { label: text('Trang chủ', 'Home'), path: '/dashboard' },
+    { label: text('Lưu trữ', 'Storage'), path: '/storage' },
+    { label: text('Tài khoản', 'Account'), path: '/account' },
+  ];
   const navItems = isGuest ? accountNavItems.slice(0, 2) : accountNavItems;
 
   const handleLogout = async () => {
@@ -42,12 +43,33 @@ export default function Layout() {
           {isGuest ? 'G' : (user?.name?.[0]?.toUpperCase() || 'U')}
         </Avatar>
         <Box flex={1} minWidth={0}>
-          <Typography variant="body2" fontWeight={650} noWrap>{isGuest ? 'Khách' : user?.name}</Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>{isGuest ? 'Không lưu trên server' : user?.email}</Typography>
+          <Typography variant="body2" fontWeight={650} noWrap>{isGuest ? text('Khách', 'Guest') : user?.name}</Typography>
+          <Typography variant="caption" color="text.secondary" noWrap>{isGuest ? text('Chưa đồng bộ', 'Not synced') : user?.email}</Typography>
         </Box>
       </Box>
 
       <Divider />
+
+      <Box sx={{ px: 2, pt: 1.5 }}>
+        <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
+          {text('Ngôn ngữ', 'Language')}
+        </Typography>
+        <ToggleButtonGroup
+          exclusive
+          fullWidth
+          size="small"
+          value={language}
+          onChange={(_, nextLanguage) => {
+            if (nextLanguage) setLanguage(nextLanguage);
+          }}
+        >
+          {languages.map((item) => (
+            <ToggleButton key={item.code} value={item.code} sx={{ textTransform: 'none', fontWeight: 700 }}>
+              {item.code.toUpperCase()}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+      </Box>
 
       <List sx={{ px: 1.5, pt: 1.5, flex: 1 }}>
         {navItems.map((item) => {
@@ -76,15 +98,15 @@ export default function Layout() {
         {isGuest ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Button fullWidth size="small" variant="contained" onClick={() => navigate('/login')}>
-              Đăng nhập để đồng bộ
+              {text('Đăng nhập để đồng bộ', 'Log in to sync')}
             </Button>
             <Button fullWidth size="small" variant="outlined" onClick={() => navigate('/register')}>
-              Đăng ký
+              {text('Đăng ký', 'Sign up')}
             </Button>
           </Box>
         ) : (
           <Button fullWidth size="small" variant="outlined" color="inherit" onClick={handleLogout}>
-            Đăng xuất
+            {text('Đăng xuất', 'Log out')}
           </Button>
         )}
       </Box>

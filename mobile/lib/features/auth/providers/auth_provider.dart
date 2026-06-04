@@ -142,13 +142,13 @@ class AuthException implements Exception {
       DioExceptionType.connectionTimeout ||
       DioExceptionType.receiveTimeout ||
       DioExceptionType.sendTimeout =>
-        'Không kết nối được backend. Hãy đảm bảo server đang chạy và điện thoại dùng cùng mạng Wi-Fi.',
+        'Không kết nối được. Kiểm tra Wi-Fi rồi thử lại.',
       DioExceptionType.connectionError =>
-        'Không kết nối được backend. Kiểm tra server và kết nối Wi-Fi.',
+        'Không kết nối được. Kiểm tra kết nối mạng rồi thử lại.',
       DioExceptionType.badResponse when error.response?.statusCode == 401 =>
         'Email hoặc mật khẩu không đúng.',
       DioExceptionType.badResponse =>
-        'Đăng nhập thất bại. Máy chủ trả về lỗi ${error.response?.statusCode}.',
+        'Đăng nhập thất bại. Vui lòng thử lại sau.',
       _ => 'Đăng nhập thất bại. Vui lòng thử lại.',
     };
     return AuthException(message);

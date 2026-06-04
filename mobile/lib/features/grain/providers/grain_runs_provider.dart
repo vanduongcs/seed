@@ -52,7 +52,7 @@ final grainRunsProvider = FutureProvider<List<GrainRun>>((ref) async {
       // error message but keep the session alive so the user can retry
       // or navigate to another tab without being logged out.
       throw const GrainRunsException(
-        'Phiên đăng nhập đã hết hạn hoặc server tạm thời không phản hồi. Kéo xuống để thử lại.',
+        'Phiên đăng nhập đã hết hạn hoặc hệ thống tạm thời không phản hồi. Kéo xuống để thử lại.',
       );
     }
     throw GrainRunsException(_friendlyDioMessage(error));
@@ -89,10 +89,10 @@ String _friendlyDioMessage(DioException error) {
     DioExceptionType.connectionTimeout ||
     DioExceptionType.receiveTimeout ||
     DioExceptionType.sendTimeout =>
-      'Không kết nối được backend. Kiểm tra server và kết nối Wi-Fi.',
+      'Không tải được dữ liệu. Kiểm tra Wi-Fi rồi thử lại.',
     DioExceptionType.connectionError =>
-      'Không kết nối được backend. Hãy đảm bảo server đang chạy và điện thoại dùng cùng mạng Wi-Fi.',
-    _ => 'Không tải được thống kê từ backend.',
+      'Không kết nối được. Kiểm tra Wi-Fi rồi thử lại.',
+    _ => 'Không tải được dữ liệu. Kéo xuống để thử lại.',
   };
 }
 

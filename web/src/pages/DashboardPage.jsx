@@ -6,8 +6,9 @@ import { useAuthStore } from '@/store/auth.store.js';
 import { DashboardPreviewPanel } from '@/components/grain/DashboardPreviewPanel.jsx';
 import { DashboardResultPanel } from '@/components/grain/DashboardResultPanel.jsx';
 import { formatMeasure, safeStem } from '@/components/grain/format.js';
+import { GrainStatsCharts } from '@/components/grain/GrainStatsCharts.jsx';
 import { StatCard } from '@/components/grain/StatCard.jsx';
-import { saveGuestRun } from '@/utils/guestRuns.js';
+import { saveGuestRun, updateGuestRunResult } from '@/utils/guestRuns.js';
 
 const emptyCalibration = { start: null, end: null, referenceMm: '' };
 
@@ -191,7 +192,7 @@ export default function DashboardPage() {
       }
 
       setProgress(50);
-      setProgressPhase('Phân tích ảnh bằng YOLO ONNX');
+      setProgressPhase('Đang nhận dạng hạt');
       startProgressDrift();
 
       const analysisApi = isGuest ? publicApi : api;
@@ -227,16 +228,37 @@ export default function DashboardPage() {
     }
   };
 
-  const handleToggleMeasurementQc = async (measurementId) => {
-    if (!result) return;
-    const renderSeq = qcRenderSeqRef.current + 1;
-    qcRenderSeqRef.current = renderSeq;
-    const nextResult = updateResultMeasurementQc(result, measurementId);
+  const persistEditedResult = async (nextResult) => {
+    const runId = nextResult?.run?.id;
+    if (!runId) return;
+    if (isGuest || nextResult?.run?.localOnly) {
+      updateGuestRunResult({ clientRunId: runId, result: nextResult });
+      return;
+    }
+    await api.put(`/grain/runs/${runId}/result`, { result: nextResult }).catch(() => {});
+  };
+
+  const applyEditedResult = async (nextResult, renderSeq) => {
     setResult(nextResult);
     const renderedResult = await renderQcPreviewsFromLabelMap(nextResult);
     if (qcRenderSeqRef.current === renderSeq) {
       setResult(renderedResult);
+      await persistEditedResult(renderedResult);
     }
+  };
+
+  const handleConfirmSuspect = async (measurementId) => {
+    if (!result) return;
+    const renderSeq = qcRenderSeqRef.current + 1;
+    qcRenderSeqRef.current = renderSeq;
+    await applyEditedResult(confirmSuspectMeasurement(result, measurementId), renderSeq);
+  };
+
+  const handleDeleteSuspect = async (measurementId) => {
+    if (!result) return;
+    const renderSeq = qcRenderSeqRef.current + 1;
+    qcRenderSeqRef.current = renderSeq;
+    await applyEditedResult(deleteMeasurement(result, measurementId), renderSeq);
   };
 
   const downloadCsv = () => {
@@ -301,13 +323,25 @@ export default function DashboardPage() {
 
   return (
     <Box sx={{ maxWidth: 1280 }}>
-      <Grid container spacing={2} mb={3}>
-        {stats.map((item) => (
-          <Grid item xs={12} sm={6} lg={3} key={item.label}>
-            <StatCard {...item} />
-          </Grid>
-        ))}
-      </Grid>
+      {result && (
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: 'repeat(2, minmax(0, 1fr))',
+              md: 'repeat(3, minmax(0, 1fr))',
+              lg: 'repeat(5, minmax(0, 1fr))',
+            },
+            gap: 2,
+            mb: 3,
+          }}
+        >
+          {stats.map((item) => (
+            <StatCard key={item.label} {...item} />
+          ))}
+        </Box>
+      )}
 
       <Grid container spacing={2}>
         <Grid item xs={12} lg={7}>
@@ -340,7 +374,8 @@ export default function DashboardPage() {
             progressPhase={progressPhase}
             qcEditMode={qcEditMode}
             onToggleQcEditMode={() => setQcEditMode((value) => !value)}
-            onToggleMeasurementQc={handleToggleMeasurementQc}
+            onConfirmSuspect={handleConfirmSuspect}
+            onDeleteSuspect={handleDeleteSuspect}
           />
         </Grid>
 
@@ -355,6 +390,12 @@ export default function DashboardPage() {
           />
         </Grid>
       </Grid>
+
+      {result?.measurements?.length > 0 && (
+        <Box sx={{ mt: 2 }}>
+          <GrainStatsCharts result={result} />
+        </Box>
+      )}
     </Box>
   );
 }
@@ -367,15 +408,15 @@ const resolveProcessError = (err) => {
   const message = err.response?.data?.message;
   if (message) return message;
   if (err.code === 'ECONNABORTED') {
-    return 'Xử lý quá lâu (quá 300 giây). Hãy thử ảnh nhỏ hơn hoặc kiểm tra backend/Python worker.';
+    return 'Xử lý quá lâu. Hãy thử ảnh nhỏ hơn, chụp gần hơn hoặc xử lý lại sau.';
   }
   if (err.response?.status === 503 || (err.response?.status === 500 && typeof err.response?.data === 'string')) {
-    return 'Backend API chưa chạy hoặc Vite không proxy được tới http://localhost:3000. Hãy chạy backend rồi thử lại.';
+    return 'Hệ thống đang chưa sẵn sàng. Vui lòng thử lại sau.';
   }
   if (err.code === 'ERR_NETWORK') {
-    return 'Không kết nối được backend. Kiểm tra server backend và kết nối mạng nội bộ.';
+    return 'Không kết nối được. Kiểm tra mạng rồi thử lại.';
   }
-  return 'Xử lý ảnh thất bại. Kiểm tra backend, MongoDB và Python dependencies.';
+  return 'Không xử lý được ảnh. Vui lòng thử lại với ảnh khác hoặc kiểm tra kết nối.';
 };
 
 const downloadBlob = (fileName, content, mimeType) => {
@@ -388,22 +429,47 @@ const downloadBlob = (fileName, content, mimeType) => {
   URL.revokeObjectURL(url);
 };
 
-const updateResultMeasurementQc = (result, measurementId) => {
+const confirmSuspectMeasurement = (result, measurementId) => {
   if (!result?.measurements?.length) return result;
   const measurements = result.measurements.map((measurement) => {
     if (Number(measurement.id) !== Number(measurementId)) return { ...measurement };
-    const nextOutlier = measurement.qc_outlier !== true;
     return {
       ...measurement,
-      qc_outlier: nextOutlier,
-      qc_reason: nextOutlier ? 'manual_qc_toggle' : '',
+      qc_outlier: false,
+      qc_reason: '',
       qc_manual_override: true,
+      qc_manual_decision: 'confirmed_grain',
     };
   });
   return {
     ...result,
     measurements,
     summary: recomputeSummaryFromMeasurements(result.summary, measurements),
+    csv: measurementsToCsv(measurements, result.csv),
+  };
+};
+
+const deleteMeasurement = (result, measurementId) => {
+  if (!result?.measurements?.length) return result;
+  const deletedId = Number(measurementId);
+  const measurements = result.measurements
+    .filter((measurement) => Number(measurement.id) !== deletedId)
+    .map((measurement) => ({ ...measurement }));
+  return {
+    ...result,
+    measurements,
+    summary: recomputeSummaryFromMeasurements(result.summary, measurements),
+    segmentation: {
+      ...(result.segmentation || {}),
+      segment_count: measurements.length,
+      marker_count: measurements.length,
+      manual_deleted_ids: [
+        ...new Set([
+          ...((result.segmentation?.manual_deleted_ids || []).map(Number).filter(Number.isFinite)),
+          deletedId,
+        ]),
+      ],
+    },
     csv: measurementsToCsv(measurements, result.csv),
   };
 };
@@ -431,6 +497,11 @@ const renderQcPreviewsFromLabelMap = async (result) => {
       .map((measurement) => Number(measurement.id))
       .filter(Number.isFinite),
   );
+  const activeIds = new Set(
+    result.measurements
+      .map((measurement) => Number(measurement.id))
+      .filter(Number.isFinite),
+  );
   const width = baseImage.width;
   const height = baseImage.height;
   const overlay = new ImageData(new Uint8ClampedArray(baseImage.data), width, height);
@@ -453,8 +524,14 @@ const renderQcPreviewsFromLabelMap = async (result) => {
     for (let x = 0; x < width; x += 1) {
       const label = labelAt(x, y);
       const offset = ((y * width) + x) * 4;
-      if (!label) {
+      if (!label || !activeIds.has(label)) {
         mask.data[offset + 3] = 0;
+        if (label && !activeIds.has(label)) {
+          labelMapImage.data[offset] = 0;
+          labelMapImage.data[offset + 1] = 0;
+          labelMapImage.data[offset + 2] = 0;
+          labelMapImage.data[offset + 3] = 255;
+        }
         continue;
       }
       const outlier = outlierIds.has(label);
@@ -476,12 +553,44 @@ const renderQcPreviewsFromLabelMap = async (result) => {
     }
   }
 
+  const labels = renderLabelsPreview(baseImage, result.measurements);
+
   return {
     ...result,
     overlay_png_base64: imageDataToBase64(overlay),
     mask_png_base64: imageDataToBase64(mask),
     sam_mask_png_base64: imageDataToBase64(mask),
+    labels_png_base64: labels,
+    label_map_png_base64: imageDataToBase64(labelMapImage),
   };
+};
+
+const renderLabelsPreview = (baseImage, measurements) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = baseImage.width;
+  canvas.height = baseImage.height;
+  const context = canvas.getContext('2d');
+  context.putImageData(baseImage, 0, 0);
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  measurements.forEach((measurement) => {
+    const id = Number(measurement.id);
+    const x = Number(measurement.centroid_x ?? (Number(measurement.bbox_x) + Number(measurement.bbox_w) / 2));
+    const y = Number(measurement.centroid_y ?? (Number(measurement.bbox_y) + Number(measurement.bbox_h) / 2));
+    if (!Number.isFinite(id) || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const radius = Math.max(13, Math.min(26, (Number(measurement.width_px) || 20) * 0.45));
+    context.fillStyle = measurement.qc_outlier === true ? '#dc2626' : '#2563eb';
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+    context.lineWidth = Math.max(2, radius * 0.16);
+    context.strokeStyle = '#ffffff';
+    context.stroke();
+    context.fillStyle = '#ffffff';
+    context.font = `700 ${Math.max(11, radius * 0.9)}px Arial, sans-serif`;
+    context.fillText(String(id), x, y + 0.5);
+  });
+  return canvas.toDataURL('image/png').split(',')[1] || '';
 };
 
 const loadImageData = (base64) => new Promise((resolve) => {
@@ -507,7 +616,50 @@ const imageDataToBase64 = (imageData) => {
 };
 
 const recomputeSummaryFromMeasurements = (previousSummary = {}, measurements) => {
-  if (!measurements.length) return previousSummary;
+  if (!measurements.length) {
+    return {
+      ...previousSummary,
+      count: 0,
+      total_area_px: 0,
+      mean_area_px: 0,
+      mean_length_px: 0,
+      mean_width_px: 0,
+      mean_area_mm2: null,
+      mean_length_mm: null,
+      mean_width_mm: null,
+      std_area_px: 0,
+      std_length_px: 0,
+      std_width_px: 0,
+      std_area_mm2: null,
+      std_length_mm: null,
+      std_width_mm: null,
+      robust_mean_area_px: 0,
+      robust_mean_length_px: 0,
+      robust_mean_width_px: 0,
+      robust_mean_area_mm2: null,
+      robust_mean_length_mm: null,
+      robust_mean_width_mm: null,
+      robust_std_area_px: 0,
+      robust_std_length_px: 0,
+      robust_std_width_px: 0,
+      robust_std_area_mm2: null,
+      robust_std_length_mm: null,
+      robust_std_width_mm: null,
+      cv_length_pct: 0,
+      cv_width_pct: 0,
+      qc: {
+        ...((previousSummary.qc && typeof previousSummary.qc === 'object') ? previousSummary.qc : {}),
+        suspect_count: 0,
+        inlier_count: 0,
+        suspect_ids: [],
+        review_required: false,
+        suspect_ratio: 0,
+        robust_used_for_reporting: true,
+        manual_override: true,
+        status: 'ok',
+      },
+    };
+  }
   const inliers = measurements.filter((measurement) => measurement.qc_outlier !== true);
   const robustMeasurements = inliers.length ? inliers : measurements;
   const suspectIds = measurements

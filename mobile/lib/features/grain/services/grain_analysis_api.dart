@@ -94,6 +94,12 @@ class GrainAnalysisApi {
     await _localStore.removePendingForSync(userId);
   }
 
+  Future<void> persistEditedRun(GrainAnalysisResult result) async {
+    final runId = result.run['id']?.toString() ?? '';
+    if (runId.isEmpty) return;
+    await _localStore.updateResult(runId, result.toJson());
+  }
+
   Future<String?> _currentUserId() async {
     final raw = await _storage.read(key: userKey);
     if (raw == null || raw.isEmpty) return null;
@@ -261,28 +267,113 @@ class GrainAnalysisResult {
     return '';
   }
 
-  GrainAnalysisResult withToggledQc(int measurementId) {
+  GrainAnalysisResult withConfirmedGrain(int measurementId) {
     final nextMeasurements = measurements.map((measurement) {
       final copy = Map<String, dynamic>.from(measurement);
       if (_asInt(copy['id']) != measurementId) return copy;
-      final nextOutlier = copy['qc_outlier'] != true;
-      copy['qc_outlier'] = nextOutlier;
-      copy['qc_reason'] = nextOutlier ? 'manual_qc_toggle' : '';
+      copy['qc_outlier'] = false;
+      copy['qc_reason'] = '';
       copy['qc_manual_override'] = true;
+      copy['qc_manual_decision'] = 'confirmed_grain';
       return copy;
     }).toList();
 
+    return _copyWithMeasurements(nextMeasurements);
+  }
+
+  GrainAnalysisResult withDeletedMeasurement(int measurementId) {
+    final nextMeasurements = [
+      for (final measurement in measurements)
+        if (_asInt(measurement['id']) != measurementId)
+          Map<String, dynamic>.from(measurement),
+    ];
+    final deletedIds = {
+      ...((segmentation['manual_deleted_ids'] as List?) ?? const [])
+          .map(_asInt)
+          .where((id) => id > 0),
+      measurementId,
+    }.toList()
+      ..sort();
+    final nextSegmentation = {
+      ...segmentation,
+      'segment_count': nextMeasurements.length,
+      'marker_count': nextMeasurements.length,
+      'manual_deleted_ids': deletedIds,
+    };
+    return _copyWithMeasurements(nextMeasurements,
+        segmentation: nextSegmentation);
+  }
+
+  GrainAnalysisResult _copyWithMeasurements(
+    List<Map<String, dynamic>> nextMeasurements, {
+    Map<String, dynamic>? segmentation,
+  }) {
     return GrainAnalysisResult(
       run: run,
       image: image,
       summary: _recomputeSummary(summary, nextMeasurements),
-      segmentation: segmentation,
+      segmentation: segmentation ?? this.segmentation,
       calibration: calibration,
       measurements: nextMeasurements,
       csv: _measurementsCsv(nextMeasurements, csv),
       previews: _renderQcPreviews(previews, nextMeasurements),
     );
   }
+}
+
+int _bitmapTextWidth(dynamic font, String text) {
+  var width = 0;
+  for (final codeUnit in text.codeUnits) {
+    final character = font.characters[codeUnit];
+    width +=
+        character == null ? (font.base as int) ~/ 2 : character.xAdvance as int;
+  }
+  return width;
+}
+
+void _drawReadablePreviewId(
+  img.Image image,
+  int id,
+  int centerX,
+  int centerY,
+) {
+  final text = '$id';
+  final font =
+      math.max(image.width, image.height) >= 720 ? img.arial48 : img.arial24;
+  final textWidth = _bitmapTextWidth(font, text);
+  final textHeight = font.lineHeight;
+  final maxX = math.max(0, image.width - textWidth);
+  final maxY = math.max(0, image.height - textHeight);
+  final x = (centerX - textWidth ~/ 2).clamp(0, maxX).toInt();
+  final y = (centerY - textHeight ~/ 2).clamp(0, maxY).toInt();
+  const outlineOffsets = [
+    [-2, -2],
+    [0, -2],
+    [2, -2],
+    [-2, 0],
+    [2, 0],
+    [-2, 2],
+    [0, 2],
+    [2, 2],
+  ];
+  for (final offset in outlineOffsets) {
+    img.drawString(
+      image,
+      text,
+      font: font,
+      x: x + offset[0],
+      y: y + offset[1],
+      color: img.ColorRgb8(0, 0, 0),
+    );
+  }
+  img.drawString(
+    image,
+    text,
+    font: font,
+    x: x,
+    y: y,
+    color: img.ColorRgb8(255, 255, 255),
+  );
 }
 
 Map<String, String> _renderQcPreviews(
@@ -314,12 +405,30 @@ Map<String, String> _renderQcPreviews(
     for (final measurement in measurements)
       if (measurement['qc_outlier'] == true) _asInt(measurement['id']),
   }..remove(0);
+  final activeIds = {
+    for (final measurement in measurements) _asInt(measurement['id']),
+  }..remove(0);
   final overlay = img.Image.from(baseImage);
   final mask = img.Image(
     width: baseImage.width,
     height: baseImage.height,
     numChannels: 4,
   );
+  final labels = img.Image(
+    width: baseImage.width,
+    height: baseImage.height,
+    numChannels: 3,
+  );
+  const labelPalette = [
+    [45, 108, 191],
+    [219, 87, 86],
+    [73, 160, 120],
+    [235, 174, 73],
+    [132, 98, 174],
+    [77, 176, 196],
+    [201, 112, 165],
+    [122, 126, 135],
+  ];
 
   int labelAt(int x, int y) {
     final pixel = labelMapImage.getPixel(x, y);
@@ -342,12 +451,19 @@ Map<String, String> _renderQcPreviews(
   for (var y = 0; y < labelMapImage.height; y++) {
     for (var x = 0; x < labelMapImage.width; x++) {
       final label = labelAt(x, y);
-      if (label <= 0) {
+      if (label <= 0 || !activeIds.contains(label)) {
         mask.setPixelRgba(x, y, 0, 0, 0, 0);
+        if (label > 0 && !activeIds.contains(label)) {
+          labelMapImage.setPixelRgba(x, y, 0, 0, 0, 255);
+        }
         continue;
       }
       final outlier = outlierIds.contains(label);
       final color = outlier ? const [220, 38, 38] : const [37, 99, 235];
+      final labelColor = outlier
+          ? const [220, 38, 38]
+          : labelPalette[(label - 1) % labelPalette.length];
+      labels.setPixelRgb(x, y, labelColor[0], labelColor[1], labelColor[2]);
       final edge = isEdge(x, y, label);
       final fillOpacity = edge ? 0.56 : 0.34;
       final source = overlay.getPixel(x, y);
@@ -382,12 +498,21 @@ Map<String, String> _renderQcPreviews(
       }
     }
   }
+  for (final measurement in measurements) {
+    final id = _asInt(measurement['id']);
+    if (id <= 0 || !activeIds.contains(id)) continue;
+    final centroidX = _asDouble(measurement['centroid_x']).round();
+    final centroidY = _asDouble(measurement['centroid_y']).round();
+    _drawReadablePreviewId(labels, id, centroidX, centroidY);
+  }
 
   return {
     ...previews,
     'overlay': base64Encode(img.encodePng(overlay)),
     'mask': base64Encode(img.encodePng(mask)),
     'samMask': base64Encode(img.encodePng(mask)),
+    'labels': base64Encode(img.encodePng(labels)),
+    'labelMap': base64Encode(img.encodePng(labelMapImage)),
   };
 }
 
@@ -395,7 +520,50 @@ Map<String, dynamic> _recomputeSummary(
   Map<String, dynamic> previousSummary,
   List<Map<String, dynamic>> measurements,
 ) {
-  if (measurements.isEmpty) return previousSummary;
+  if (measurements.isEmpty) {
+    return {
+      ...previousSummary,
+      'count': 0,
+      'total_area_px': 0,
+      'mean_area_px': 0,
+      'mean_length_px': 0,
+      'mean_width_px': 0,
+      'mean_area_mm2': null,
+      'mean_length_mm': null,
+      'mean_width_mm': null,
+      'std_area_px': 0,
+      'std_length_px': 0,
+      'std_width_px': 0,
+      'std_area_mm2': null,
+      'std_length_mm': null,
+      'std_width_mm': null,
+      'robust_mean_area_px': 0,
+      'robust_mean_length_px': 0,
+      'robust_mean_width_px': 0,
+      'robust_mean_area_mm2': null,
+      'robust_mean_length_mm': null,
+      'robust_mean_width_mm': null,
+      'robust_std_area_px': 0,
+      'robust_std_length_px': 0,
+      'robust_std_width_px': 0,
+      'robust_std_area_mm2': null,
+      'robust_std_length_mm': null,
+      'robust_std_width_mm': null,
+      'cv_length_pct': 0,
+      'cv_width_pct': 0,
+      'qc': {
+        ...Map<String, dynamic>.from(previousSummary['qc'] as Map? ?? {}),
+        'suspect_count': 0,
+        'inlier_count': 0,
+        'suspect_ids': [],
+        'review_required': false,
+        'suspect_ratio': 0,
+        'robust_used_for_reporting': true,
+        'manual_override': true,
+        'status': 'ok',
+      },
+    };
+  }
   final inliers = [
     for (final measurement in measurements)
       if (measurement['qc_outlier'] != true) measurement,

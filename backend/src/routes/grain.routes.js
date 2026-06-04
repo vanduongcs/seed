@@ -9,6 +9,7 @@ import {
   getGrainRun,
   importOfflineGrainRuns,
   listGrainRuns,
+  updateGrainRunResult,
 } from '../controllers/grain.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 
@@ -35,6 +36,7 @@ router.post('/analyze-public', upload.single('image'), analyzeGrainImagePublic);
 router.get('/runs', authenticate, listGrainRuns);
 router.post('/runs/import', authenticate, importOfflineGrainRuns);
 router.get('/runs/:id', authenticate, getGrainRun);
+router.put('/runs/:id/result', authenticate, updateGrainRunResult);
 router.delete('/runs/:id', authenticate, deleteGrainRun);
 router.post('/analyze', authenticate, upload.single('image'), analyzeGrainImage);
 
