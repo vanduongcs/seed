@@ -14,17 +14,21 @@ import {
   FormControlLabel,
   Grid,
   MenuItem,
+  ToggleButton,
+  ToggleButtonGroup,
   Switch,
   TextField,
   Typography,
 } from '@mui/material';
 
 import { api } from '@/api/axios.js';
+import { languages, useLanguage } from '@/i18n.jsx';
 import { useAuthStore } from '@/store/auth.store.js';
 
 export default function AccountPage() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const { language, setLanguage, text } = useLanguage();
   const [form, setForm] = useState({ name: user?.name || '', email: user?.email || '', role: user?.role || 'user' });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -46,7 +50,7 @@ export default function AccountPage() {
           role: profile?.role || 'user',
         });
       } catch (err) {
-        setError(err.response?.data?.message || 'Không tải được thông tin tài khoản');
+        setError(err.response?.data?.message || text('Không tải được thông tin tài khoản', 'Could not load account information'));
       } finally {
         setLoading(false);
       }
@@ -63,9 +67,9 @@ export default function AccountPage() {
       const { data } = await api.patch('/users/me', { name: form.name.trim() });
       setUser(data.data);
       setForm((current) => ({ ...current, name: data.data.name || current.name }));
-      setMessage('Đã cập nhật tài khoản');
+      setMessage(text('Đã cập nhật tài khoản', 'Account updated'));
     } catch (err) {
-      setError(err.response?.data?.message || 'Cập nhật tài khoản thất bại');
+      setError(err.response?.data?.message || text('Cập nhật tài khoản thất bại', 'Account update failed'));
     } finally {
       setSaving(false);
     }
@@ -73,9 +77,9 @@ export default function AccountPage() {
 
   return (
     <Box sx={{ maxWidth: 860 }}>
-      <Typography variant="h5" fontWeight={700} mb={0.75}>Tài khoản</Typography>
+      <Typography variant="h5" fontWeight={700} mb={0.75}>{text('Tài khoản', 'Account')}</Typography>
       <Typography variant="body2" color="text.secondary" mb={2.5}>
-        Thông tin người dùng được dùng chung cho web và mobile.
+        {text('Thông tin người dùng được dùng chung cho web và mobile.', 'User information is shared between web and mobile.')}
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -83,7 +87,7 @@ export default function AccountPage() {
 
       <Card>
         <CardContent sx={{ p: 3 }}>
-          <Typography variant="h6" fontWeight={700} mb={2}>Thông tin tài khoản</Typography>
+          <Typography variant="h6" fontWeight={700} mb={2}>{text('Thông tin tài khoản', 'Account information')}</Typography>
           {loading ? (
             <Box sx={{ py: 5, display: 'grid', placeItems: 'center' }}>
               <CircularProgress size={30} />
@@ -92,7 +96,7 @@ export default function AccountPage() {
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
                 <TextField
-                  label="Họ và tên"
+                  label={text('Họ và tên', 'Full name')}
                   value={form.name}
                   onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                   fullWidth
@@ -102,16 +106,16 @@ export default function AccountPage() {
                 <TextField label="Email" value={form.email} fullWidth disabled />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField label="Vai trò" value={form.role} fullWidth disabled />
+                <TextField label={text('Vai trò', 'Role')} value={form.role} fullWidth disabled />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField label="Đơn vị đo mặc định" value="Milimét (mm)" fullWidth disabled />
+                <TextField label={text('Đơn vị đo mặc định', 'Default measurement unit')} value={text('Milimét (mm)', 'Millimeter (mm)')} fullWidth disabled />
               </Grid>
               <Grid item xs={12} display="flex" gap={1} flexWrap="wrap">
                 <Button variant="contained" onClick={handleSave} disabled={saving || form.name.trim().length < 2}>
-                  {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
+                  {saving ? text('Đang lưu...', 'Saving...') : text('Lưu thay đổi', 'Save changes')}
                 </Button>
-                <Button variant="outlined" onClick={() => setSettingsOpen(true)}>Cài đặt</Button>
+                <Button variant="outlined" onClick={() => setSettingsOpen(true)}>{text('Cài đặt', 'Settings')}</Button>
               </Grid>
             </Grid>
           )}
@@ -119,26 +123,45 @@ export default function AccountPage() {
       </Card>
 
       <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Cài đặt website</DialogTitle>
+        <DialogTitle>{text('Cài đặt website', 'Website settings')}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 1 }}>
-            <TextField select label="Đơn vị đo mặc định" defaultValue="mm" fullWidth sx={{ mb: 2 }}>
-              <MenuItem value="mm">Milimét (mm)</MenuItem>
-              <MenuItem value="cm">Centimét (cm)</MenuItem>
+            <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
+              {text('Ngôn ngữ', 'Language')}
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              fullWidth
+              size="small"
+              value={language}
+              onChange={(_, nextLanguage) => {
+                if (nextLanguage) setLanguage(nextLanguage);
+              }}
+              sx={{ mb: 2 }}
+            >
+              {languages.map((item) => (
+                <ToggleButton key={item.code} value={item.code} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                  {item.label}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+            <TextField select label={text('Đơn vị đo mặc định', 'Default measurement unit')} defaultValue="mm" fullWidth sx={{ mb: 2 }}>
+              <MenuItem value="mm">{text('Milimét (mm)', 'Millimeter (mm)')}</MenuItem>
+              <MenuItem value="cm">{text('Centimét (cm)', 'Centimeter (cm)')}</MenuItem>
             </TextField>
-            <TextField select label="Chế độ lưu ảnh" defaultValue="processed" fullWidth sx={{ mb: 2 }}>
-              <MenuItem value="processed">Lưu ảnh đã xử lý</MenuItem>
-              <MenuItem value="original">Lưu ảnh gốc</MenuItem>
-              <MenuItem value="both">Lưu cả hai</MenuItem>
+            <TextField select label={text('Chế độ lưu ảnh', 'Image storage mode')} defaultValue="processed" fullWidth sx={{ mb: 2 }}>
+              <MenuItem value="processed">{text('Lưu ảnh đã xử lý', 'Save processed image')}</MenuItem>
+              <MenuItem value="original">{text('Lưu ảnh gốc', 'Save original image')}</MenuItem>
+              <MenuItem value="both">{text('Lưu cả hai', 'Save both')}</MenuItem>
             </TextField>
             <Divider sx={{ my: 1.5 }} />
-            <FormControlLabel control={<Switch defaultChecked />} label="Tự động lưu kết quả sau xử lý" />
-            <FormControlLabel control={<Switch />} label="Hiển thị lưới tham chiếu khi xem ảnh" />
+            <FormControlLabel control={<Switch defaultChecked />} label={text('Tự động lưu kết quả sau xử lý', 'Automatically save results after analysis')} />
+            <FormControlLabel control={<Switch />} label={text('Hiển thị lưới tham chiếu khi xem ảnh', 'Show reference grid when viewing images')} />
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSettingsOpen(false)}>Hủy</Button>
-          <Button variant="contained" onClick={() => setSettingsOpen(false)}>Lưu cài đặt</Button>
+          <Button onClick={() => setSettingsOpen(false)}>{text('Hủy', 'Cancel')}</Button>
+          <Button variant="contained" onClick={() => setSettingsOpen(false)}>{text('Lưu cài đặt', 'Save settings')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

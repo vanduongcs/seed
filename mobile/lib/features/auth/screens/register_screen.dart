@@ -46,7 +46,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  '${appText(language, 'Đăng ký thất bại', 'Registration failed')}: ${state.error}',
+                  '${appText(language, 'Đăng ký thất bại', 'Registration failed')}: ${localizedText(language, state.error.toString())}',
                 ),
               ),
             ],

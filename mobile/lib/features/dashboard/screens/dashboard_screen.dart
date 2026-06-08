@@ -71,7 +71,10 @@ class _DashboardContent extends ConsumerWidget {
       padding: EdgeInsets.all(horizontalPadding),
       children: [
         if (historyError != null) ...[
-          Text(historyError!, style: TextStyle(color: Colors.red.shade700)),
+          Text(
+            localizedText(language, historyError!),
+            style: TextStyle(color: Colors.red.shade700),
+          ),
           const SizedBox(height: 14),
         ],
         _BackendAnalysisCard(onResultChanged: onSessionResultChanged),
@@ -208,15 +211,20 @@ String _formatMeasureStat(double? primary, String primaryUnit, double? fallback,
 }
 
 String _localizedProgressPhase(AppLanguage language, String phase) {
-  if (language == AppLanguage.vi) return phase;
   return switch (phase) {
     'Chuẩn bị ảnh' => 'Preparing image',
+    'Chuẩn bị nhận dạng trên thiết bị' => 'Preparing on-device detection',
+    'Phân tích trực tiếp trên thiết bị' => 'Analyzing directly on device',
+    'Chuẩn bị ảnh để nhận dạng' => 'Preparing image for detection',
+    'Đang nhận dạng hạt trên thiết bị' => 'Detecting grains on device',
+    'Tạo hình dạng, đo hạt và dựng ảnh' =>
+      'Creating masks, measuring grains, and rendering result',
     'Đang nhận dạng hạt' => 'Detecting grains',
     'Đo kích thước' => 'Measuring size',
     'Lưu kết quả' => 'Saving result',
     'Hoàn tất' => 'Complete',
     'Đang xử lý' => 'Processing',
-    _ => phase,
+    _ => localizedText(language, phase),
   };
 }
 
@@ -532,7 +540,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: Colors.red.shade700)),
+              Text(
+                localizedText(language, _error!),
+                style: TextStyle(color: Colors.red.shade700),
+              ),
             ],
             if (_busy) ...[
               const SizedBox(height: 10),
@@ -570,31 +581,36 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.fact_check_outlined,
                           size: 20,
                           color: Color(0xFF9A3412),
                         ),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Kiểm tra chất lượng hạt',
-                                style: TextStyle(
+                                appText(language, 'Kiểm tra chất lượng hạt',
+                                    'Grain quality check'),
+                                style: const TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w800,
                                   color: Color(0xFF7C2D12),
                                 ),
                               ),
-                              SizedBox(height: 3),
+                              const SizedBox(height: 3),
                               Text(
-                                'Hạt màu đỏ là vùng hệ thống nghi có lỗi tách vùng ảnh hoặc kích thước bất thường. Đây là gợi ý để người dùng kiểm tra lại, không phải kết luận loại hạt.',
-                                style: TextStyle(fontSize: 12),
+                                appText(
+                                  language,
+                                  'Hạt màu đỏ là vùng hệ thống nghi có lỗi tách vùng ảnh hoặc kích thước bất thường. Đây là gợi ý để người dùng kiểm tra lại, không phải kết luận loại hạt.',
+                                  'Red grains are regions the system suspects may have segmentation errors or unusual size. This is a review hint, not a grain classification.',
+                                ),
+                                style: const TextStyle(fontSize: 12),
                               ),
                             ],
                           ),
@@ -694,6 +710,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                 const SizedBox(height: 10),
                 _SuspectDecisionTable(
                   result: result,
+                  language: language,
                   onConfirm: _confirmSuspect,
                   onDelete: _deleteSuspect,
                 ),
@@ -892,11 +909,13 @@ class _QcMeasurementBox extends StatelessWidget {
 
 class _SuspectDecisionTable extends StatelessWidget {
   final GrainAnalysisResult result;
+  final AppLanguage language;
   final Future<void> Function(int id) onConfirm;
   final Future<void> Function(int id) onDelete;
 
   const _SuspectDecisionTable({
     required this.result,
+    required this.language,
     required this.onConfirm,
     required this.onDelete,
   });
@@ -921,37 +940,40 @@ class _SuspectDecisionTable extends StatelessWidget {
               color: Color(0xFFF8FAFC),
               border: Border(bottom: BorderSide(color: AppTheme.border)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Expanded(
+                const Expanded(
                   flex: 2,
                   child:
                       Text('ID', style: TextStyle(fontWeight: FontWeight.w800)),
                 ),
                 Expanded(
                   flex: 3,
-                  child: Text('Kích thước',
-                      style: TextStyle(fontWeight: FontWeight.w800)),
+                  child: Text(
+                    appText(language, 'Kích thước', 'Size'),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                 ),
                 SizedBox(
                   width: 92,
                   child: Text(
-                    'Quyết định',
+                    appText(language, 'Quyết định', 'Decision'),
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontWeight: FontWeight.w800),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
               ],
             ),
           ),
           if (suspects.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(10),
+            Padding(
+              padding: const EdgeInsets.all(10),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Không còn hạt nghi ngờ cần xử lý.',
-                  style: TextStyle(color: AppTheme.textSecondary),
+                  appText(language, 'Không còn hạt nghi ngờ cần xử lý.',
+                      'No suspect grains need review.'),
+                  style: const TextStyle(color: AppTheme.textSecondary),
                 ),
               ),
             )
@@ -959,6 +981,7 @@ class _SuspectDecisionTable extends StatelessWidget {
             for (final measurement in suspects)
               _SuspectDecisionRow(
                 measurement: measurement,
+                language: language,
                 onConfirm: onConfirm,
                 onDelete: onDelete,
               ),
@@ -970,11 +993,13 @@ class _SuspectDecisionTable extends StatelessWidget {
 
 class _SuspectDecisionRow extends StatelessWidget {
   final Map<String, dynamic> measurement;
+  final AppLanguage language;
   final Future<void> Function(int id) onConfirm;
   final Future<void> Function(int id) onDelete;
 
   const _SuspectDecisionRow({
     required this.measurement,
+    required this.language,
     required this.onConfirm,
     required this.onDelete,
   });
@@ -1016,13 +1041,15 @@ class _SuspectDecisionRow extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  tooltip: 'Xác nhận đây là hạt thật',
+                  tooltip: appText(language, 'Xác nhận đây là hạt thật',
+                      'Confirm this is a real grain'),
                   icon:
                       const Icon(Icons.check_circle, color: Color(0xFF16A34A)),
                   onPressed: () => onConfirm(id),
                 ),
                 IconButton(
-                  tooltip: 'Xóa nhận dạng sai khỏi kết quả',
+                  tooltip: appText(language, 'Xóa nhận dạng sai khỏi kết quả',
+                      'Remove wrong detection from result'),
                   icon: const Icon(Icons.cancel, color: Color(0xFFDC2626)),
                   onPressed: () => onDelete(id),
                 ),
@@ -1035,7 +1062,7 @@ class _SuspectDecisionRow extends StatelessWidget {
   }
 }
 
-class _ReferenceImageSelector extends StatefulWidget {
+class _ReferenceImageSelector extends ConsumerStatefulWidget {
   final Uint8List? bytes;
   final Size? imageSize;
   final Offset? start;
@@ -1055,11 +1082,12 @@ class _ReferenceImageSelector extends StatefulWidget {
   });
 
   @override
-  State<_ReferenceImageSelector> createState() =>
+  ConsumerState<_ReferenceImageSelector> createState() =>
       _ReferenceImageSelectorState();
 }
 
-class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
+class _ReferenceImageSelectorState
+    extends ConsumerState<_ReferenceImageSelector> {
   static const _handleHitRadius = 52.0;
 
   String? _dragTarget;
@@ -1111,6 +1139,7 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
 
   @override
   Widget build(BuildContext context) {
+    final language = ref.watch(appLanguageProvider);
     final sourceSize = widget.imageSize;
     final hasLine = widget.start != null && widget.end != null;
 
@@ -1215,9 +1244,9 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                 children: [
                   Row(
                     children: [
-                      const Text(
-                        'Hướng dẫn',
-                        style: TextStyle(
+                      Text(
+                        appText(language, 'Hướng dẫn', 'Guide'),
+                        style: const TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                           color: AppTheme.textPrimary,
@@ -1234,15 +1263,24 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
-                        tooltip: 'Xem hướng dẫn',
+                        tooltip:
+                            appText(language, 'Xem hướng dẫn', 'View guide'),
                       ),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
                     hasLine
-                        ? 'Kéo chốt A hoặc chốt B để khớp chính xác hai mép vật mốc.'
-                        : 'Nhấn vào vùng bất kỳ trên ảnh để khởi tạo đoạn thẳng tham chiếu kích thước.',
+                        ? appText(
+                            language,
+                            'Kéo chốt A hoặc chốt B để khớp chính xác hai mép vật mốc.',
+                            'Drag handle A or B to match the two marker edges precisely.',
+                          )
+                        : appText(
+                            language,
+                            'Nhấn vào vùng bất kỳ trên ảnh để khởi tạo đoạn thẳng tham chiếu kích thước.',
+                            'Tap anywhere on the image to initialize the size reference line.',
+                          ),
                     style: const TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,
@@ -1487,7 +1525,7 @@ class _ReferenceImageSelectorState extends State<_ReferenceImageSelector> {
   }
 }
 
-class _ReferenceHandleControls extends StatelessWidget {
+class _ReferenceHandleControls extends ConsumerWidget {
   final bool enabled;
   final String selectedHandle;
   final VoidCallback onSelectStart;
@@ -1509,15 +1547,16 @@ class _ReferenceHandleControls extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final chips = [
       ChoiceChip(
-        label: const Text('Chốt A'),
+        label: Text(appText(language, 'Chốt A', 'Handle A')),
         selected: selectedHandle == 'start',
         onSelected: enabled ? (_) => onSelectStart() : null,
       ),
       ChoiceChip(
-        label: const Text('Chốt B'),
+        label: Text(appText(language, 'Chốt B', 'Handle B')),
         selected: selectedHandle == 'end',
         onSelected: enabled ? (_) => onSelectEnd() : null,
       ),
@@ -1875,11 +1914,12 @@ class _StatTile extends StatelessWidget {
   }
 }
 
-class _ImagePlaceholder extends StatelessWidget {
+class _ImagePlaceholder extends ConsumerWidget {
   const _ImagePlaceholder();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1890,17 +1930,18 @@ class _ImagePlaceholder extends StatelessWidget {
             color: AppTheme.textSecondary.withValues(alpha: 0.45),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Chưa có ảnh',
-            style: TextStyle(
+          Text(
+            appText(language, 'Chưa có ảnh', 'No image'),
+            style: const TextStyle(
               fontWeight: FontWeight.w600,
               color: AppTheme.textSecondary,
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Chọn ảnh hoặc chụp ảnh để bắt đầu',
-            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          Text(
+            appText(language, 'Chọn ảnh hoặc chụp ảnh để bắt đầu',
+                'Choose or capture an image to start'),
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
           ),
         ],
       ),
@@ -2069,15 +2110,16 @@ class _GuideImage extends StatelessWidget {
   }
 }
 
-class _CalibrationGuideDialog extends StatefulWidget {
+class _CalibrationGuideDialog extends ConsumerStatefulWidget {
   const _CalibrationGuideDialog();
 
   @override
-  State<_CalibrationGuideDialog> createState() =>
+  ConsumerState<_CalibrationGuideDialog> createState() =>
       _CalibrationGuideDialogState();
 }
 
-class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
+class _CalibrationGuideDialogState
+    extends ConsumerState<_CalibrationGuideDialog> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
 
@@ -2089,6 +2131,7 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final language = ref.watch(appLanguageProvider);
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       backgroundColor: Colors.white,
@@ -2102,14 +2145,15 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.help_center_outlined,
+                    const Icon(Icons.help_center_outlined,
                         color: AppTheme.primary, size: 20),
-                    SizedBox(width: 6),
+                    const SizedBox(width: 6),
                     Text(
-                      'Hướng dẫn căn mốc',
-                      style: TextStyle(
+                      appText(language, 'Hướng dẫn căn mốc',
+                          'Reference marker guide'),
+                      style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 15,
                         color: AppTheme.textPrimary,
@@ -2132,34 +2176,50 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
               child: PageView(
                 controller: _pageController,
                 onPageChanged: (page) => setState(() => _currentPage = page),
-                children: const [
+                children: [
                   _GuideSlide(
-                    title: '1. Upload ảnh hạt và vật mốc',
-                    description:
-                        'Chọn hoặc chụp ảnh có cả hạt cần đo và vật mốc có kích thước thật đã biết.',
-                    diagram:
-                        _GuideImage('assets/images/calibration_guide_1.png'),
+                    title: appText(language, '1. Upload ảnh hạt và vật mốc',
+                        '1. Upload grain image and reference marker'),
+                    description: appText(
+                      language,
+                      'Chọn hoặc chụp ảnh có cả hạt cần đo và vật mốc có kích thước thật đã biết.',
+                      'Choose or capture an image containing both grains to measure and a reference marker with known real size.',
+                    ),
+                    diagram: const _GuideImage(
+                        'assets/images/calibration_guide_1.png'),
                   ),
                   _GuideSlide(
-                    title: '2. Tạo đoạn đo bằng 2 chốt',
-                    description:
-                        'Chạm lên vật mốc để tạo đoạn thẳng gồm chốt A và chốt B.',
-                    diagram:
-                        _GuideImage('assets/images/calibration_guide_2.png'),
+                    title: appText(language, '2. Tạo đoạn đo bằng 2 chốt',
+                        '2. Create a measurement line with 2 handles'),
+                    description: appText(
+                      language,
+                      'Chạm lên vật mốc để tạo đoạn thẳng gồm chốt A và chốt B.',
+                      'Tap the reference marker to create a line with handle A and handle B.',
+                    ),
+                    diagram: const _GuideImage(
+                        'assets/images/calibration_guide_2.png'),
                   ),
                   _GuideSlide(
-                    title: '3. Kéo thả chốt đo vật mốc',
-                    description:
-                        'Kéo từng chốt tới đúng hai mép vật mốc; có thể dùng nút mũi tên để tinh chỉnh từng pixel.',
-                    diagram:
-                        _GuideImage('assets/images/calibration_guide_3.png'),
+                    title: appText(language, '3. Kéo thả chốt đo vật mốc',
+                        '3. Drag the reference marker handles'),
+                    description: appText(
+                      language,
+                      'Kéo từng chốt tới đúng hai mép vật mốc; có thể dùng nút mũi tên để tinh chỉnh từng pixel.',
+                      'Drag each handle to the two marker edges; use arrow buttons for pixel-level tuning.',
+                    ),
+                    diagram: const _GuideImage(
+                        'assets/images/calibration_guide_3.png'),
                   ),
                   _GuideSlide(
-                    title: '4. Nhập kích thước thật',
-                    description:
-                        'Nhập chiều dài thật của vật mốc vào ô Kích thước (mm), sau đó bấm Xử lý.',
-                    diagram:
-                        _GuideImage('assets/images/calibration_guide_4.png'),
+                    title: appText(language, '4. Nhập kích thước thật',
+                        '4. Enter the real size'),
+                    description: appText(
+                      language,
+                      'Nhập chiều dài thật của vật mốc vào ô Kích thước (mm), sau đó bấm Xử lý.',
+                      'Enter the marker real length in Size (mm), then press Analyze.',
+                    ),
+                    diagram: const _GuideImage(
+                        'assets/images/calibration_guide_4.png'),
                   ),
                 ],
               ),
@@ -2198,9 +2258,9 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                             curve: Curves.easeInOut,
                           );
                         },
-                        child: const Text(
-                          'Quay lại',
-                          style: TextStyle(
+                        child: Text(
+                          appText(language, 'Quay lại', 'Back'),
+                          style: const TextStyle(
                               color: AppTheme.textSecondary, fontSize: 13),
                         ),
                       ),
@@ -2221,7 +2281,9 @@ class _CalibrationGuideDialogState extends State<_CalibrationGuideDialog> {
                           Navigator.of(context).pop();
                         }
                       },
-                      child: Text(_currentPage == 3 ? 'Bắt đầu' : 'Tiếp theo'),
+                      child: Text(_currentPage == 3
+                          ? appText(language, 'Bắt đầu', 'Start')
+                          : appText(language, 'Tiếp theo', 'Next')),
                     ),
                   ],
                 ),

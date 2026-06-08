@@ -122,7 +122,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                 'Đơn vị đo mặc định',
                 'Default measurement unit',
               )),
-              subtitle: const Text('Milimét (mm)'),
+              subtitle: Text(appText(
+                language,
+                'Milimét (mm)',
+                'Millimeter (mm)',
+              )),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -170,9 +174,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
+    final language = ref.read(appLanguageProvider);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(localizedText(language, message)),
         backgroundColor: Colors.red.shade700,
       ),
     );

@@ -36,7 +36,7 @@ class StorageScreen extends ConsumerWidget {
             _Header(isGuest: isGuest),
             const SizedBox(height: 18),
             Text(
-              error.toString(),
+              localizedText(language, error.toString()),
               style: TextStyle(color: Colors.red.shade700),
             ),
           ],
@@ -61,7 +61,7 @@ class StorageScreen extends ConsumerWidget {
             final run = runs[index - 2];
             return _RunCard(
               run: run,
-              onTap: () => _openRunDetail(context, run.id),
+              onTap: () => _openRunDetail(context, run.id, language),
             );
           },
         ),
@@ -269,7 +269,8 @@ Uint8List? _decodePreview(String value) {
   }
 }
 
-Future<void> _openRunDetail(BuildContext context, String runId) async {
+Future<void> _openRunDetail(
+    BuildContext context, String runId, AppLanguage language) async {
   showDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -288,7 +289,11 @@ Future<void> _openRunDetail(BuildContext context, String runId) async {
     if (!context.mounted) return;
     Navigator.of(context).pop();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Không tải được chi tiết: $error')),
+      SnackBar(
+        content: Text(
+          '${appText(language, 'Không tải được chi tiết', 'Could not load details')}: $error',
+        ),
+      ),
     );
   }
 }

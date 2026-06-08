@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../i18n/app_language.dart';
 import '../theme/app_theme.dart';
 import 'mobile_update_service.dart';
 
-class MobileUpdateGate extends StatefulWidget {
+class MobileUpdateGate extends ConsumerStatefulWidget {
   final Widget child;
 
   const MobileUpdateGate({super.key, required this.child});
 
   @override
-  State<MobileUpdateGate> createState() => _MobileUpdateGateState();
+  ConsumerState<MobileUpdateGate> createState() => _MobileUpdateGateState();
 }
 
-class _MobileUpdateGateState extends State<MobileUpdateGate> {
+class _MobileUpdateGateState extends ConsumerState<MobileUpdateGate> {
   static const _channel = MethodChannel('vn.mekonglab.seedvision/app_update');
 
   final _updateService = MobileUpdateService();
@@ -38,6 +40,7 @@ class _MobileUpdateGateState extends State<MobileUpdateGate> {
   Future<void> _showUpdateDialog(MobileUpdateCheckResult result) async {
     final info = result.updateInfo;
     final required = result.isRequired;
+    final language = ref.read(appLanguageProvider);
     await showDialog<void>(
       context: context,
       barrierDismissible: !required,
@@ -45,15 +48,15 @@ class _MobileUpdateGateState extends State<MobileUpdateGate> {
         return PopScope(
           canPop: !required,
           child: AlertDialog(
-            title: Text(info.title),
+            title: Text(localizedText(language, info.title)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(info.message),
+                Text(localizedText(language, info.message)),
                 const SizedBox(height: 10),
                 Text(
-                  'Phiên bản mới: ${info.latestVersionName}',
+                  '${appText(language, 'Phiên bản mới', 'New version')}: ${info.latestVersionName}',
                   style: const TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 13,
@@ -65,12 +68,12 @@ class _MobileUpdateGateState extends State<MobileUpdateGate> {
               if (!required)
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Để sau'),
+                  child: Text(appText(language, 'Để sau', 'Later')),
                 ),
               ElevatedButton.icon(
                 onPressed: () => _openStore(info.playStoreUrl),
                 icon: const Icon(Icons.open_in_new),
-                label: const Text('Cập nhật'),
+                label: Text(appText(language, 'Cập nhật', 'Update')),
               ),
             ],
           ),

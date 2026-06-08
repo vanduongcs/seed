@@ -27,6 +27,7 @@ import {
 import { api } from '@/api/axios.js';
 import { formatMeasure, formatNumber, safeStem } from '@/components/grain/format.js';
 import { GrainStatsCharts } from '@/components/grain/GrainStatsCharts.jsx';
+import { useLanguage } from '@/i18n.jsx';
 import { useAuthStore } from '@/store/auth.store.js';
 import { deleteGuestRun, readGuestRuns } from '@/utils/guestRuns.js';
 
@@ -37,6 +38,7 @@ function reportedStat(summary, rawKey, robustKey) {
 }
 
 function RunThumbnail({ run, isGuest }) {
+  const { text } = useLanguage();
   const hostRef = useRef(null);
   const [overlay, setOverlay] = useState(run.overlay_png_base64 || '');
   const [visible, setVisible] = useState(Boolean(run.overlay_png_base64));
@@ -88,7 +90,7 @@ function RunThumbnail({ run, isGuest }) {
         <Box
           component="img"
           src={`data:image/png;base64,${overlay}`}
-          alt="Ảnh đánh dấu"
+          alt={text('Ảnh đánh dấu', 'Overlay image')}
           sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
       ) : (
@@ -100,6 +102,7 @@ function RunThumbnail({ run, isGuest }) {
 
 export default function StoragePage() {
   const isGuest = useAuthStore((state) => state.isGuest);
+  const { language, text } = useLanguage();
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -128,7 +131,7 @@ export default function StoragePage() {
       const { data } = await api.get('/grain/runs', { params: { limit: 100 } });
       setRuns(data.data.items || []);
     } catch (err) {
-      setError(err.response?.data?.message || 'Không tải được lịch sử phân tích');
+      setError(err.response?.data?.message || text('Không tải được lịch sử phân tích', 'Could not load analysis history'));
     } finally {
       setLoading(false);
     }
@@ -144,7 +147,7 @@ export default function StoragePage() {
     try {
       if (isGuest) {
         const local = readGuestRuns().find((item) => item.clientRunId === runId);
-        if (!local) throw new Error('Không tìm thấy bản xử lý local');
+        if (!local) throw new Error(text('Không tìm thấy bản xử lý local', 'Local analysis run was not found'));
         setSelected({
           run: {
             ...(local.result?.run || {}),
@@ -161,14 +164,14 @@ export default function StoragePage() {
       setSelected(data.data);
       setDetailPreviewMode('overlay');
     } catch (err) {
-      setError(err.response?.data?.message || 'Không tải được chi tiết xử lý');
+      setError(err.response?.data?.message || text('Không tải được chi tiết xử lý', 'Could not load analysis details'));
     } finally {
       setDetailLoading(false);
     }
   };
 
   const deleteRun = async (run) => {
-    const ok = window.confirm(`Xóa lần xử lý ${shortRunId(run.id)}?`);
+    const ok = window.confirm(`${text('Xóa lần xử lý', 'Delete analysis run')} ${shortRunId(run.id)}?`);
     if (!ok) return;
 
     try {
@@ -182,7 +185,7 @@ export default function StoragePage() {
       setRuns((current) => current.filter((item) => item.id !== run.id));
       if (selected?.run?.id === run.id) setSelected(null);
     } catch (err) {
-      setError(err.response?.data?.message || 'Xóa lần xử lý thất bại');
+      setError(err.response?.data?.message || text('Xóa lần xử lý thất bại', 'Could not delete analysis run'));
     }
   };
 
@@ -201,14 +204,14 @@ export default function StoragePage() {
     <Box sx={{ maxWidth: 1200, minWidth: 0 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mb: 2.5, flexWrap: 'wrap' }}>
         <Box>
-          <Typography variant="h5" fontWeight={700} mb={0.75}>Lưu trữ</Typography>
+          <Typography variant="h5" fontWeight={700} mb={0.75}>{text('Lưu trữ', 'Storage')}</Typography>
           {isGuest && (
             <Typography variant="body2" color="text.secondary">
-              Dữ liệu đang được lưu trên thiết bị này. Đăng nhập để đồng bộ lên tài khoản của bạn.
+              {text('Dữ liệu đang được lưu trên thiết bị này. Đăng nhập để đồng bộ lên tài khoản của bạn.', 'Data is saved on this device. Log in to sync it to your account.')}
             </Typography>
           )}
         </Box>
-        <IconButton color="primary" onClick={loadRuns} disabled={loading} aria-label="Làm mới">
+        <IconButton color="primary" onClick={loadRuns} disabled={loading} aria-label={text('Làm mới', 'Refresh')}>
           <RefreshOutlined />
         </IconButton>
       </Box>
@@ -230,10 +233,10 @@ export default function StoragePage() {
                   <RunThumbnail run={run} isGuest={isGuest} />
                   <Stack spacing={0.75} sx={{ minWidth: 0, flexGrow: 1 }}>
                     <Typography variant="body1" fontWeight={700} noWrap>
-                      {`${run.summary?.count ?? 0} hạt - ${formatDate(run.createdAt)}`}
+                      {`${run.summary?.count ?? 0} ${text('hạt', 'grains')} - ${formatDate(run.createdAt, language)}`}
                     </Typography>
                     <Typography variant="body2" fontWeight={650} color="text.primary">
-                      ĐLC: {formatPair(
+                      {text('ĐLC', 'SD')}: {formatPair(
                         reportedStat(run.summary, 'std_length_mm', 'robust_std_length_mm'),
                         reportedStat(run.summary, 'std_width_mm', 'robust_std_width_mm'),
                         reportedStat(run.summary, 'std_length_px', 'robust_std_length_px'),
@@ -242,7 +245,7 @@ export default function StoragePage() {
                       )}
                     </Typography>
                     <Typography variant="body2" fontWeight={650} color="text.primary">
-                      TB: {formatPair(
+                      {text('TB', 'Avg')}: {formatPair(
                         run.summary?.mean_length_mm,
                         run.summary?.mean_width_mm,
                         run.summary?.mean_length_px,
@@ -251,8 +254,8 @@ export default function StoragePage() {
                       )}
                     </Typography>
                     <Stack direction="row" spacing={0.5} sx={{ mt: 'auto' }}>
-                      <Button size="small" startIcon={<VisibilityOutlined />} onClick={() => openDetail(run.id)} disabled={detailLoading}>Xem</Button>
-                      <Button size="small" color="error" startIcon={<DeleteOutline />} onClick={() => deleteRun(run)}>Xóa</Button>
+                      <Button size="small" startIcon={<VisibilityOutlined />} onClick={() => openDetail(run.id)} disabled={detailLoading}>{text('Xem', 'View')}</Button>
+                      <Button size="small" color="error" startIcon={<DeleteOutline />} onClick={() => deleteRun(run)}>{text('Xóa', 'Delete')}</Button>
                     </Stack>
                   </Stack>
                 </CardContent>
@@ -261,11 +264,11 @@ export default function StoragePage() {
           ))}
         </Grid>
       ) : (
-        <Alert severity="info">Chưa có dữ liệu.</Alert>
+        <Alert severity="info">{text('Chưa có dữ liệu.', 'No data yet.')}</Alert>
       )}
 
       <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} maxWidth="lg" fullWidth>
-        <DialogTitle>Chi tiết xử lý {detailRun ? shortRunId(detailRun.id) : ''}</DialogTitle>
+        <DialogTitle>{text('Chi tiết xử lý', 'Analysis detail')} {detailRun ? shortRunId(detailRun.id) : ''}</DialogTitle>
         <DialogContent dividers>
           {detailResult && (
             <Grid container spacing={2}>
@@ -277,10 +280,10 @@ export default function StoragePage() {
                   mb: 1.5,
                 }}>
                   {[
-                    ['original', 'Ảnh gốc'],
-                    ['overlay', 'Đánh dấu'],
-                    ['mask', 'Hình dạng'],
-                    ['labels', 'Đánh số'],
+                    ['original', text('Ảnh gốc', 'Original')],
+                    ['overlay', text('Đánh dấu', 'Overlay')],
+                    ['mask', text('Hình dạng', 'Mask')],
+                    ['labels', text('Đánh số', 'Labels')],
                   ].map(([key, label]) => (
                     <Button
                       key={key}
@@ -318,25 +321,25 @@ export default function StoragePage() {
                       sx={{ width: '100%', maxHeight: 420, objectFit: 'contain', display: 'block' }}
                     />
                   ) : (
-                    <Typography variant="body2" color="text.secondary">Không có overlay</Typography>
+                    <Typography variant="body2" color="text.secondary">{text('Không có overlay', 'No overlay')}</Typography>
                   )}
                 </Box>
               </Grid>
               <Grid item xs={12} md={5}>
                 <Stack spacing={1.2}>
-                  <ResultRow label="Tên tệp ảnh" value={detailRun?.sourceFileName || '-'} />
-                  <ResultRow label="Thời gian quét" value={formatDate(detailRun?.createdAt)} />
-                  <ResultRow label="Tổng số hạt đo được" value={detailResult.summary?.count ?? 0} />
-                  <ResultRow label="ĐLC chiều dài (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(detailResult.summary, 'std_length_px', 'robust_std_length_px'), 'px')} />
-                  <ResultRow label="ĐLC chiều rộng (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(detailResult.summary, 'std_width_px', 'robust_std_width_px'), 'px')} />
-                  <ResultRow label="ĐLC diện tích (báo cáo)" value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat(detailResult.summary, 'std_area_px', 'robust_std_area_px'), 'px2')} />
-                  <ResultRow label="Hạt nghi ngờ sau kiểm tra" value={String(detailResult.summary?.qc?.suspect_count ?? 0)} />
-                  <ResultRow label="Tỷ lệ thước đo" value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : 'Chưa thiết lập'} />
+                  <ResultRow label={text('Tên tệp ảnh', 'Image file name')} value={detailRun?.sourceFileName || '-'} />
+                  <ResultRow label={text('Thời gian quét', 'Scan time')} value={formatDate(detailRun?.createdAt, language)} />
+                  <ResultRow label={text('Tổng số hạt đo được', 'Total measured grains')} value={detailResult.summary?.count ?? 0} />
+                  <ResultRow label={text('ĐLC chiều dài (báo cáo)', 'Length SD (reported)')} value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat(detailResult.summary, 'std_length_px', 'robust_std_length_px'), 'px')} />
+                  <ResultRow label={text('ĐLC chiều rộng (báo cáo)', 'Width SD (reported)')} value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat(detailResult.summary, 'std_width_px', 'robust_std_width_px'), 'px')} />
+                  <ResultRow label={text('ĐLC diện tích (báo cáo)', 'Area SD (reported)')} value={formatStorageMeasure(detailResult.calibration, reportedStat(detailResult.summary, 'std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat(detailResult.summary, 'std_area_px', 'robust_std_area_px'), 'px2')} />
+                  <ResultRow label={text('Hạt nghi ngờ sau kiểm tra', 'Suspect grains after QC')} value={String(detailResult.summary?.qc?.suspect_count ?? 0)} />
+                  <ResultRow label={text('Tỷ lệ thước đo', 'Scale ratio')} value={detailResult.calibration?.enabled ? `${formatNumber(detailResult.calibration.mm_per_pixel, 5)} mm/px` : text('Chưa thiết lập', 'Not set')} />
 
                   <Divider sx={{ my: 0.5 }} />
                   <Box>
                     <Typography variant="subtitle2" fontWeight={800} mb={0.75}>
-                      Tóm tắt kích thước đã lưu
+                      {text('Tóm tắt kích thước đã lưu', 'Saved size summary')}
                     </Typography>
                     <GrainStatsCharts result={detailResult} compact />
                   </Box>
@@ -348,7 +351,7 @@ export default function StoragePage() {
                       disabled={!detailResult.csv}
                       onClick={() => downloadBlob(`${safeStem(detailRun?.sourceFileName)}_measurements.csv`, detailResult.csv, 'text/csv;charset=utf-8')}
                     >
-                      Xuất CSV
+                      {text('Xuất CSV', 'Export CSV')}
                     </Button>
                     <Button
                       variant="outlined"
@@ -356,7 +359,7 @@ export default function StoragePage() {
                       disabled={!detailResult.overlay_png_base64}
                       onClick={() => downloadPng(detailRun?.sourceFileName, detailResult.overlay_png_base64)}
                     >
-                      Xuất ảnh kết quả
+                      {text('Xuất ảnh kết quả', 'Export result image')}
                     </Button>
                   </Stack>
                 </Stack>
@@ -365,7 +368,7 @@ export default function StoragePage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSelected(null)}>Đóng</Button>
+          <Button onClick={() => setSelected(null)}>{text('Đóng', 'Close')}</Button>
         </DialogActions>
       </Dialog>
     </Box>
@@ -393,9 +396,9 @@ const ResultRow = ({ label, value }) => (
 
 const shortRunId = (id = '') => id ? `RUN-${id.slice(-8).toUpperCase()}` : 'RUN';
 
-const formatDate = (value) => {
+const formatDate = (value, language = 'vi') => {
   if (!value) return '-';
-  return new Intl.DateTimeFormat('vi-VN', {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'vi-VN', {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(value));

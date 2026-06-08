@@ -43,7 +43,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  '${appText(language, 'Đăng nhập thất bại', 'Login failed')}: ${state.error}',
+                  '${appText(language, 'Đăng nhập thất bại', 'Login failed')}: ${localizedText(language, state.error.toString())}',
                 ),
               ),
             ],

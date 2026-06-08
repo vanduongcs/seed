@@ -8,12 +8,14 @@ import { DashboardResultPanel } from '@/components/grain/DashboardResultPanel.js
 import { formatMeasure, safeStem } from '@/components/grain/format.js';
 import { GrainStatsCharts } from '@/components/grain/GrainStatsCharts.jsx';
 import { StatCard } from '@/components/grain/StatCard.jsx';
+import { useLanguage } from '@/i18n.jsx';
 import { saveGuestRun, updateGuestRunResult } from '@/utils/guestRuns.js';
 
 const emptyCalibration = { start: null, end: null, referenceMm: '' };
 
 export default function DashboardPage() {
   const isGuest = useAuthStore((state) => state.isGuest);
+  const { text } = useLanguage();
   const videoRef = useRef(null);
   const imageRef = useRef(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -59,7 +61,7 @@ export default function DashboardPage() {
       setCameraActive(true);
       resetRunState();
     } catch {
-      setCameraError('Không thể kết nối camera. Kiểm tra quyền truy cập hoặc thiết bị.');
+      setCameraError(text('Không thể kết nối camera. Kiểm tra quyền truy cập hoặc thiết bị.', 'Could not connect to the camera. Check permission or device access.'));
     }
   };
 
@@ -80,7 +82,7 @@ export default function DashboardPage() {
     };
     reader.onerror = () => {
       setPreviewUrl('');
-      setProcessError('Không thể đọc ảnh đã chọn. Vui lòng thử ảnh JPG hoặc PNG khác.');
+      setProcessError(text('Không thể đọc ảnh đã chọn. Vui lòng thử ảnh JPG hoặc PNG khác.', 'Could not read the selected image. Please try another JPG or PNG image.'));
     };
     reader.readAsDataURL(file);
 
@@ -151,7 +153,7 @@ export default function DashboardPage() {
     setProcessing(true);
     setProcessError('');
     setProgress(5);
-    setProgressPhase('Chuẩn bị ảnh');
+    setProgressPhase(text('Chuẩn bị ảnh', 'Preparing image'));
 
     const startProgressDrift = () => {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
@@ -166,7 +168,7 @@ export default function DashboardPage() {
     try {
       const file = await getImageForProcessing();
       if (!file) {
-        setProcessError('Vui lòng import ảnh hoặc bật camera trước khi xử lý.');
+        setProcessError(text('Vui lòng import ảnh hoặc bật camera trước khi xử lý.', 'Please import an image or turn on the camera before analyzing.'));
         setProgress(0);
         setProgressPhase('');
         setProcessing(false);
@@ -174,7 +176,7 @@ export default function DashboardPage() {
       }
 
       setProgress(20);
-      setProgressPhase(isGuest ? 'Chuẩn bị xử lý' : 'Xác thực phiên');
+      setProgressPhase(isGuest ? text('Chuẩn bị xử lý', 'Preparing analysis') : text('Xác thực phiên', 'Checking session'));
       if (!isGuest) await ensureFreshAccessToken();
 
       const formData = new FormData();
@@ -192,7 +194,7 @@ export default function DashboardPage() {
       }
 
       setProgress(50);
-      setProgressPhase('Đang nhận dạng hạt');
+      setProgressPhase(text('Đang nhận dạng hạt', 'Detecting grains'));
       startProgressDrift();
 
       const analysisApi = isGuest ? publicApi : api;
@@ -204,7 +206,7 @@ export default function DashboardPage() {
 
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
       setProgress(96);
-      setProgressPhase('Lưu kết quả');
+      setProgressPhase(text('Lưu kết quả', 'Saving result'));
       qcRenderSeqRef.current += 1;
       setResult(data.data);
       if (isGuest) {
@@ -212,12 +214,12 @@ export default function DashboardPage() {
       }
       setPreviewMode('overlay');
       setProgress(100);
-      setProgressPhase('Hoàn tất');
+      setProgressPhase(text('Hoàn tất', 'Complete'));
     } catch (err) {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
       setProgress(0);
       setProgressPhase('');
-      setProcessError(resolveProcessError(err));
+      setProcessError(resolveProcessError(err, text));
     } finally {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
       setProcessing(false);
@@ -291,33 +293,33 @@ export default function DashboardPage() {
 
   const stats = [
     {
-      label: 'Số hạt đo được',
+      label: text('Số hạt đo được', 'Measured grains'),
       value: summary ? String(summary.count) : '0',
-      note: result ? 'Theo lần xử lý hiện tại' : 'Chưa có dữ liệu',
+      note: result ? text('Theo lần xử lý hiện tại', 'Current analysis') : text('Chưa có dữ liệu', 'No data yet'),
     },
     {
-      label: 'Giá trị trung bình (dài × rộng)',
+      label: text('Giá trị trung bình (dài × rộng)', 'Average value (length × width)'),
       value: summary
         ? `${formatMeasure(summary?.mean_length_mm, 'mm', summary?.mean_length_px, 'px')} × ${formatMeasure(summary?.mean_width_mm, 'mm', summary?.mean_width_px, 'px')}`
         : '-',
-      note: 'Thống kê trung bình trên các hạt hợp lệ',
+      note: text('Thống kê trung bình trên các hạt hợp lệ', 'Average statistics from valid grains'),
     },
     {
-      label: 'Giá trị trung bình diện tích',
+      label: text('Giá trị trung bình diện tích', 'Average area'),
       value: summary ? formatMeasure(summary?.mean_area_mm2, 'mm2', summary?.mean_area_px, 'px2') : '-',
-      note: 'Thống kê trung bình trên các hạt hợp lệ',
+      note: text('Thống kê trung bình trên các hạt hợp lệ', 'Average statistics from valid grains'),
     },
     {
-      label: 'Độ lệch chuẩn (dài × rộng)',
+      label: text('Độ lệch chuẩn (dài × rộng)', 'Standard deviation (length × width)'),
       value: summary
         ? `${formatMeasure(reportedStat('std_length_mm', 'robust_std_length_mm'), 'mm', reportedStat('std_length_px', 'robust_std_length_px'), 'px')} × ${formatMeasure(reportedStat('std_width_mm', 'robust_std_width_mm'), 'mm', reportedStat('std_width_px', 'robust_std_width_px'), 'px')}`
         : '-',
-      note: useRobustStats ? 'Sau kiểm tra hạt nghi ngờ' : 'Dùng SD thô vì hạt nghi ngờ cao',
+      note: useRobustStats ? text('Sau kiểm tra hạt nghi ngờ', 'After suspect-grain QC') : text('Dùng SD thô vì hạt nghi ngờ cao', 'Using raw SD because suspect ratio is high'),
     },
     {
-      label: 'Độ lệch chuẩn diện tích',
+      label: text('Độ lệch chuẩn diện tích', 'Area standard deviation'),
       value: summary ? formatMeasure(reportedStat('std_area_mm2', 'robust_std_area_mm2'), 'mm2', reportedStat('std_area_px', 'robust_std_area_px'), 'px2') : '-',
-      note: useRobustStats ? 'Sau kiểm tra hạt nghi ngờ' : 'Dùng SD thô vì hạt nghi ngờ cao',
+      note: useRobustStats ? text('Sau kiểm tra hạt nghi ngờ', 'After suspect-grain QC') : text('Dùng SD thô vì hạt nghi ngờ cao', 'Using raw SD because suspect ratio is high'),
     },
   ];
 
@@ -400,23 +402,23 @@ export default function DashboardPage() {
   );
 }
 
-const resolveProcessError = (err) => {
+const resolveProcessError = (err, text) => {
   if (err.response?.status === 401) {
-    return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại rồi chạy xử lý.';
+    return text('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại rồi chạy xử lý.', 'Your session expired. Please log in again and run analysis.');
   }
 
   const message = err.response?.data?.message;
   if (message) return message;
   if (err.code === 'ECONNABORTED') {
-    return 'Xử lý quá lâu. Hãy thử ảnh nhỏ hơn, chụp gần hơn hoặc xử lý lại sau.';
+    return text('Xử lý quá lâu. Hãy thử ảnh nhỏ hơn, chụp gần hơn hoặc xử lý lại sau.', 'Analysis took too long. Try a smaller image, shoot closer, or run it again later.');
   }
   if (err.response?.status === 503 || (err.response?.status === 500 && typeof err.response?.data === 'string')) {
-    return 'Hệ thống đang chưa sẵn sàng. Vui lòng thử lại sau.';
+    return text('Hệ thống đang chưa sẵn sàng. Vui lòng thử lại sau.', 'The system is not ready yet. Please try again later.');
   }
   if (err.code === 'ERR_NETWORK') {
-    return 'Không kết nối được. Kiểm tra mạng rồi thử lại.';
+    return text('Không kết nối được. Kiểm tra mạng rồi thử lại.', 'Could not connect. Check the network and try again.');
   }
-  return 'Không xử lý được ảnh. Vui lòng thử lại với ảnh khác hoặc kiểm tra kết nối.';
+  return text('Không xử lý được ảnh. Vui lòng thử lại với ảnh khác hoặc kiểm tra kết nối.', 'Could not analyze the image. Try another image or check the connection.');
 };
 
 const downloadBlob = (fileName, content, mimeType) => {

@@ -274,7 +274,7 @@ class _GrainStatsChartsState extends ConsumerState<GrainStatsCharts> {
   }
 }
 
-class _MetricGrid extends StatelessWidget {
+class _MetricGrid extends ConsumerWidget {
   final _ChartModel model;
   final String chartMode;
 
@@ -284,7 +284,8 @@ class _MetricGrid extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final keys = chartMode == 'all'
         ? const ['length', 'width', 'area']
         : <String>[chartMode, 'review'];
@@ -302,18 +303,26 @@ class _MetricGrid extends StatelessWidget {
             for (final key in keys)
               if (key == 'review')
                 _MetricTile(
-                  label: 'Hạt cần xem lại',
+                  label:
+                      appText(language, 'Hạt cần xem lại', 'Grains to review'),
                   value: '${model.suspectCount}/${model.totalCount}',
-                  helper: '${_formatNumber(model.suspectPct, 1)}% tổng số hạt.',
+                  helper: appText(
+                    language,
+                    '${_formatNumber(model.suspectPct, 1)}% tổng số hạt.',
+                    '${_formatNumber(model.suspectPct, 1)}% of total grains.',
+                  ),
                 )
               else if (model.distributions[key] case final distribution?)
                 _MetricTile(
-                  label: distribution.title
-                      .replaceFirst('Phân bố ', 'Cỡ thường gặp theo '),
+                  label: localizedText(
+                    language,
+                    distribution.title
+                        .replaceFirst('Phân bố ', 'Cỡ thường gặp theo '),
+                  ),
                   value:
                       '${_formatNumber(distribution.midpoint, distribution.decimals)} ${distribution.unit}',
                   helper:
-                      'Khoảng phổ biến: ${_formatNumber(_percentile(distribution.sortedValues, 0.1), distribution.decimals)}-${_formatNumber(_percentile(distribution.sortedValues, 0.9), distribution.decimals)} ${distribution.unit}',
+                      '${appText(language, 'Khoảng phổ biến', 'Common range')}: ${_formatNumber(_percentile(distribution.sortedValues, 0.1), distribution.decimals)}-${_formatNumber(_percentile(distribution.sortedValues, 0.9), distribution.decimals)} ${distribution.unit}',
                 ),
           ],
         );
@@ -369,13 +378,14 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-class _EvennessBar extends StatelessWidget {
+class _EvennessBar extends ConsumerWidget {
   final _ChartModel model;
 
   const _EvennessBar({required this.model});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final value = (100 - model.spreadPct).clamp(0, 100).toDouble();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -383,10 +393,11 @@ class _EvennessBar extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Độ đồng đều',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+            Text(appText(language, 'Độ đồng đều', 'Uniformity'),
+                style:
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
             Text(
-              'Chênh lệch: ${_formatNumber(model.spreadPct, 1)}%',
+              '${appText(language, 'Chênh lệch', 'Spread')}: ${_formatNumber(model.spreadPct, 1)}%',
               style:
                   const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
             ),
@@ -407,13 +418,14 @@ class _EvennessBar extends StatelessWidget {
   }
 }
 
-class _SizeGroupSection extends StatelessWidget {
+class _SizeGroupSection extends ConsumerWidget {
   final _Distribution? distribution;
 
   const _SizeGroupSection({required this.distribution});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final data = distribution;
     if (data == null || data.sortedValues.isEmpty || data.midpoint <= 0) {
       return const SizedBox.shrink();
@@ -423,7 +435,10 @@ class _SizeGroupSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Nhóm kích thước theo ${data.title.replaceFirst('Phân bố ', '').toLowerCase()}',
+          localizedText(
+            language,
+            'Nhóm kích thước theo ${data.title.replaceFirst('Phân bố ', '').toLowerCase()}',
+          ),
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
@@ -438,14 +453,15 @@ class _SizeGroupSection extends StatelessWidget {
   }
 }
 
-class _DistributionChart extends StatelessWidget {
+class _DistributionChart extends ConsumerWidget {
   final _Distribution? distribution;
   final bool compact;
 
   const _DistributionChart({required this.distribution, required this.compact});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     final data = distribution;
     if (data == null) return const SizedBox.shrink();
     final maxCount = data.bins.fold<int>(
@@ -465,19 +481,23 @@ class _DistributionChart extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(data.title,
+                child: Text(localizedText(language, data.title),
                     style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w800)),
               ),
-              Text('${data.sampleCount} hạt',
+              Text('${data.sampleCount} ${appText(language, 'hạt', 'grains')}',
                   style: const TextStyle(
                       fontSize: 12, color: AppTheme.textSecondary)),
             ],
           ),
           const SizedBox(height: 2),
-          const Text(
-            'Mỗi cột là một nhóm hạt có kích thước gần nhau.',
-            style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+          Text(
+            appText(
+              language,
+              'Mỗi cột là một nhóm hạt có kích thước gần nhau.',
+              'Each column is a group of grains with similar sizes.',
+            ),
+            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 10),
           SizedBox(
@@ -531,7 +551,11 @@ class _DistributionChart extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Ví dụ cột 5+ rồi đến 8+ nghĩa là cột 5+ gồm các hạt từ 5 đến dưới 8. Trung vị: ${_formatNumber(data.midpoint, data.decimals)} ${data.unit}',
+            appText(
+              language,
+              'Ví dụ cột 5+ rồi đến 8+ nghĩa là cột 5+ gồm các hạt từ 5 đến dưới 8. Trung vị: ${_formatNumber(data.midpoint, data.decimals)} ${data.unit}',
+              'For example, a 5+ column followed by 8+ means 5+ contains grains from 5 to under 8. Median: ${_formatNumber(data.midpoint, data.decimals)} ${data.unit}',
+            ),
             style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
           ),
         ],
@@ -562,13 +586,14 @@ class _SegmentBar extends StatelessWidget {
   }
 }
 
-class _GroupRow extends StatelessWidget {
+class _GroupRow extends ConsumerWidget {
   final _SizeGroup group;
 
   const _GroupRow({required this.group});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
     return Row(
       children: [
         Container(
@@ -581,9 +606,10 @@ class _GroupRow extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Expanded(
-            child: Text(group.label, style: const TextStyle(fontSize: 13))),
+            child: Text(localizedText(language, group.label),
+                style: const TextStyle(fontSize: 13))),
         Text(
-          '${group.count} hạt (${_formatNumber(group.pct, 1)}%)',
+          '${group.count} ${appText(language, 'hạt', 'grains')} (${_formatNumber(group.pct, 1)}%)',
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
         ),
       ],
