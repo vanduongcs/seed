@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
 
@@ -181,13 +181,14 @@ class OfflineGrainAnalyzer {
     }
 
     await reportProgress(82, 'Tạo hình dạng, đo hạt và dựng ảnh');
-    final processedPng = Uint8List.fromList(img.encodePng(processed));
+    final mergedInstances = _mergeInstances(rawInstances);
+    // Drop duplicate mask buffers before rendering previews and applying calibration.
+    rawInstances.clear();
 
-    return compute(
-      _finishAnalysis,
+    return _finishAnalysis(
+      processed,
       _OfflinePostprocessInput(
-        processedPng,
-        rawInstances: _mergeInstances(rawInstances),
+        rawInstances: mergedInstances,
         rawDetectionCount: rawDetectionCount,
         passCount: passCount,
         roiRegionCount: roiRegions.length,
@@ -454,9 +455,10 @@ class OfflineGrainAnalyzer {
     return (maxChannel - minChannel) / maxChannel;
   }
 
-  static OfflineAnalyzeResult _finishAnalysis(_OfflinePostprocessInput input) {
-    final processed = img.decodePng(input.previewImagePng);
-    if (processed == null) throw StateError('Cannot decode selected image.');
+  static OfflineAnalyzeResult _finishAnalysis(
+    img.Image processed,
+    _OfflinePostprocessInput input,
+  ) {
     final rawDetectionCount = input.rawDetectionCount;
     final instances = input.rawInstances;
     final filtered = _filterAndMeasure(
@@ -2162,7 +2164,6 @@ class _FilteredResult {
 }
 
 class _OfflinePostprocessInput {
-  final Uint8List previewImagePng;
   final List<_Instance> rawInstances;
   final int rawDetectionCount;
   final int passCount;
@@ -2181,8 +2182,7 @@ class _OfflinePostprocessInput {
   final double? referenceX2;
   final double? referenceY2;
 
-  const _OfflinePostprocessInput(
-    this.previewImagePng, {
+  const _OfflinePostprocessInput({
     required this.rawInstances,
     required this.rawDetectionCount,
     required this.passCount,
