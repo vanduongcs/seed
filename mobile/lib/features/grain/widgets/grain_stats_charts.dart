@@ -289,41 +289,54 @@ class _MetricGrid extends ConsumerWidget {
     final keys = chartMode == 'all'
         ? const ['length', 'width', 'area']
         : <String>[chartMode, 'review'];
+    final tiles = [
+      for (final key in keys)
+        if (key == 'review')
+          _MetricTile(
+            label: appText(language, 'Hạt cần xem lại', 'Grains to review'),
+            value: '${model.suspectCount}/${model.totalCount}',
+            helper: appText(
+              language,
+              '${_formatNumber(model.suspectPct, 1)}% tổng số hạt.',
+              '${_formatNumber(model.suspectPct, 1)}% of total grains.',
+            ),
+          )
+        else if (model.distributions[key] case final distribution?)
+          _MetricTile(
+            label: localizedText(
+              language,
+              distribution.title
+                  .replaceFirst('Phân bố ', 'Cỡ thường gặp theo '),
+            ),
+            value:
+                '${_formatNumber(distribution.midpoint, distribution.decimals)} ${distribution.unit}',
+            helper:
+                '${appText(language, 'Khoảng phổ biến', 'Common range')}: ${_formatNumber(_percentile(distribution.sortedValues, 0.1), distribution.decimals)}-${_formatNumber(_percentile(distribution.sortedValues, 0.9), distribution.decimals)} ${distribution.unit}',
+          ),
+    ];
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final twoColumns = constraints.maxWidth >= 520;
-        return GridView.count(
-          crossAxisCount: twoColumns ? math.min(3, keys.length) : 1,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          childAspectRatio: twoColumns ? 2.25 : 3.8,
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final columnCount = availableWidth >= 720
+            ? math.min(3, tiles.length)
+            : (availableWidth >= 420 ? math.min(2, tiles.length) : 1);
+        const gap = 10.0;
+        final tileWidth = columnCount <= 1
+            ? availableWidth
+            : (availableWidth - gap * (columnCount - 1)) / columnCount;
+
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
           children: [
-            for (final key in keys)
-              if (key == 'review')
-                _MetricTile(
-                  label:
-                      appText(language, 'Hạt cần xem lại', 'Grains to review'),
-                  value: '${model.suspectCount}/${model.totalCount}',
-                  helper: appText(
-                    language,
-                    '${_formatNumber(model.suspectPct, 1)}% tổng số hạt.',
-                    '${_formatNumber(model.suspectPct, 1)}% of total grains.',
-                  ),
-                )
-              else if (model.distributions[key] case final distribution?)
-                _MetricTile(
-                  label: localizedText(
-                    language,
-                    distribution.title
-                        .replaceFirst('Phân bố ', 'Cỡ thường gặp theo '),
-                  ),
-                  value:
-                      '${_formatNumber(distribution.midpoint, distribution.decimals)} ${distribution.unit}',
-                  helper:
-                      '${appText(language, 'Khoảng phổ biến', 'Common range')}: ${_formatNumber(_percentile(distribution.sortedValues, 0.1), distribution.decimals)}-${_formatNumber(_percentile(distribution.sortedValues, 0.9), distribution.decimals)} ${distribution.unit}',
-                ),
+            for (final tile in tiles)
+              SizedBox(
+                width: tileWidth,
+                child: tile,
+              ),
           ],
         );
       },
@@ -351,13 +364,17 @@ class _MetricTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppTheme.border),
       ),
+      constraints: const BoxConstraints(minHeight: 92),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(label,
-              style:
-                  const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
           const SizedBox(height: 2),
           Text(
             value,
@@ -391,19 +408,37 @@ class _EvennessBar extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(appText(language, 'Độ đồng đều', 'Uniformity'),
+            Expanded(
+              child: Text(
+                appText(language, 'Độ đồng đều', 'Uniformity'),
                 style:
-                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-            Text(
-              '${appText(language, 'Chênh lệch', 'Spread')}: ${_formatNumber(model.spreadPct, 1)}%',
-              style:
-                  const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                '${appText(language, 'Chênh lệch', 'Spread')}: ${_formatNumber(model.spreadPct, 1)}%',
+                textAlign: TextAlign.right,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 12, color: AppTheme.textSecondary),
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
+        Text(
+          localizedText(language, model.spreadLabel),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: model.spreadColor,
+          ),
+        ),
+        const SizedBox(height: 6),
         ClipRRect(
           borderRadius: BorderRadius.circular(999),
           child: LinearProgressIndicator(
@@ -606,11 +641,22 @@ class _GroupRow extends ConsumerWidget {
         ),
         const SizedBox(width: 8),
         Expanded(
-            child: Text(localizedText(language, group.label),
-                style: const TextStyle(fontSize: 13))),
-        Text(
-          '${group.count} ${appText(language, 'hạt', 'grains')} (${_formatNumber(group.pct, 1)}%)',
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          child: Text(
+            localizedText(language, group.label),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            '${group.count} ${appText(language, 'hạt', 'grains')} (${_formatNumber(group.pct, 1)}%)',
+            textAlign: TextAlign.right,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
         ),
       ],
     );

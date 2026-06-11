@@ -112,6 +112,8 @@ class _RunCard extends ConsumerStatefulWidget {
 
 class _RunCardState extends ConsumerState<_RunCard> {
   Future<Uint8List?>? _remoteOverlay;
+  String _overlayCacheKey = '';
+  Uint8List? _overlayCacheBytes;
 
   @override
   void initState() {
@@ -129,7 +131,7 @@ class _RunCardState extends ConsumerState<_RunCard> {
   }
 
   void _prepareRemoteOverlay() {
-    if (_decodePreview(widget.run.overlayBase64) != null) {
+    if (_overlayBytesFromRun() != null) {
       _remoteOverlay = null;
       return;
     }
@@ -140,9 +142,23 @@ class _RunCardState extends ConsumerState<_RunCard> {
         .catchError((_) => null);
   }
 
+  Uint8List? _overlayBytesFromRun() {
+    final source = widget.run.overlayBase64;
+    if (source.isEmpty) {
+      _overlayCacheKey = '';
+      _overlayCacheBytes = null;
+      return null;
+    }
+    final cacheKey = '${widget.run.id}:${source.length}:${source.hashCode}';
+    if (_overlayCacheKey == cacheKey) return _overlayCacheBytes;
+    _overlayCacheBytes = _decodePreview(source);
+    _overlayCacheKey = cacheKey;
+    return _overlayCacheBytes;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final overlayBytes = _decodePreview(widget.run.overlayBase64);
+    final overlayBytes = _overlayBytesFromRun();
     final language = ref.watch(appLanguageProvider);
 
     return Card(
@@ -309,12 +325,28 @@ class _RunDetailDialog extends ConsumerStatefulWidget {
 
 class _RunDetailDialogState extends ConsumerState<_RunDetailDialog> {
   String _previewMode = 'overlay';
+  String _previewCacheKey = '';
+  Uint8List? _previewCacheBytes;
+
+  Uint8List? _previewBytesFor(String previewBase64) {
+    if (previewBase64.isEmpty) {
+      _previewCacheKey = '';
+      _previewCacheBytes = null;
+      return null;
+    }
+    final cacheKey = '$_previewMode:${previewBase64.length}';
+    if (_previewCacheKey == cacheKey) return _previewCacheBytes;
+    _previewCacheBytes = _decodePreview(previewBase64);
+    _previewCacheKey = cacheKey;
+    return _previewCacheBytes;
+  }
 
   @override
   Widget build(BuildContext context) {
     final result = widget.detail.result;
     final run = widget.detail.run;
     final preview = result.previewWithFallback(_previewMode);
+    final previewBytes = _previewBytesFor(preview);
     final name = run['sourceFileName']?.toString() ?? 'seed-image';
     final language = ref.watch(appLanguageProvider);
 
@@ -340,11 +372,11 @@ class _RunDetailDialogState extends ConsumerState<_RunDetailDialog> {
                 ],
               ),
               const SizedBox(height: 12),
-              if (preview.isNotEmpty)
+              if (previewBytes != null)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.memory(
-                    base64Decode(preview),
+                    previewBytes,
                     cacheWidth: 1200,
                   ),
                 ),
@@ -446,6 +478,8 @@ Future<void> _shareCsv(String sourceName, String csv) async {
 String _segmentationPng(GrainAnalysisResult result) {
   final segment = result.previewBase64('samMask');
   if (segment.isNotEmpty) return segment;
+  final mask = result.previewBase64('mask');
+  if (mask.isNotEmpty) return mask;
   final labels = result.previewBase64('labels');
   if (labels.isNotEmpty) return labels;
   return result.previewBase64('overlay');

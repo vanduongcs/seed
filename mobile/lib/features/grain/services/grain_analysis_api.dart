@@ -30,18 +30,18 @@ class GrainAnalysisApi {
     double? referenceY2,
     OfflineProgressCallback? onProgress,
   }) async {
-    final localAnalysis = await _offlineAnalyzer.analyze(
-      bytes,
-      referencePixels: referencePixels,
-      referenceMm: referenceMm,
-      referenceX1: referenceX1,
-      referenceY1: referenceY1,
-      referenceX2: referenceX2,
-      referenceY2: referenceY2,
-      onProgress: onProgress,
-    );
     final localResult = GrainAnalysisResult.fromJson(
-      localAnalysis.asApiJson(fileName),
+      (await _offlineAnalyzer.analyze(
+        bytes,
+        referencePixels: referencePixels,
+        referenceMm: referenceMm,
+        referenceX1: referenceX1,
+        referenceY1: referenceY1,
+        referenceX2: referenceX2,
+        referenceY2: referenceY2,
+        onProgress: onProgress,
+      ))
+          .asApiJson(fileName),
     );
     final guest = await isGuestMode();
     final ownerUserId = guest ? null : await _currentUserId();
@@ -157,6 +157,8 @@ class GrainAnalysisResult {
 
   factory GrainAnalysisResult.fromJson(Map<String, dynamic> json) {
     final rawMeasurements = json['measurements'] as List<dynamic>? ?? const [];
+    final maskPreview = json['mask_png_base64']?.toString() ?? '';
+    final samMaskPreview = json['sam_mask_png_base64']?.toString() ?? '';
     return GrainAnalysisResult(
       run: Map<String, dynamic>.from(json['run'] as Map? ?? {}),
       image: Map<String, dynamic>.from(json['image'] as Map? ?? {}),
@@ -172,9 +174,9 @@ class GrainAnalysisResult {
         'original': json['original_png_base64']?.toString() ?? '',
         'preprocessed': json['preprocessed_png_base64']?.toString() ?? '',
         'overlay': json['overlay_png_base64']?.toString() ?? '',
-        'samMask': json['sam_mask_png_base64']?.toString() ?? '',
+        'samMask': samMaskPreview == maskPreview ? '' : samMaskPreview,
         'labels': json['labels_png_base64']?.toString() ?? '',
-        'mask': json['mask_png_base64']?.toString() ?? '',
+        'mask': maskPreview,
         'labelMap': json['label_map_png_base64']?.toString() ?? '',
       },
     );
@@ -260,6 +262,14 @@ class GrainAnalysisResult {
   String previewWithFallback(String key) {
     final selected = previewBase64(key);
     if (selected.isNotEmpty) return selected;
+    if (key == 'samMask') {
+      final mask = previewBase64('mask');
+      if (mask.isNotEmpty) return mask;
+    }
+    if (key == 'mask') {
+      final samMask = previewBase64('samMask');
+      if (samMask.isNotEmpty) return samMask;
+    }
     if (key != 'overlay') {
       final overlay = previewBase64('overlay');
       if (overlay.isNotEmpty) return overlay;
@@ -506,11 +516,12 @@ Map<String, String> _renderQcPreviews(
     _drawReadablePreviewId(labels, id, centroidX, centroidY);
   }
 
+  final maskBase64 = base64Encode(img.encodePng(mask));
   return {
     ...previews,
     'overlay': base64Encode(img.encodePng(overlay)),
-    'mask': base64Encode(img.encodePng(mask)),
-    'samMask': base64Encode(img.encodePng(mask)),
+    'mask': maskBase64,
+    'samMask': '',
     'labels': base64Encode(img.encodePng(labels)),
     'labelMap': base64Encode(img.encodePng(labelMapImage)),
   };

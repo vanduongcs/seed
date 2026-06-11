@@ -277,7 +277,7 @@ def _split_instance_if_merged(
             if part_metrics is None or not _should_try_merged_split(part_metrics, params, reference):
                 next_parts.append(part)
                 continue
-            split_masks = _projection_split_mask(part.mask, reference)
+            split_masks = _merged_split_mask(part.mask, params, reference, part_metrics)
             if len(split_masks) < 2 or len(next_parts) + len(split_masks) + (len(parts) - len(next_parts) - 1) > max_parts:
                 next_parts.append(part)
                 continue
@@ -308,6 +308,139 @@ def _should_try_merged_split(metrics: dict, params: dict, reference: dict) -> bo
     length_large = length >= float(reference["length_split_upper"])
     width_large = width >= float(reference["width_split_upper"])
     return bool(area_large and (length_large or width_large))
+
+
+def _merged_split_mask(mask: np.ndarray, params: dict, reference: dict, metrics: dict) -> list[np.ndarray]:
+    target_parts = _expected_split_part_count(int(metrics["area_px"]), params, reference)
+    if not _has_distance_split_evidence(mask, reference, target_parts, metrics):
+        return [mask]
+    marker_parts = _distance_marker_split_mask(mask, params, reference, target_parts)
+    if len(marker_parts) > 1:
+        return marker_parts
+    return _projection_split_mask(mask, reference)
+
+
+def _expected_split_part_count(area: int, params: dict, reference: dict) -> int:
+    max_parts = max(2, int_param(params, "mergedSplitMaxParts"))
+    area_ratio = area / max(float(reference["area"]), 1.0)
+    # Bias slightly downward near half steps; over-splitting is worse than
+    # leaving an uncertain cluster for the projection fallback/manual review.
+    return int(np.clip(np.floor(area_ratio + 0.35), 2, max_parts))
+
+
+def _has_distance_split_evidence(
+    mask: np.ndarray,
+    reference: dict,
+    target_parts: int,
+    metrics: dict,
+) -> bool:
+    core_count = _distance_core_component_count(mask, reference)
+    if target_parts <= 2:
+        return core_count >= 2
+    if core_count >= 2:
+        return True
+    return float(metrics.get("extent", 1.0) or 1.0) <= 0.68
+
+
+def _distance_core_component_count(mask: np.ndarray, reference: dict) -> int:
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 2:
+        return 0
+    y1, y2 = int(ys.min()), int(ys.max()) + 1
+    x1, x2 = int(xs.min()), int(xs.max()) + 1
+    crop = mask[y1:y2, x1:x2].astype(np.uint8)
+    distance = cv2.distanceTransform(crop, cv2.DIST_L2, 3)
+    max_distance = float(distance.max()) if distance.size else 0.0
+    if max_distance < 2.5:
+        return 0
+    core = ((crop > 0) & (distance >= max(2.0, max_distance * 0.65))).astype(np.uint8)
+    component_count, _, stats, _ = cv2.connectedComponentsWithStats(core, connectivity=8)
+    min_core_area = max(3, int(float(reference["width"]) * 0.25))
+    return sum(1 for label in range(1, component_count) if int(stats[label, cv2.CC_STAT_AREA]) >= min_core_area)
+
+
+def _distance_marker_split_mask(
+    mask: np.ndarray,
+    params: dict,
+    reference: dict,
+    target_parts: int,
+) -> list[np.ndarray]:
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 2:
+        return [mask]
+
+    y1, y2 = int(ys.min()), int(ys.max()) + 1
+    x1, x2 = int(xs.min()), int(xs.max()) + 1
+    crop = mask[y1:y2, x1:x2].astype(np.uint8)
+    area = int(np.count_nonzero(crop))
+    if area < 2:
+        return [mask]
+
+    distance = cv2.distanceTransform(crop, cv2.DIST_L2, 3)
+    max_distance = float(distance.max()) if distance.size else 0.0
+    if max_distance < 2.5:
+        return [mask]
+
+    peak_threshold = max(2.0, max_distance * 0.45)
+    peak_ys, peak_xs = np.nonzero((crop > 0) & (distance >= peak_threshold))
+    if len(peak_xs) < 2:
+        return [mask]
+
+    min_seed_distance = max(3.0, min(18.0, float(reference["width"]) * 0.45))
+    min_seed_distance_sq = min_seed_distance * min_seed_distance
+    seeds: list[tuple[float, float]] = []
+    while len(seeds) < target_parts:
+        best: tuple[float, float, float] | None = None
+        for sx_raw, sy_raw in zip(peak_xs, peak_ys):
+            sx = float(sx_raw)
+            sy = float(sy_raw)
+            base_score = float(distance[int(sy_raw), int(sx_raw)])
+            if seeds:
+                min_distance_sq = min((sx - ox) ** 2 + (sy - oy) ** 2 for ox, oy in seeds)
+                if min_distance_sq < min_seed_distance_sq:
+                    continue
+                spread_score = min(float(np.sqrt(min_distance_sq)) / max(min_seed_distance, 1.0), 1.8)
+                score = base_score * spread_score
+            else:
+                score = base_score
+            if best is None or score > best[0]:
+                best = (score, sx, sy)
+        if best is None:
+            break
+        seeds.append((best[1], best[2]))
+    if len(seeds) < 2:
+        return [mask]
+
+    point_ys, point_xs = np.nonzero(crop)
+    seed_xs = np.asarray([seed[0] for seed in seeds], dtype=np.float64)
+    seed_ys = np.asarray([seed[1] for seed in seeds], dtype=np.float64)
+    distances_sq = (
+        (point_xs[:, None].astype(np.float64) - seed_xs[None, :]) ** 2
+        + (point_ys[:, None].astype(np.float64) - seed_ys[None, :]) ** 2
+    )
+    assignments = np.argmin(distances_sq, axis=1)
+
+    crop_parts = [np.zeros_like(crop, dtype=bool) for _ in seeds]
+    for part_index in range(len(seeds)):
+        selected = assignments == part_index
+        if np.any(selected):
+            crop_parts[part_index][point_ys[selected], point_xs[selected]] = True
+
+    part_areas = [int(np.count_nonzero(part)) for part in crop_parts]
+    min_part_area = max(20, int(float(reference["area"]) * 0.28))
+    if any(part_area < min_part_area for part_area in part_areas):
+        return [mask]
+    if min(part_areas) / max(sum(part_areas), 1) < 0.18:
+        return [mask]
+    if not _split_parts_are_plausible(crop_parts, reference, max_width_multiplier=1.90):
+        return [mask]
+
+    full_parts: list[np.ndarray] = []
+    for crop_part in crop_parts:
+        full_part = np.zeros_like(mask, dtype=bool)
+        full_part[y1:y2, x1:x2] = crop_part
+        full_parts.append(full_part)
+    return full_parts
 
 
 def _projection_split_mask(mask: np.ndarray, reference: dict) -> list[np.ndarray]:
@@ -401,9 +534,14 @@ def _split_mask_on_axis(
     return [left_mask, right_mask], valley_ratio
 
 
-def _split_parts_are_plausible(parts: list[np.ndarray], reference: dict) -> bool:
+def _split_parts_are_plausible(
+    parts: list[np.ndarray],
+    reference: dict,
+    *,
+    max_width_multiplier: float = 1.75,
+) -> bool:
     min_aspect = max(1.35, float(reference["length"]) / max(float(reference["width"]), 1.0) * 0.45)
-    max_width = float(reference["width"]) * 1.75
+    max_width = float(reference["width"]) * max_width_multiplier
     min_length = float(reference["length"]) * 0.45
     for part in parts:
         metrics = mask_metrics(part)

@@ -268,15 +268,11 @@ class OfflineGrainAnalyzer {
     final outputs = await session.run({session.inputNames.first: inputTensor});
     try {
       return _OfflineInferencePass(
-        predictions: Float32List.fromList(
-          (await outputs[session.outputNames.first]!.asFlattenedList())
-              .map((value) => (value as num).toDouble())
-              .toList(),
+        predictions: _flattenedOutputToFloat32(
+          await outputs[session.outputNames.first]!.asFlattenedList(),
         ),
-        protos: Float32List.fromList(
-          (await outputs[session.outputNames.last]!.asFlattenedList())
-              .map((value) => (value as num).toDouble())
-              .toList(),
+        protos: _flattenedOutputToFloat32(
+          await outputs[session.outputNames.last]!.asFlattenedList(),
         ),
         width: source.width,
         height: source.height,
@@ -291,6 +287,20 @@ class OfflineGrainAnalyzer {
         await output.dispose();
       }
     }
+  }
+
+  static Float32List _flattenedOutputToFloat32(Object? values) {
+    if (values is Float32List) {
+      return Float32List.fromList(values);
+    }
+    if (values is List) {
+      final output = Float32List(values.length);
+      for (var i = 0; i < values.length; i++) {
+        output[i] = (values[i] as num).toDouble();
+      }
+      return output;
+    }
+    throw StateError('Unexpected ONNX output format: ${values.runtimeType}');
   }
 
   static List<_RoiBox> _detectRoiRegions(img.Image source) {
@@ -519,6 +529,8 @@ class OfflineGrainAnalyzer {
         'confidence': _confidence,
         'iou': _iou,
         'max_det': _maxDetections,
+        'merged_split_method': 'distance_marker_projection',
+        'merged_split_evidence_gate': 'distance_core_or_low_extent',
         'multi_pass_enabled': _enableRoiPrepass || _enableTiledInference,
         'multi_pass_count': input.passCount,
         'roi_prepass_enabled': _enableRoiPrepass,
@@ -564,6 +576,8 @@ class OfflineGrainAnalyzer {
           'mergedSplitWidthRatio': _mergedSplitWidthRatio,
           'mergedSplitMadZ': _mergedSplitMadZ,
           'mergedSplitMaxParts': _mergedSplitMaxParts,
+          'mergedSplitMethod': 'distance_marker_projection',
+          'mergedSplitEvidenceGate': 'distance_core_or_low_extent',
         },
         'offline': true,
         'execution': 'mobile_onnxruntime',
@@ -1313,8 +1327,13 @@ class OfflineGrainAnalyzer {
           next.add(part);
           continue;
         }
-        final splitMasks =
-            _projectionSplitMask(part.mask, part.width, part.height, reference);
+        final splitMasks = _mergedSplitMask(
+          part.mask,
+          part.width,
+          part.height,
+          reference,
+          metrics,
+        );
         if (splitMasks.length < 2 ||
             next.length + splitMasks.length + (parts.length - next.length - 1) >
                 _mergedSplitMaxParts) {
@@ -1354,6 +1373,295 @@ class OfflineGrainAnalyzer {
     final lengthLarge = length >= reference.lengthSplitUpper;
     final widthLarge = width >= reference.widthSplitUpper;
     return areaLarge && (lengthLarge || widthLarge);
+  }
+
+  static List<Uint8List> _mergedSplitMask(
+    Uint8List mask,
+    int width,
+    int height,
+    _SizeReference reference,
+    Map<String, dynamic> metrics,
+  ) {
+    final area = (metrics['area_px'] as num).round();
+    final targetParts = _expectedSplitPartCount(area, reference);
+    if (!_hasDistanceSplitEvidence(
+      mask,
+      width,
+      height,
+      reference,
+      targetParts,
+      metrics,
+    )) {
+      return [mask];
+    }
+    final markerParts = _distanceMarkerSplitMask(
+      mask,
+      width,
+      height,
+      reference,
+      targetParts,
+    );
+    if (markerParts.length > 1) return markerParts;
+    return _projectionSplitMask(mask, width, height, reference);
+  }
+
+  static int _expectedSplitPartCount(int area, _SizeReference reference) {
+    final areaRatio = area / math.max(reference.area, 1.0);
+    // Bias slightly downward near half steps; over-splitting is worse than
+    // leaving an uncertain cluster for the projection fallback/manual review.
+    return math.max(
+      2,
+      math.min(_mergedSplitMaxParts, (areaRatio + 0.35).floor()),
+    );
+  }
+
+  static bool _hasDistanceSplitEvidence(
+    Uint8List mask,
+    int width,
+    int height,
+    _SizeReference reference,
+    int targetParts,
+    Map<String, dynamic> metrics,
+  ) {
+    final coreCount =
+        _distanceCoreComponentCount(mask, width, height, reference);
+    if (targetParts <= 2) return coreCount >= 2;
+    if (coreCount >= 2) return true;
+    final extent = (metrics['extent'] as num?)?.toDouble() ?? 1.0;
+    return extent <= 0.68;
+  }
+
+  static int _distanceCoreComponentCount(
+    Uint8List mask,
+    int width,
+    int height,
+    _SizeReference reference,
+  ) {
+    if (width <= 0 || height <= 0 || mask.isEmpty) return 0;
+    final distances = _distanceTransform(mask, width, height);
+    var maxDistance = 0.0;
+    for (final value in distances) {
+      if (value > maxDistance && value < _largeDistance) maxDistance = value;
+    }
+    if (maxDistance < 2.5) return 0;
+
+    final threshold = math.max(2.0, maxDistance * 0.65);
+    final visited = Uint8List(mask.length);
+    final minCoreArea = math.max(3, (reference.width * 0.25).floor());
+    var count = 0;
+    final queue = Int32List(mask.length);
+    for (var i = 0; i < mask.length; i++) {
+      if (visited[i] != 0 || mask[i] == 0 || distances[i] < threshold) {
+        continue;
+      }
+      var head = 0;
+      var tail = 0;
+      queue[tail++] = i;
+      visited[i] = 1;
+      var area = 0;
+      while (head < tail) {
+        final index = queue[head++];
+        area++;
+        final x = index % width;
+        final y = index ~/ width;
+        for (var dy = -1; dy <= 1; dy++) {
+          final ny = y + dy;
+          if (ny < 0 || ny >= height) continue;
+          for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            final nx = x + dx;
+            if (nx < 0 || nx >= width) continue;
+            final neighbor = ny * width + nx;
+            if (visited[neighbor] != 0 ||
+                mask[neighbor] == 0 ||
+                distances[neighbor] < threshold) {
+              continue;
+            }
+            visited[neighbor] = 1;
+            queue[tail++] = neighbor;
+          }
+        }
+      }
+      if (area >= minCoreArea) count++;
+    }
+    return count;
+  }
+
+  static List<Uint8List> _distanceMarkerSplitMask(
+    Uint8List mask,
+    int width,
+    int height,
+    _SizeReference reference,
+    int targetParts,
+  ) {
+    if (width <= 0 || height <= 0 || mask.isEmpty) return [mask];
+    var total = 0;
+    for (final value in mask) {
+      if (value != 0) total++;
+    }
+    if (total < 2) return [mask];
+
+    final distances = _distanceTransform(mask, width, height);
+    var maxDistance = 0.0;
+    for (final value in distances) {
+      if (value > maxDistance && value < _largeDistance) maxDistance = value;
+    }
+    if (maxDistance < 2.5) return [mask];
+    final peakThreshold = math.max(2.0, maxDistance * 0.45);
+    final candidates = <_MaskSeed>[];
+    for (var y = height - 1; y >= 0; y--) {
+      final row = y * width;
+      for (var x = width - 1; x >= 0; x--) {
+        final index = row + x;
+        final value = distances[index];
+        if (mask[index] == 0 || value < peakThreshold) continue;
+        candidates.add(_MaskSeed(x.toDouble(), y.toDouble(), value));
+      }
+    }
+    if (candidates.length < 2) return [mask];
+
+    final minSeedDistance =
+        math.max(3.0, math.min(18.0, reference.width * 0.45));
+    final minSeedDistanceSq = minSeedDistance * minSeedDistance;
+    final seeds = <_MaskSeed>[];
+    while (seeds.length < targetParts) {
+      _MaskSeed? bestSeed;
+      var bestScore = double.negativeInfinity;
+      for (final candidate in candidates) {
+        var score = candidate.distance;
+        if (seeds.isNotEmpty) {
+          var nearestSeedDistanceSq = double.infinity;
+          for (final seed in seeds) {
+            final dx = candidate.x - seed.x;
+            final dy = candidate.y - seed.y;
+            nearestSeedDistanceSq = math.min(
+              nearestSeedDistanceSq,
+              dx * dx + dy * dy,
+            );
+          }
+          if (nearestSeedDistanceSq < minSeedDistanceSq) continue;
+          final spreadScore = math.min(
+            math.sqrt(nearestSeedDistanceSq) / math.max(minSeedDistance, 1.0),
+            1.8,
+          );
+          score *= spreadScore;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestSeed = candidate;
+        }
+      }
+      if (bestSeed == null) {
+        break;
+      }
+      seeds.add(bestSeed);
+    }
+    if (seeds.length < 2) return [mask];
+
+    final parts = List.generate(seeds.length, (_) => Uint8List(mask.length));
+    final partAreas = List<int>.filled(seeds.length, 0);
+    for (var y = 0; y < height; y++) {
+      final row = y * width;
+      for (var x = 0; x < width; x++) {
+        final index = row + x;
+        if (mask[index] == 0) continue;
+        var bestSeedIndex = 0;
+        var bestDistanceSq = double.infinity;
+        for (var seedIndex = 0; seedIndex < seeds.length; seedIndex++) {
+          final seed = seeds[seedIndex];
+          final dx = x - seed.x;
+          final dy = y - seed.y;
+          final distanceSq = dx * dx + dy * dy;
+          if (distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            bestSeedIndex = seedIndex;
+          }
+        }
+        parts[bestSeedIndex][index] = 1;
+        partAreas[bestSeedIndex]++;
+      }
+    }
+
+    final minPartArea = math.max(20, (reference.area * 0.28).round());
+    for (final area in partAreas) {
+      if (area < minPartArea) return [mask];
+    }
+    if (partAreas.reduce(math.min) / math.max(total, 1) < 0.18) {
+      return [mask];
+    }
+    if (!_splitPartsArePlausible(
+      parts,
+      width,
+      height,
+      reference,
+      maxWidthMultiplier: 1.90,
+    )) {
+      return [mask];
+    }
+    return parts;
+  }
+
+  static const _largeDistance = 1.0e9;
+
+  static Float32List _distanceTransform(Uint8List mask, int width, int height) {
+    final distances = Float32List(mask.length);
+    for (var i = 0; i < mask.length; i++) {
+      distances[i] = mask[i] == 0 ? 0 : _largeDistance;
+    }
+
+    const diagonalCost = 1.41421356237;
+    for (var y = 0; y < height; y++) {
+      final row = y * width;
+      for (var x = 0; x < width; x++) {
+        final index = row + x;
+        if (mask[index] == 0) continue;
+        var best = distances[index];
+        if (x > 0) best = math.min(best, distances[index - 1] + 1);
+        if (y > 0) {
+          best = math.min(best, distances[index - width] + 1);
+          if (x > 0) {
+            best = math.min(
+              best,
+              distances[index - width - 1] + diagonalCost,
+            );
+          }
+          if (x + 1 < width) {
+            best = math.min(
+              best,
+              distances[index - width + 1] + diagonalCost,
+            );
+          }
+        }
+        distances[index] = best;
+      }
+    }
+
+    for (var y = height - 1; y >= 0; y--) {
+      final row = y * width;
+      for (var x = width - 1; x >= 0; x--) {
+        final index = row + x;
+        if (mask[index] == 0) continue;
+        var best = distances[index];
+        if (x + 1 < width) best = math.min(best, distances[index + 1] + 1);
+        if (y + 1 < height) {
+          best = math.min(best, distances[index + width] + 1);
+          if (x + 1 < width) {
+            best = math.min(
+              best,
+              distances[index + width + 1] + diagonalCost,
+            );
+          }
+          if (x > 0) {
+            best = math.min(
+              best,
+              distances[index + width - 1] + diagonalCost,
+            );
+          }
+        }
+        distances[index] = best;
+      }
+    }
+    return distances;
   }
 
   static List<Uint8List> _projectionSplitMask(
@@ -1509,10 +1817,11 @@ class OfflineGrainAnalyzer {
     List<Uint8List> parts,
     int width,
     int height,
-    _SizeReference reference,
-  ) {
+    _SizeReference reference, {
+    double maxWidthMultiplier = 1.75,
+  }) {
     final minAspect = math.max(1.35, reference.length / reference.width * 0.45);
-    final maxWidth = reference.width * 1.75;
+    final maxWidth = reference.width * maxWidthMultiplier;
     final minLength = reference.length * 0.45;
     for (final part in parts) {
       final metrics = _maskMetrics(part, width, height, offsetX: 0, offsetY: 0);
@@ -2126,6 +2435,14 @@ class _ProjectionSplitResult {
   const _ProjectionSplitResult(this.masks, this.score);
 }
 
+class _MaskSeed {
+  final double x;
+  final double y;
+  final double distance;
+
+  const _MaskSeed(this.x, this.y, this.distance);
+}
+
 class _Point {
   final double x;
   final double y;
@@ -2346,7 +2663,7 @@ class OfflineAnalyzeResult {
       'csv': _measurementsCsv(measurements),
       'original_png_base64': '',
       'overlay_png_base64': base64Encode(overlayPng),
-      'sam_mask_png_base64': maskBase64,
+      'sam_mask_png_base64': '',
       'labels_png_base64': base64Encode(labelsPng),
       'mask_png_base64': maskBase64,
       'label_map_png_base64': base64Encode(labelMapPng),

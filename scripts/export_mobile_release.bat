@@ -7,7 +7,9 @@ set "MOBILE_DIR=%ROOT%\mobile"
 set "OUT_DIR=%ROOT%\artifacts\releases"
 set "CURRENT_DIR=%ROOT%\artifacts\release-current"
 set "KEY_PROPS=%MOBILE_DIR%\android\key.properties"
-set "APK_SRC=%MOBILE_DIR%\build\app\outputs\flutter-apk\app-release.apk"
+set "APK_ARM64_SRC=%MOBILE_DIR%\build\app\outputs\flutter-apk\app-arm64-v8a-release.apk"
+set "APK_ARMEABI_SRC=%MOBILE_DIR%\build\app\outputs\flutter-apk\app-armeabi-v7a-release.apk"
+set "APK_X86_64_SRC=%MOBILE_DIR%\build\app\outputs\flutter-apk\app-x86_64-release.apk"
 set "AAB_SRC=%MOBILE_DIR%\build\app\outputs\bundle\release\app-release.aab"
 
 echo.
@@ -73,8 +75,8 @@ if /I "%~1"=="pub" (
 
 pushd "%MOBILE_DIR%"
 
-echo Building release APK for local install...
-call "%DART_EXE%" --packages="%FLUTTER_PACKAGES%" "%FLUTTER_SNAPSHOT%" build apk --release --no-pub
+echo Building release APKs split by Android ABI...
+call "%DART_EXE%" --packages="%FLUTTER_PACKAGES%" "%FLUTTER_SNAPSHOT%" build apk --release --split-per-abi --no-pub
 if errorlevel 1 (
   popd
   exit /b 1
@@ -88,8 +90,8 @@ if errorlevel 1 (
 )
 popd
 
-if not exist "%APK_SRC%" (
-  echo ERROR: APK output not found: %APK_SRC%
+if not exist "%APK_ARM64_SRC%" (
+  echo ERROR: ARM64 APK output not found: %APK_ARM64_SRC%
   exit /b 1
 )
 if not exist "%AAB_SRC%" (
@@ -100,16 +102,21 @@ if not exist "%AAB_SRC%" (
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 if not exist "%CURRENT_DIR%" mkdir "%CURRENT_DIR%"
 
-copy /Y "%APK_SRC%" "%OUT_DIR%\seedvision-release.apk" >nul
+copy /Y "%APK_ARM64_SRC%" "%OUT_DIR%\seedvision-release.apk" >nul
+copy /Y "%APK_ARM64_SRC%" "%OUT_DIR%\seedvision-release-arm64-v8a.apk" >nul
+if exist "%APK_ARMEABI_SRC%" copy /Y "%APK_ARMEABI_SRC%" "%OUT_DIR%\seedvision-release-armeabi-v7a.apk" >nul
+if exist "%APK_X86_64_SRC%" copy /Y "%APK_X86_64_SRC%" "%OUT_DIR%\seedvision-release-x86_64.apk" >nul
 copy /Y "%AAB_SRC%" "%OUT_DIR%\seedvision-release.aab" >nul
-copy /Y "%APK_SRC%" "%CURRENT_DIR%\Seed.apk" >nul
+copy /Y "%APK_ARM64_SRC%" "%CURRENT_DIR%\Seed.apk" >nul
 copy /Y "%AAB_SRC%" "%CURRENT_DIR%\Seed.aab" >nul
 
 echo.
 echo === Export complete ===
-echo Install APK : %OUT_DIR%\seedvision-release.apk
+echo Install APK : %OUT_DIR%\seedvision-release.apk ^(arm64-v8a^)
+if exist "%OUT_DIR%\seedvision-release-armeabi-v7a.apk" echo 32-bit APK : %OUT_DIR%\seedvision-release-armeabi-v7a.apk
+if exist "%OUT_DIR%\seedvision-release-x86_64.apk" echo x86_64 APK : %OUT_DIR%\seedvision-release-x86_64.apk
 echo Play AAB    : %OUT_DIR%\seedvision-release.aab
-echo Easy pick   : %CURRENT_DIR%\Seed.apk
+echo Easy pick   : %CURRENT_DIR%\Seed.apk ^(arm64-v8a^)
 echo Play upload : %CURRENT_DIR%\Seed.aab
 echo.
 exit /b 0

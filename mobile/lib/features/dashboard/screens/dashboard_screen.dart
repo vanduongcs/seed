@@ -26,15 +26,24 @@ class DashboardScreen extends ConsumerStatefulWidget {
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+class _DashboardScreenState extends ConsumerState<DashboardScreen>
+    with AutomaticKeepAliveClientMixin<DashboardScreen> {
   GrainAnalysisResult? _sessionResult;
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     final runsState = ref.watch(grainRunsProvider);
 
     return runsState.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => _DashboardContent(
+        sessionResult: _sessionResult,
+        onSessionResultChanged: (result) =>
+            setState(() => _sessionResult = result),
+      ),
       error: (error, _) => _DashboardContent(
         historyError: error.toString(),
         sessionResult: _sessionResult,
@@ -68,6 +77,7 @@ class _DashboardContent extends ConsumerWidget {
     final horizontalPadding = screenWidth < 360 ? 12.0 : 20.0;
 
     return ListView(
+      key: const PageStorageKey<String>('dashboard-home-scroll'),
       padding: EdgeInsets.all(horizontalPadding),
       children: [
         if (historyError != null) ...[
@@ -211,6 +221,7 @@ String _formatMeasureStat(double? primary, String primaryUnit, double? fallback,
 }
 
 String _localizedProgressPhase(AppLanguage language, String phase) {
+  if (language == AppLanguage.vi) return phase;
   return switch (phase) {
     'Chuẩn bị ảnh' => 'Preparing image',
     'Chuẩn bị nhận dạng trên thiết bị' => 'Preparing on-device detection',
@@ -224,7 +235,9 @@ String _localizedProgressPhase(AppLanguage language, String phase) {
     'Lưu kết quả' => 'Saving result',
     'Hoàn tất' => 'Complete',
     'Đang xử lý' => 'Processing',
-    _ => localizedText(language, phase),
+    _ => phase.startsWith('Nhận dạng ROI ')
+        ? phase.replaceFirst('Nhận dạng ROI ', 'Detecting ROI ')
+        : localizedText(language, phase),
   };
 }
 
@@ -260,6 +273,8 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   double _progress = 0;
   String _progressPhase = '';
   Timer? _progressTimer;
+  String _decodedPreviewKey = '';
+  Uint8List? _decodedPreviewBytes;
 
   @override
   bool get wantKeepAlive => true;
@@ -294,6 +309,34 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     _progressTimer = null;
   }
 
+  void _clearPreviewCache() {
+    _decodedPreviewKey = '';
+    _decodedPreviewBytes = null;
+  }
+
+  Uint8List? _previewBytesFor(GrainAnalysisResult? result, String mode) {
+    if (result == null) {
+      _clearPreviewCache();
+      return null;
+    }
+    final previewBase64 = result.previewWithFallback(mode);
+    if (previewBase64.isEmpty) {
+      _clearPreviewCache();
+      return null;
+    }
+    final cacheKey =
+        '${identityHashCode(result)}:$mode:${previewBase64.length}';
+    if (_decodedPreviewKey == cacheKey) return _decodedPreviewBytes;
+    try {
+      _decodedPreviewBytes = base64Decode(previewBase64);
+      _decodedPreviewKey = cacheKey;
+      return _decodedPreviewBytes;
+    } on FormatException {
+      _clearPreviewCache();
+      return null;
+    }
+  }
+
   Future<void> _pick(ImageSource source) async {
     final file = await _picker.pickImage(
       source: source,
@@ -315,6 +358,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       _error = null;
       _previewMode = 'overlay';
       _qcEditMode = false;
+      _clearPreviewCache();
     });
   }
 
@@ -361,7 +405,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       _stopProgress();
       _setProgress(96, 'Lưu kết quả');
       if (!mounted) return;
-      setState(() => _result = result);
+      setState(() {
+        _result = result;
+        _clearPreviewCache();
+      });
       widget.onResultChanged(result);
       _setProgress(100, 'Hoàn tất');
       ref.invalidate(grainRunsProvider);
@@ -394,9 +441,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   }
 
   Future<void> _sharePng() async {
-    final base64 = _result?.previewBase64('samMask').isNotEmpty == true
-        ? _result?.previewBase64('samMask')
-        : _result?.previewBase64('overlay');
+    final base64 = _result?.previewWithFallback('samMask');
     if (base64 == null || base64.isEmpty) return;
     final file = await _writeTempFile(
         '${_safeStem(_fileName)}_segmentation.png', base64Decode(base64));
@@ -405,7 +450,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   }
 
   Future<void> _applyEditedResult(GrainAnalysisResult next) async {
-    setState(() => _result = next);
+    setState(() {
+      _result = next;
+      _clearPreviewCache();
+    });
     widget.onResultChanged(next);
     await _api.persistEditedRun(next);
     ref.invalidate(grainRunsProvider);
@@ -428,7 +476,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     super.build(context);
     final result = _result;
     final language = ref.watch(appLanguageProvider);
-    final previewBase64 = result?.previewWithFallback(_previewMode) ?? '';
+    final previewBytes = _previewBytesFor(result, _previewMode);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final cardPadding = screenWidth < 360 ? 12.0 : 18.0;
 
@@ -700,10 +748,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                 ),
               ],
               const SizedBox(height: 12),
-              if (previewBase64.isNotEmpty)
+              if (previewBytes != null)
                 _QcEditablePreview(
                   result: result,
-                  previewBytes: base64Decode(previewBase64),
+                  previewBytes: previewBytes,
                   editMode: _qcEditMode,
                 ),
               if (_qcEditMode) ...[
@@ -1119,10 +1167,27 @@ class _ReferenceImageSelectorState
       previous?.dispose();
       return;
     }
-    final codec = await ui.instantiateImageCodec(bytes);
+    final sourceSize = widget.imageSize;
+    int? targetWidth;
+    int? targetHeight;
+    if (sourceSize != null) {
+      final longestSide = math.max(sourceSize.width, sourceSize.height);
+      if (longestSide > _BackendAnalysisCardState._previewCacheWidth) {
+        final scale =
+            _BackendAnalysisCardState._previewCacheWidth / longestSide;
+        targetWidth = math.max(1, (sourceSize.width * scale).round());
+        targetHeight = math.max(1, (sourceSize.height * scale).round());
+      }
+    }
+    final codec = await ui.instantiateImageCodec(
+      bytes,
+      targetWidth: targetWidth,
+      targetHeight: targetHeight,
+      allowUpscaling: false,
+    );
     final frame = await codec.getNextFrame();
     codec.dispose();
-    if (!mounted) {
+    if (!mounted || !identical(widget.bytes, bytes)) {
       frame.image.dispose();
       return;
     }
@@ -1589,7 +1654,7 @@ class _ReferenceHandleControls extends ConsumerWidget {
             children: [
               Wrap(spacing: 6, runSpacing: 6, children: chips),
               const SizedBox(height: 4),
-              Wrap(spacing: 4, runSpacing: 4, children: nudges),
+              Wrap(spacing: 6, runSpacing: 6, children: nudges),
             ],
           );
         }
@@ -1725,13 +1790,26 @@ class _ReferenceMagnifierPainter extends CustomPainter {
     final maxTop = math.max(0.0, imageSize.height - cropSide);
     final cropLeft = (target.dx - cropSide / 2).clamp(0.0, maxLeft).toDouble();
     final cropTop = (target.dy - cropSide / 2).clamp(0.0, maxTop).toDouble();
-    final sourceRect = Rect.fromLTWH(cropLeft, cropTop, cropSide, cropSide);
+    final originalCropRect =
+        Rect.fromLTWH(cropLeft, cropTop, cropSide, cropSide);
+    final decodedScaleX = sourceImage.width / imageSize.width;
+    final decodedScaleY = sourceImage.height / imageSize.height;
+    final sourceRect = Rect.fromLTWH(
+      originalCropRect.left * decodedScaleX,
+      originalCropRect.top * decodedScaleY,
+      originalCropRect.width * decodedScaleX,
+      originalCropRect.height * decodedScaleY,
+    );
     final destination = Offset.zero & size;
     canvas.drawImageRect(sourceImage, sourceRect, destination, Paint());
 
     Offset magnifiedPoint(Offset point) => Offset(
-          (point.dx - sourceRect.left) / sourceRect.width * size.width,
-          (point.dy - sourceRect.top) / sourceRect.height * size.height,
+          (point.dx - originalCropRect.left) /
+              originalCropRect.width *
+              size.width,
+          (point.dy - originalCropRect.top) /
+              originalCropRect.height *
+              size.height,
         );
     if (start != null && end != null) {
       final linePaint = Paint()
@@ -2132,13 +2210,17 @@ class _CalibrationGuideDialogState
   @override
   Widget build(BuildContext context) {
     final language = ref.watch(appLanguageProvider);
+    final mediaSize = MediaQuery.sizeOf(context);
+    final dialogWidth = math.min(360.0, math.max(280.0, mediaSize.width - 32));
+    final dialogHeight =
+        math.min(425.0, math.max(320.0, mediaSize.height - 48));
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       backgroundColor: Colors.white,
       child: Container(
         padding: const EdgeInsets.all(16),
-        width: 320,
-        height: 425,
+        width: dialogWidth,
+        height: dialogHeight,
         child: Column(
           children: [
             // Header
@@ -2186,7 +2268,7 @@ class _CalibrationGuideDialogState
                       'Choose or capture an image containing both grains to measure and a reference marker with known real size.',
                     ),
                     diagram: const _GuideImage(
-                        'assets/images/calibration_guide_1.png'),
+                        'assets/images/calibration_guide_1.webp'),
                   ),
                   _GuideSlide(
                     title: appText(language, '2. Tạo đoạn đo bằng 2 chốt',
@@ -2197,7 +2279,7 @@ class _CalibrationGuideDialogState
                       'Tap the reference marker to create a line with handle A and handle B.',
                     ),
                     diagram: const _GuideImage(
-                        'assets/images/calibration_guide_2.png'),
+                        'assets/images/calibration_guide_2.webp'),
                   ),
                   _GuideSlide(
                     title: appText(language, '3. Kéo thả chốt đo vật mốc',
@@ -2208,7 +2290,7 @@ class _CalibrationGuideDialogState
                       'Drag each handle to the two marker edges; use arrow buttons for pixel-level tuning.',
                     ),
                     diagram: const _GuideImage(
-                        'assets/images/calibration_guide_3.png'),
+                        'assets/images/calibration_guide_3.webp'),
                   ),
                   _GuideSlide(
                     title: appText(language, '4. Nhập kích thước thật',
@@ -2219,7 +2301,7 @@ class _CalibrationGuideDialogState
                       'Enter the marker real length in Size (mm), then press Analyze.',
                     ),
                     diagram: const _GuideImage(
-                        'assets/images/calibration_guide_4.png'),
+                        'assets/images/calibration_guide_4.webp'),
                   ),
                 ],
               ),

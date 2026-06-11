@@ -561,7 +561,7 @@ const renderQcPreviewsFromLabelMap = async (result) => {
     ...result,
     overlay_png_base64: imageDataToBase64(overlay),
     mask_png_base64: imageDataToBase64(mask),
-    sam_mask_png_base64: imageDataToBase64(mask),
+    sam_mask_png_base64: '',
     labels_png_base64: labels,
     label_map_png_base64: imageDataToBase64(labelMapImage),
   };

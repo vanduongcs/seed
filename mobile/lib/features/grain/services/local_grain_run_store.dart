@@ -89,7 +89,23 @@ class LocalGrainRunStore {
 
   Future<void> _write(List<Map<String, dynamic>> runs) async {
     final file = await _file();
-    await file.writeAsString(jsonEncode(runs), flush: true);
+    final compacted = runs.map(_compactRunForStorage).toList();
+    await file.writeAsString(jsonEncode(compacted), flush: true);
+  }
+
+  Map<String, dynamic> _compactRunForStorage(Map<String, dynamic> item) {
+    final next = Map<String, dynamic>.from(item);
+    final rawResult = next['result'];
+    if (rawResult is Map) {
+      final result = Map<String, dynamic>.from(rawResult);
+      final samMask = result['sam_mask_png_base64']?.toString() ?? '';
+      final mask = result['mask_png_base64']?.toString() ?? '';
+      if (samMask.isNotEmpty && samMask == mask) {
+        result['sam_mask_png_base64'] = '';
+      }
+      next['result'] = result;
+    }
+    return next;
   }
 
   bool _needsSync(Map<String, dynamic> item) {

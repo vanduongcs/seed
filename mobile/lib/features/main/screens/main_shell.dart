@@ -120,49 +120,56 @@ class _ShellTopBar extends StatelessWidget {
     final titleStyle = Theme.of(context).appBarTheme.titleTextStyle ??
         Theme.of(context).textTheme.titleLarge;
 
-    return SizedBox(
-      height: kToolbarHeight,
-      width: double.infinity,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Center(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: titleStyle,
-            ),
-          ),
-          Positioned(
-            right: 4,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _LanguageMenu(
-                  language: language,
-                  onChanged: onLanguageChanged,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 420;
+        return SizedBox(
+          height: kToolbarHeight,
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: compact ? Alignment.centerLeft : Alignment.center,
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: titleStyle,
+                  ),
                 ),
-                if (isGuest) ...[
-                  _AuthNavButton(
-                    label: appText(language, 'Đăng nhập', 'Log in'),
-                    onPressed: onLogin,
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _LanguageMenu(
+                    language: language,
+                    onChanged: onLanguageChanged,
                   ),
-                  _AuthNavButton(
-                    label: appText(language, 'Đăng ký', 'Sign up'),
-                    onPressed: onRegister,
-                  ),
-                ] else
-                  IconButton(
-                    tooltip: appText(language, 'Đăng xuất', 'Log out'),
-                    icon: const Icon(Icons.logout),
-                    onPressed: onLogout,
-                  ),
-              ],
-            ),
+                  if (isGuest) ...[
+                    _AuthNavButton(
+                      label: appText(language, 'Đăng nhập', 'Log in'),
+                      onPressed: onLogin,
+                      compact: compact,
+                    ),
+                    _AuthNavButton(
+                      label: appText(language, 'Đăng ký', 'Sign up'),
+                      onPressed: onRegister,
+                      compact: compact,
+                    ),
+                  ] else
+                    IconButton(
+                      tooltip: appText(language, 'Đăng xuất', 'Log out'),
+                      icon: const Icon(Icons.logout),
+                      onPressed: onLogout,
+                    ),
+                ],
+              ),
+              const SizedBox(width: 4),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -213,10 +220,12 @@ class _LanguageMenu extends StatelessWidget {
 class _AuthNavButton extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
+  final bool compact;
 
   const _AuthNavButton({
     required this.label,
     required this.onPressed,
+    this.compact = false,
   });
 
   @override
@@ -225,8 +234,8 @@ class _AuthNavButton extends StatelessWidget {
       onPressed: onPressed,
       style: TextButton.styleFrom(
         foregroundColor: AppTheme.primary,
-        minimumSize: const Size(58, 36),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        minimumSize: Size(compact ? 48 : 58, 36),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 8),
         textStyle: const TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,

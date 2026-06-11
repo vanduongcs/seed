@@ -5,8 +5,8 @@ const String defaultBaseUrl =
 const String baseUrl =
     configuredBaseUrl == '' ? defaultBaseUrl : configuredBaseUrl;
 
-const String appVersionName = '1.0.15';
-const int appBuildNumber = 16;
+const String appVersionName = '1.0.16';
+const int appBuildNumber = 17;
 
 const Duration connectTimeout = Duration(seconds: 15);
 const Duration receiveTimeout = Duration(seconds: 180);
