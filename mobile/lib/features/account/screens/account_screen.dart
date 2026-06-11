@@ -7,6 +7,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/i18n/app_language.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../auth/providers/auth_provider.dart';
 
 class AccountScreen extends ConsumerStatefulWidget {
   const AccountScreen({super.key});
@@ -104,6 +105,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _logout() async {
+    await ref.read(authProvider.notifier).logout();
+    if (mounted) context.go('/login');
   }
 
   void _openSettings(BuildContext context) {
@@ -208,16 +214,34 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
           ),
           const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: () => context.go('/login'),
-            child: Text(
-                appText(language, 'Đăng nhập để đồng bộ', 'Log in to sync')),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: () => context.go('/login'),
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                  appText(language, 'Đăng nhập để đồng bộ', 'Log in to sync')),
+            ),
           ),
           const SizedBox(height: 10),
-          OutlinedButton(
-            onPressed: () => context.go('/register'),
-            child:
-                Text(appText(language, 'Đăng ký tài khoản', 'Create account')),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton(
+              onPressed: () => context.go('/register'),
+              style: OutlinedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                  appText(language, 'Đăng ký tài khoản', 'Create account')),
+            ),
           ),
         ],
       );
@@ -278,6 +302,16 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         OutlinedButton(
           onPressed: () => _openSettings(context),
           child: Text(appText(language, 'Cài đặt', 'Settings')),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: _logout,
+          icon: const Icon(Icons.logout),
+          label: Text(appText(language, 'Đăng xuất', 'Log out')),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.red.shade700,
+            side: BorderSide(color: Colors.red.shade200),
+          ),
         ),
       ],
     );

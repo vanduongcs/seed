@@ -9,8 +9,8 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  LinearProgress,
   Stack,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
@@ -216,10 +216,7 @@ const buildChartModel = (result) => {
   );
   if (!lengthDistribution) return null;
 
-  const d10 = lengthDistribution.low;
   const d50 = lengthDistribution.midpoint;
-  const d90 = lengthDistribution.high;
-  const spreadPct = d50 && d50 > 0 ? round(((d90 - d10) / d50) * 100, 1) : null;
   const measuredSuspects = measurements.reduce(
     (count, measurement) =>
       measurement?.qc_outlier === true ? count + 1 : count,
@@ -239,9 +236,6 @@ const buildChartModel = (result) => {
     sampleCount: lengthDistribution.sampleCount,
     totalCount: measurements.length,
     midpoint: d50,
-    commonLow: d10,
-    commonHigh: d90,
-    spreadPct,
     suspectCount,
     suspectPct,
     distributions: {
@@ -392,16 +386,6 @@ const DistributionChart = ({ distribution, compact = false }) => {
           </Typography>
         ))}
       </Box>
-      <Typography
-        variant="caption"
-        color="text.secondary"
-        display="block"
-        mt={0.75}
-      >
-        Ví dụ cột `5+` rồi đến `8+` nghĩa là cột `5+` gồm các hạt từ 5 đến dưới
-        8. Trung vị: {formatNumber(distribution.midpoint, distribution.digits)}{" "}
-        {distribution.unit}
-      </Typography>
     </Box>
   );
 };
@@ -665,65 +649,6 @@ export function GrainStatsCharts({ result, compact = false }) {
             suspectPct={model.suspectPct}
           />
 
-          <Box>
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              justifyContent="space-between"
-              alignItems={{ xs: "flex-start", sm: "baseline" }}
-              gap={0.25}
-              mb={0.75}
-            >
-              <Typography variant="body2" fontWeight={700}>
-                Độ đồng đều
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Chênh lệch:{" "}
-                {model.spreadPct == null
-                  ? "-"
-                  : `${formatNumber(model.spreadPct, 1)}%`}
-              </Typography>
-            </Stack>
-            <Typography
-              variant="body2"
-              fontWeight={600}
-              sx={{
-                mb: 0.75,
-                color:
-                  model.spreadPct == null || model.spreadPct <= 20
-                    ? "#2f6b4f"
-                    : model.spreadPct <= 35
-                      ? "#d97706"
-                      : "#dc2626",
-              }}
-            >
-              {model.spreadPct == null
-                ? ""
-                : model.spreadPct <= 20
-                  ? "Mẫu khá đều"
-                  : model.spreadPct <= 35
-                    ? "Mẫu hơi lẫn cỡ"
-                    : "Mẫu lẫn nhiều cỡ"}
-            </Typography>
-            <LinearProgress
-              variant="determinate"
-              value={clamp(100 - (model.spreadPct ?? 100), 0, 100)}
-              sx={{
-                height: 10,
-                borderRadius: 999,
-                bgcolor: "grey.100",
-                "& .MuiLinearProgress-bar": {
-                  borderRadius: 999,
-                  bgcolor:
-                    model.spreadPct == null || model.spreadPct <= 20
-                      ? "#2f6b4f"
-                      : model.spreadPct <= 35
-                        ? "#d97706"
-                        : "#dc2626",
-                },
-              }}
-            />
-          </Box>
-
           {chartMode === "all" ? (
             <Stack spacing={1.25}>
               {["length", "width", "area"].map((key) => (
@@ -745,9 +670,21 @@ export function GrainStatsCharts({ result, compact = false }) {
               alignItems={{ xs: "stretch", sm: "center" }}
               mb={1}
             >
-              <Typography variant="body2" fontWeight={800}>
-                Biểu đồ phân bố
-              </Typography>
+              <Stack direction="row" alignItems="center" spacing={0.5}>
+                <Typography variant="body2" fontWeight={800}>
+                  Biểu đồ phân bố
+                </Typography>
+                <Tooltip title="Cách đọc biểu đồ">
+                  <IconButton
+                    size="small"
+                    onClick={() => setHelpOpen(true)}
+                    aria-label="Cách đọc biểu đồ"
+                    sx={{ width: 30, height: 30 }}
+                  >
+                    <HelpOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
             </Stack>
             <Stack spacing={1}>
               {visibleCharts.map((key) => (

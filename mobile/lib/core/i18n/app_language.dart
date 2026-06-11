@@ -123,8 +123,8 @@ const _phrasePairs = <(String, String)>[
   ),
   ('4. Nhập kích thước thật', '4. Enter the real size'),
   (
-    'Nhập chiều dài thật của vật mốc vào ô Kích thước (mm), sau đó bấm Xử lý.',
-    'Enter the marker real length in Size (mm), then press Analyze.'
+    'Vẽ line để lấy kích thước px tự động, rồi nhập kích thước thật của vật mốc vào ô Kích thước thật (mm); để trống thì kết quả giữ đơn vị px.',
+    'Draw the line to measure pixels automatically, then enter the marker real size in Real size (mm); leave it blank to keep pixel units.'
   ),
   ('Quay lại', 'Back'),
   ('Bắt đầu', 'Start'),
@@ -178,20 +178,11 @@ const _phrasePairs = <(String, String)>[
   ('chiều dài', 'length'),
   ('chiều rộng', 'width'),
   ('diện tích', 'area'),
-  ('Độ đồng đều', 'Uniformity'),
-  ('Chênh lệch', 'Spread'),
   ('hạt', 'grains'),
   (
     'Mỗi cột là một nhóm hạt có kích thước gần nhau.',
     'Each column is a group of grains with similar sizes.'
   ),
-  (
-    'Ví dụ cột 5+ rồi đến 8+ nghĩa là cột 5+ gồm các hạt từ 5 đến dưới 8. Trung vị',
-    'For example, a 5+ column followed by 8+ means 5+ contains grains from 5 to under 8. Median'
-  ),
-  ('Mẫu khá đều', 'Sample is fairly uniform'),
-  ('Mẫu hơi lẫn cỡ', 'Sample has some size variation'),
-  ('Mẫu lẫn nhiều cỡ', 'Sample has many size groups'),
   ('Không có hạt nghi ngờ', 'No suspect grains'),
   ('Ít hạt cần xem lại', 'Few grains need review'),
   ('Cần xem lại ảnh', 'Image needs review'),

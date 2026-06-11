@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar, Box, Drawer, IconButton, List, ListItem,
   ListItemButton, ListItemText, Toolbar,
@@ -9,12 +9,15 @@ import { Menu as MenuIcon } from '@mui/icons-material';
 import { api } from '@/api/axios.js';
 import { useAuthStore } from '@/store/auth.store.js';
 import { languages, useLanguage } from '@/i18n.jsx';
+import DashboardPage from '@/pages/DashboardPage.jsx';
+import StoragePage from '@/pages/StoragePage.jsx';
+import AccountPage from '@/pages/AccountPage.jsx';
 
 const DRAWER_WIDTH = 260;
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, isGuest, logout } = useAuthStore();
+  const { user, isGuest, isAuthenticated, accessToken, refreshToken, logout } = useAuthStore();
   const { language, setLanguage, text } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
@@ -24,6 +27,14 @@ export default function Layout() {
     { label: text('Tài khoản', 'Account'), path: '/account' },
   ];
   const navItems = isGuest ? accountNavItems.slice(0, 2) : accountNavItems;
+
+  const currentPath = location.pathname;
+  const showAccount = !isGuest && isAuthenticated && (accessToken || refreshToken);
+
+  // Redirect bare '/' to '/dashboard'
+  useEffect(() => {
+    if (currentPath === '/') navigate('/dashboard', { replace: true });
+  }, [currentPath, navigate]);
 
   const handleLogout = async () => {
     try {
@@ -73,7 +84,7 @@ export default function Layout() {
 
       <List sx={{ px: 1.5, pt: 1.5, flex: 1 }}>
         {navItems.map((item) => {
-          const active = location.pathname.startsWith(item.path);
+          const active = currentPath.startsWith(item.path);
           return (
             <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton
@@ -140,7 +151,17 @@ export default function Layout() {
       </Box>
 
       <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, mt: { xs: 8, md: 0 }, minHeight: '100vh', bgcolor: 'background.default' }}>
-        <Outlet />
+        <Box sx={{ display: currentPath.startsWith('/dashboard') ? 'block' : 'none' }}>
+          <DashboardPage />
+        </Box>
+        <Box sx={{ display: currentPath.startsWith('/storage') ? 'block' : 'none' }}>
+          <StoragePage />
+        </Box>
+        {showAccount && (
+          <Box sx={{ display: currentPath.startsWith('/account') ? 'block' : 'none' }}>
+            <AccountPage />
+          </Box>
+        )}
       </Box>
     </Box>
   );

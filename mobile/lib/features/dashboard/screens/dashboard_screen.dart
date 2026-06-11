@@ -8,7 +8,6 @@ import 'dart:ui' as ui;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -338,28 +337,51 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   }
 
   Future<void> _pick(ImageSource source) async {
-    final file = await _picker.pickImage(
-      source: source,
-      requestFullMetadata: false,
-    );
-    if (file == null) return;
-    final bytes = await file.readAsBytes();
-    final decoded = img.decodeImage(bytes);
-    setState(() {
-      _selectedBytes = bytes;
-      _selectedImageSize = decoded == null
-          ? null
-          : Size(decoded.width.toDouble(), decoded.height.toDouble());
-      _referenceStart = null;
-      _referenceEnd = null;
-      _referencePixels.clear();
-      _fileName = file.name;
-      _result = null;
-      _error = null;
-      _previewMode = 'overlay';
-      _qcEditMode = false;
-      _clearPreviewCache();
-    });
+    try {
+      final file = await _picker.pickImage(
+        source: source,
+        requestFullMetadata: false,
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      final imageSize = await _imageSizeFromBytes(bytes);
+      if (!mounted) return;
+      setState(() {
+        _selectedBytes = bytes;
+        _selectedImageSize = imageSize;
+        _referenceStart = null;
+        _referenceEnd = null;
+        _referencePixels.clear();
+        _referenceMm.clear();
+        _fileName = file.name;
+        _result = null;
+        _error = null;
+        _previewMode = 'overlay';
+        _qcEditMode = false;
+        _clearPreviewCache();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error =
+            'Không thể đọc ảnh đã chọn. Vui lòng thử ảnh JPG hoặc PNG khác.';
+      });
+    }
+  }
+
+  static Future<Size?> _imageSizeFromBytes(Uint8List bytes) async {
+    ui.ImmutableBuffer? buffer;
+    ui.ImageDescriptor? descriptor;
+    try {
+      buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
+      return Size(descriptor.width.toDouble(), descriptor.height.toDouble());
+    } catch (_) {
+      return null;
+    } finally {
+      descriptor?.dispose();
+      buffer?.dispose();
+    }
   }
 
   Future<void> _analyze() async {
@@ -520,37 +542,53 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
               },
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _referencePixels,
-                    readOnly: true,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: InputDecoration(
-                      labelText:
-                          appText(language, 'Kích thước (px)', 'Size (px)'),
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                    ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final hasReferenceLine =
+                    _referenceStart != null && _referenceEnd != null;
+                final pixelsField = TextField(
+                  controller: _referencePixels,
+                  enabled: false,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText:
+                        appText(language, 'Kích thước (px)', 'Size (px)'),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: _referenceMm,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: InputDecoration(
-                      labelText:
-                          appText(language, 'Kích thước (mm)', 'Size (mm)'),
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                    ),
+                );
+                final millimetersField = TextField(
+                  controller: _referenceMm,
+                  enabled: hasReferenceLine && !_busy,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: appText(
+                        language, 'Kích thước thật (mm)', 'Real size (mm)'),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
                   ),
-                ),
-              ],
+                );
+
+                if (constraints.maxWidth < 380) {
+                  return Column(
+                    children: [
+                      pixelsField,
+                      const SizedBox(height: 10),
+                      millimetersField,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: pixelsField),
+                    const SizedBox(width: 10),
+                    Expanded(child: millimetersField),
+                  ],
+                );
+              },
             ),
             Align(
               alignment: Alignment.centerLeft,
@@ -562,6 +600,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                           _referenceStart = null;
                           _referenceEnd = null;
                           _referencePixels.clear();
+                          _referenceMm.clear();
                         });
                       },
                 icon: const Icon(Icons.clear),
@@ -1178,6 +1217,8 @@ class _ReferenceImageSelectorState
         targetWidth = math.max(1, (sourceSize.width * scale).round());
         targetHeight = math.max(1, (sourceSize.height * scale).round());
       }
+    } else {
+      targetWidth = _BackendAnalysisCardState._previewCacheWidth;
     }
     final codec = await ui.instantiateImageCodec(
       bytes,
@@ -2297,8 +2338,8 @@ class _CalibrationGuideDialogState
                         '4. Enter the real size'),
                     description: appText(
                       language,
-                      'Nhập chiều dài thật của vật mốc vào ô Kích thước (mm), sau đó bấm Xử lý.',
-                      'Enter the marker real length in Size (mm), then press Analyze.',
+                      'Vẽ line để lấy kích thước px tự động, rồi nhập kích thước thật của vật mốc vào ô Kích thước thật (mm); để trống thì kết quả giữ đơn vị px.',
+                      'Draw the line to measure pixels automatically, then enter the marker real size in Real size (mm); leave it blank to keep pixel units.',
                     ),
                     diagram: const _GuideImage(
                         'assets/images/calibration_guide_4.webp'),

@@ -237,8 +237,6 @@ class _GrainStatsChartsState extends ConsumerState<GrainStatsCharts> {
               chartMode: _chartMode,
             ),
             const SizedBox(height: 14),
-            _EvennessBar(model: model),
-            const SizedBox(height: 14),
             if (_chartMode == 'all')
               for (final key in const ['length', 'width', 'area']) ...[
                 _SizeGroupSection(distribution: model.distributions[key]),
@@ -247,11 +245,31 @@ class _GrainStatsChartsState extends ConsumerState<GrainStatsCharts> {
             else
               _SizeGroupSection(distribution: model.distributions[_chartMode]),
             const SizedBox(height: 14),
-            Text(
-              appText(language, 'Biểu đồ phân bố', 'Distribution chart'),
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    appText(language, 'Biểu đồ phân bố', 'Distribution chart'),
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                IconButton(
+                  tooltip: appText(
+                    language,
+                    'Cách đọc biểu đồ',
+                    'How to read the chart',
+                  ),
+                  icon: const Icon(Icons.help_outline, size: 18),
+                  visualDensity: VisualDensity.compact,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 32, height: 32),
+                  padding: EdgeInsets.zero,
+                  onPressed: _showHelp,
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             for (final key in visibleCharts) ...[
               _DistributionChart(
                 distribution: model.distributions[key],
@@ -395,64 +413,6 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-class _EvennessBar extends ConsumerWidget {
-  final _ChartModel model;
-
-  const _EvennessBar({required this.model});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final language = ref.watch(appLanguageProvider);
-    final value = (100 - model.spreadPct).clamp(0, 100).toDouble();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                appText(language, 'Độ đồng đều', 'Uniformity'),
-                style:
-                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                '${appText(language, 'Chênh lệch', 'Spread')}: ${_formatNumber(model.spreadPct, 1)}%',
-                textAlign: TextAlign.right,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 12, color: AppTheme.textSecondary),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          localizedText(language, model.spreadLabel),
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: model.spreadColor,
-          ),
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: value / 100,
-            minHeight: 10,
-            backgroundColor: AppTheme.bgDefault,
-            color: model.spreadColor,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _SizeGroupSection extends ConsumerWidget {
   final _Distribution? distribution;
 
@@ -583,15 +543,6 @@ class _DistributionChart extends ConsumerWidget {
                   ),
                 ),
             ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            appText(
-              language,
-              'Ví dụ cột 5+ rồi đến 8+ nghĩa là cột 5+ gồm các hạt từ 5 đến dưới 8. Trung vị: ${_formatNumber(data.midpoint, data.decimals)} ${data.unit}',
-              'For example, a 5+ column followed by 8+ means 5+ contains grains from 5 to under 8. Median: ${_formatNumber(data.midpoint, data.decimals)} ${data.unit}',
-            ),
-            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
           ),
         ],
       ),
@@ -766,9 +717,6 @@ class _ChartModel {
   final String unitLabel;
   final int decimals;
   final double midpoint;
-  final double commonLow;
-  final double commonHigh;
-  final double spreadPct;
   final int suspectCount;
   final double suspectPct;
 
@@ -779,24 +727,9 @@ class _ChartModel {
     required this.unitLabel,
     required this.decimals,
     required this.midpoint,
-    required this.commonLow,
-    required this.commonHigh,
-    required this.spreadPct,
     required this.suspectCount,
     required this.suspectPct,
   });
-
-  String get spreadLabel {
-    if (spreadPct <= 20) return 'Mẫu khá đều';
-    if (spreadPct <= 35) return 'Mẫu hơi lẫn cỡ';
-    return 'Mẫu lẫn nhiều cỡ';
-  }
-
-  Color get spreadColor {
-    if (spreadPct <= 20) return AppTheme.primary;
-    if (spreadPct <= 35) return const Color(0xFFD97706);
-    return const Color(0xFFDC2626);
-  }
 
   String get qcLabel {
     if (suspectPct <= 0) return 'Không có hạt nghi ngờ';
@@ -817,12 +750,7 @@ _ChartModel? _buildModel(GrainAnalysisResult result) {
   final lengthDistribution = _buildDistribution(result, 'length');
   if (lengthDistribution == null) return null;
 
-  final commonLow = _percentile(lengthDistribution.sortedValues, 0.10);
   final midpoint = lengthDistribution.midpoint;
-  final commonHigh = _percentile(lengthDistribution.sortedValues, 0.90);
-  final spreadPct = midpoint > 0
-      ? _round(((commonHigh - commonLow) / midpoint) * 100, 1)
-      : 0.0;
 
   final summarySuspects = _asInt(result.summary['qc'] is Map
       ? (result.summary['qc'] as Map)['suspect_count']
@@ -850,9 +778,6 @@ _ChartModel? _buildModel(GrainAnalysisResult result) {
     unitLabel: lengthDistribution.unit,
     decimals: lengthDistribution.decimals,
     midpoint: midpoint,
-    commonLow: commonLow,
-    commonHigh: commonHigh,
-    spreadPct: spreadPct,
     suspectCount: suspectCount,
     suspectPct: suspectPct,
   );
