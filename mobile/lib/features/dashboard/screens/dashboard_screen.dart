@@ -17,6 +17,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../grain/providers/grain_runs_provider.dart';
 import '../../grain/services/grain_analysis_api.dart';
 import '../../grain/widgets/grain_stats_charts.dart';
+import '../providers/dashboard_state_provider.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -27,8 +28,6 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with AutomaticKeepAliveClientMixin<DashboardScreen> {
-  GrainAnalysisResult? _sessionResult;
-
   @override
   bool get wantKeepAlive => true;
 
@@ -36,23 +35,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Widget build(BuildContext context) {
     super.build(context);
     final runsState = ref.watch(grainRunsProvider);
+    final dashboardState = ref.watch(dashboardStateProvider);
 
     return runsState.when(
       loading: () => _DashboardContent(
-        sessionResult: _sessionResult,
+        sessionResult: dashboardState.result,
         onSessionResultChanged: (result) =>
-            setState(() => _sessionResult = result),
+            ref.read(dashboardStateProvider.notifier).setResult(result),
       ),
       error: (error, _) => _DashboardContent(
         historyError: error.toString(),
-        sessionResult: _sessionResult,
+        sessionResult: dashboardState.result,
         onSessionResultChanged: (result) =>
-            setState(() => _sessionResult = result),
+            ref.read(dashboardStateProvider.notifier).setResult(result),
       ),
       data: (_) => _DashboardContent(
-        sessionResult: _sessionResult,
+        sessionResult: dashboardState.result,
         onSessionResultChanged: (result) =>
-            setState(() => _sessionResult = result),
+            ref.read(dashboardStateProvider.notifier).setResult(result),
       ),
     );
   }
@@ -259,18 +259,6 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   final _referencePixels = TextEditingController();
   final _referenceMm = TextEditingController();
 
-  Uint8List? _selectedBytes;
-  Size? _selectedImageSize;
-  Offset? _referenceStart;
-  Offset? _referenceEnd;
-  String _fileName = 'camera-frame.png';
-  GrainAnalysisResult? _result;
-  String? _error;
-  String _previewMode = 'overlay';
-  bool _qcEditMode = false;
-  bool _busy = false;
-  double _progress = 0;
-  String _progressPhase = '';
   Timer? _progressTimer;
   String _decodedPreviewKey = '';
   Uint8List? _decodedPreviewBytes;
@@ -287,19 +275,20 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   }
 
   void _setProgress(double value, String phase) {
-    setState(() {
-      _progress = value.clamp(0, 100);
-      _progressPhase = phase;
-    });
+    ref.read(dashboardStateProvider.notifier).setProgress(value, phase);
   }
 
   void _startProgressDrift() {
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
       if (!mounted) return;
-      setState(() {
-        if (_progress < 82) _progress = (_progress + 2).clamp(0, 82);
-      });
+      final currentProgress = ref.read(dashboardStateProvider).progress;
+      if (currentProgress < 82) {
+        ref.read(dashboardStateProvider.notifier).setProgress(
+          (currentProgress + 2).clamp(0, 82),
+          ref.read(dashboardStateProvider).progressPhase,
+        );
+      }
     });
   }
 
@@ -346,26 +335,12 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       final bytes = await file.readAsBytes();
       final imageSize = await _imageSizeFromBytes(bytes);
       if (!mounted) return;
-      setState(() {
-        _selectedBytes = bytes;
-        _selectedImageSize = imageSize;
-        _referenceStart = null;
-        _referenceEnd = null;
-        _referencePixels.clear();
-        _referenceMm.clear();
-        _fileName = file.name;
-        _result = null;
-        _error = null;
-        _previewMode = 'overlay';
-        _qcEditMode = false;
-        _clearPreviewCache();
-      });
+      ref.read(dashboardStateProvider.notifier).setSelectedImage(bytes, imageSize, file.name);
+      _clearPreviewCache();
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _error =
-            'Không thể đọc ảnh đã chọn. Vui lòng thử ảnh JPG hoặc PNG khác.';
-      });
+      ref.read(dashboardStateProvider.notifier).setError(
+          'Không thể đọc ảnh đã chọn. Vui lòng thử ảnh JPG hoặc PNG khác.');
     }
   }
 
@@ -385,17 +360,16 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   }
 
   Future<void> _analyze() async {
-    final bytes = _selectedBytes;
+    final stateVal = ref.read(dashboardStateProvider);
+    final bytes = stateVal.selectedBytes;
     if (bytes == null) {
-      setState(() => _error = 'Chọn ảnh hoặc chụp ảnh trước khi xử lý.');
+      ref.read(dashboardStateProvider.notifier).setError('Chọn ảnh hoặc chụp ảnh trước khi xử lý.');
       return;
     }
 
-    setState(() {
-      _busy = true;
-      _error = null;
-      _qcEditMode = false;
-    });
+    ref.read(dashboardStateProvider.notifier).setBusy(true);
+    ref.read(dashboardStateProvider.notifier).setError(null);
+    ref.read(dashboardStateProvider.notifier).setQcEditMode(false);
     _setProgress(5, 'Chuẩn bị ảnh');
     try {
       _setProgress(
@@ -412,13 +386,13 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       final result = await _api
           .analyzeImage(
             bytes: bytes,
-            fileName: _fileName,
+            fileName: stateVal.fileName,
             referencePixels: referencePixels,
             referenceMm: referenceMm,
-            referenceX1: _referenceStart?.dx,
-            referenceY1: _referenceStart?.dy,
-            referenceX2: _referenceEnd?.dx,
-            referenceY2: _referenceEnd?.dy,
+            referenceX1: stateVal.referenceStart?.dx,
+            referenceY1: stateVal.referenceStart?.dy,
+            referenceX2: stateVal.referenceEnd?.dx,
+            referenceY2: stateVal.referenceEnd?.dy,
             onProgress: (value, phase) {
               if (mounted) _setProgress(value, phase);
             },
@@ -427,68 +401,63 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       _stopProgress();
       _setProgress(96, 'Lưu kết quả');
       if (!mounted) return;
-      setState(() {
-        _result = result;
-        _clearPreviewCache();
-      });
+      ref.read(dashboardStateProvider.notifier).setResult(result);
+      _clearPreviewCache();
       widget.onResultChanged(result);
       _setProgress(100, 'Hoàn tất');
       ref.invalidate(grainRunsProvider);
     } catch (error) {
       _stopProgress();
       if (!mounted) return;
-      setState(() => _error = _friendlyError(error));
+      ref.read(dashboardStateProvider.notifier).setError(_friendlyError(error));
     } finally {
       _stopProgress();
       if (mounted) {
-        setState(() => _busy = false);
+        ref.read(dashboardStateProvider.notifier).setBusy(false);
         Future.delayed(const Duration(milliseconds: 500), () {
           if (!mounted) return;
-          setState(() {
-            _progress = 0;
-            _progressPhase = '';
-          });
+          ref.read(dashboardStateProvider.notifier).setProgress(0, '');
         });
       }
     }
   }
 
   Future<void> _shareCsv() async {
-    final csv = _result?.csv;
+    final stateVal = ref.read(dashboardStateProvider);
+    final csv = stateVal.result?.csv;
     if (csv == null || csv.isEmpty) return;
     final file = await _writeTempFile(
-        '${_safeStem(_fileName)}_measurements.csv', utf8.encode(csv));
+        '${_safeStem(stateVal.fileName)}_measurements.csv', utf8.encode(csv));
     await Share.shareXFiles([XFile(file.path)],
         text: 'SeedVision measurements CSV');
   }
 
   Future<void> _sharePng() async {
-    final base64 = _result?.previewWithFallback('samMask');
+    final stateVal = ref.read(dashboardStateProvider);
+    final base64 = stateVal.result?.previewWithFallback('samMask');
     if (base64 == null || base64.isEmpty) return;
     final file = await _writeTempFile(
-        '${_safeStem(_fileName)}_segmentation.png', base64Decode(base64));
+        '${_safeStem(stateVal.fileName)}_segmentation.png', base64Decode(base64));
     await Share.shareXFiles([XFile(file.path)],
         text: 'SeedVision segmentation PNG');
   }
 
   Future<void> _applyEditedResult(GrainAnalysisResult next) async {
-    setState(() {
-      _result = next;
-      _clearPreviewCache();
-    });
+    ref.read(dashboardStateProvider.notifier).setResult(next);
+    _clearPreviewCache();
     widget.onResultChanged(next);
     await _api.persistEditedRun(next);
     ref.invalidate(grainRunsProvider);
   }
 
   Future<void> _confirmSuspect(int measurementId) async {
-    final current = _result;
+    final current = ref.read(dashboardStateProvider).result;
     if (current == null) return;
     await _applyEditedResult(current.withConfirmedGrain(measurementId));
   }
 
   Future<void> _deleteSuspect(int measurementId) async {
-    final current = _result;
+    final current = ref.read(dashboardStateProvider).result;
     if (current == null) return;
     await _applyEditedResult(current.withDeletedMeasurement(measurementId));
   }
@@ -496,11 +465,20 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final result = _result;
+    final stateVal = ref.watch(dashboardStateProvider);
+    final result = stateVal.result;
     final language = ref.watch(appLanguageProvider);
-    final previewBytes = _previewBytesFor(result, _previewMode);
+    final previewBytes = _previewBytesFor(result, stateVal.previewMode);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final cardPadding = screenWidth < 360 ? 12.0 : 18.0;
+
+    final distance = stateVal.referenceStart != null && stateVal.referenceEnd != null
+        ? (stateVal.referenceEnd! - stateVal.referenceStart!).distance
+        : null;
+    _referencePixels.text = distance != null ? distance.toStringAsFixed(1) : '';
+    if (_referenceMm.text != stateVal.referenceMmInput) {
+      _referenceMm.text = stateVal.referenceMmInput;
+    }
 
     return Card(
       child: Padding(
@@ -513,12 +491,12 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
               runSpacing: 10,
               children: [
                 OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _pick(ImageSource.gallery),
+                  onPressed: stateVal.busy ? null : () => _pick(ImageSource.gallery),
                   icon: const Icon(Icons.photo_library_outlined),
                   label: Text(appText(language, 'Chọn ảnh', 'Choose image')),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _pick(ImageSource.camera),
+                  onPressed: stateVal.busy ? null : () => _pick(ImageSource.camera),
                   icon: const Icon(Icons.photo_camera_outlined),
                   label: const Text('Camera'),
                 ),
@@ -526,26 +504,21 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
             ),
             const SizedBox(height: 14),
             _ReferenceImageSelector(
-              bytes: _selectedBytes,
-              imageSize: _selectedImageSize,
-              start: _referenceStart,
-              end: _referenceEnd,
-              enabled: !_busy && _selectedBytes != null,
-              onPickImage: _busy ? null : () => _pick(ImageSource.gallery),
+              bytes: stateVal.selectedBytes,
+              imageSize: stateVal.selectedImageSize,
+              start: stateVal.referenceStart,
+              end: stateVal.referenceEnd,
+              enabled: !stateVal.busy && stateVal.selectedBytes != null,
+              onPickImage: stateVal.busy ? null : () => _pick(ImageSource.gallery),
               onChanged: (start, end) {
-                setState(() {
-                  _referenceStart = start;
-                  _referenceEnd = end;
-                  _referencePixels.text =
-                      (end - start).distance.toStringAsFixed(1);
-                });
+                ref.read(dashboardStateProvider.notifier).setReferenceLine(start, end);
               },
             ),
             const SizedBox(height: 12),
             LayoutBuilder(
               builder: (context, constraints) {
                 final hasReferenceLine =
-                    _referenceStart != null && _referenceEnd != null;
+                    stateVal.referenceStart != null && stateVal.referenceEnd != null;
                 final pixelsField = TextField(
                   controller: _referencePixels,
                   enabled: false,
@@ -560,7 +533,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                 );
                 final millimetersField = TextField(
                   controller: _referenceMm,
-                  enabled: hasReferenceLine && !_busy,
+                  enabled: hasReferenceLine && !stateVal.busy,
+                  onChanged: (val) {
+                    ref.read(dashboardStateProvider.notifier).setReferenceMmInput(val);
+                  },
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
@@ -593,15 +569,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: _busy || _referenceStart == null
+                onPressed: stateVal.busy || stateVal.referenceStart == null
                     ? null
                     : () {
-                        setState(() {
-                          _referenceStart = null;
-                          _referenceEnd = null;
-                          _referencePixels.clear();
-                          _referenceMm.clear();
-                        });
+                        ref.read(dashboardStateProvider.notifier).clearReference();
                       },
                 icon: const Icon(Icons.clear),
                 label: Text(
@@ -612,35 +583,35 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: _busy || _selectedBytes == null ? null : _analyze,
-                icon: _busy
+                onPressed: stateVal.busy || stateVal.selectedBytes == null ? null : _analyze,
+                icon: stateVal.busy
                     ? const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.auto_awesome_motion_outlined),
-                label: Text(_busy
+                label: Text(stateVal.busy
                     ? appText(language, 'Đang xử lý', 'Processing')
                     : appText(language, 'Xử lý', 'Analyze')),
               ),
             ),
-            if (_error != null) ...[
+            if (stateVal.error != null) ...[
               const SizedBox(height: 12),
               Text(
-                localizedText(language, _error!),
+                localizedText(language, stateVal.error!),
                 style: TextStyle(color: Colors.red.shade700),
               ),
             ],
-            if (_busy) ...[
+            if (stateVal.busy) ...[
               const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      _progressPhase.isEmpty
+                      stateVal.progressPhase.isEmpty
                           ? appText(language, 'Đang xử lý', 'Processing')
-                          : _localizedProgressPhase(language, _progressPhase),
+                          : _localizedProgressPhase(language, stateVal.progressPhase),
                       style: const TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 12,
@@ -648,13 +619,13 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                     ),
                   ),
                   Text(
-                    '${_progress.round()}%',
+                    '${stateVal.progress.round()}%',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ],
               ),
               const SizedBox(height: 6),
-              LinearProgressIndicator(value: (_progress / 100).clamp(0, 1)),
+              LinearProgressIndicator(value: (stateVal.progress / 100).clamp(0, 1)),
             ],
             if (result != null) ...[
               const SizedBox(height: 16),
@@ -737,19 +708,22 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                   _previewChip(
                     mode: 'overlay',
                     label: appText(language, 'Đánh dấu', 'Overlay'),
+                    previewMode: stateVal.previewMode,
                   ),
                   _previewChip(
                     mode: 'mask',
                     label: appText(language, 'Hình dạng', 'Mask'),
+                    previewMode: stateVal.previewMode,
                   ),
                   _previewChip(
                     mode: 'labels',
                     label: appText(language, 'Đánh số', 'Labels'),
+                    previewMode: stateVal.previewMode,
                   ),
-                  _qcEditChip(),
+                  _qcEditChip(stateVal.qcEditMode),
                 ],
               ),
-              if (_qcEditMode) ...[
+              if (stateVal.qcEditMode) ...[
                 const SizedBox(height: 8),
                 Container(
                   width: double.infinity,
@@ -791,9 +765,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                 _QcEditablePreview(
                   result: result,
                   previewBytes: previewBytes,
-                  editMode: _qcEditMode,
+                  editMode: stateVal.qcEditMode,
                 ),
-              if (_qcEditMode) ...[
+              if (stateVal.qcEditMode) ...[
                 const SizedBox(height: 10),
                 _SuspectDecisionTable(
                   result: result,
@@ -826,16 +800,15 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     );
   }
 
-  Widget _previewChip({required String mode, required String label}) {
+  Widget _previewChip({required String mode, required String label, required String previewMode}) {
     return ChoiceChip(
       label: Text(label),
-      selected: _previewMode == mode,
-      onSelected: (_) => setState(() => _previewMode = mode),
+      selected: previewMode == mode,
+      onSelected: (_) => ref.read(dashboardStateProvider.notifier).setPreviewMode(mode),
     );
   }
 
-  Widget _qcEditChip() {
-    final active = _qcEditMode;
+  Widget _qcEditChip(bool active) {
     final language = ref.watch(appLanguageProvider);
     return FilterChip(
       avatar: Icon(
@@ -847,7 +820,7 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
           ? appText(language, 'Xong chỉnh hạt', 'Finish editing')
           : appText(language, 'Chỉnh hạt nghi ngờ', 'Edit suspect grains')),
       selected: active,
-      onSelected: (_) => setState(() => _qcEditMode = !_qcEditMode),
+      onSelected: (_) => ref.read(dashboardStateProvider.notifier).setQcEditMode(!active),
       selectedColor: const Color(0xFFFFEDD5),
       checkmarkColor: const Color(0xFF9A3412),
       side: BorderSide(
