@@ -35,22 +35,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Widget build(BuildContext context) {
     super.build(context);
     final runsState = ref.watch(grainRunsProvider);
-    final dashboardState = ref.watch(dashboardStateProvider);
 
     return runsState.when(
       loading: () => _DashboardContent(
-        sessionResult: dashboardState.result,
         onSessionResultChanged: (result) =>
             ref.read(dashboardStateProvider.notifier).setResult(result),
       ),
       error: (error, _) => _DashboardContent(
         historyError: error.toString(),
-        sessionResult: dashboardState.result,
         onSessionResultChanged: (result) =>
             ref.read(dashboardStateProvider.notifier).setResult(result),
       ),
       data: (_) => _DashboardContent(
-        sessionResult: dashboardState.result,
         onSessionResultChanged: (result) =>
             ref.read(dashboardStateProvider.notifier).setResult(result),
       ),
@@ -60,12 +56,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
 class _DashboardContent extends ConsumerWidget {
   final String? historyError;
-  final GrainAnalysisResult? sessionResult;
   final ValueChanged<GrainAnalysisResult?> onSessionResultChanged;
 
   const _DashboardContent({
     this.historyError,
-    required this.sessionResult,
     required this.onSessionResultChanged,
   });
 
@@ -87,122 +81,6 @@ class _DashboardContent extends ConsumerWidget {
           const SizedBox(height: 14),
         ],
         _BackendAnalysisCard(onResultChanged: onSessionResultChanged),
-        if (sessionResult case final result?) ...[
-          const SizedBox(height: 18),
-          _StatTile(
-            label: appText(language, 'Tổng số hạt', 'Total grains'),
-            value: '${result.count}',
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _StatTile(
-                  label:
-                      appText(language, 'Số hạt chắc chắn', 'Confirmed grains'),
-                  value: '${result.qcInlierCount}',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatTile(
-                  label: appText(language, 'Số hạt nghi ngờ', 'Suspect grains'),
-                  value: '${result.qcSuspectCount}',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Text(
-            appText(language, 'Giá trị trung bình', 'Average values'),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _StatTile(
-                  label: appText(
-                      language, 'Chiều dài trung bình', 'Average length'),
-                  value: _formatMeasureStat(
-                    result.meanLengthMm,
-                    'mm',
-                    result.meanLengthPx,
-                    'px',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatTile(
-                  label: appText(
-                      language, 'Chiều rộng trung bình', 'Average width'),
-                  value: _formatMeasureStat(
-                    result.meanWidthMm,
-                    'mm',
-                    result.meanWidthPx,
-                    'px',
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _StatTile(
-            label: appText(language, 'Diện tích trung bình', 'Average area'),
-            value: _formatMeasureStat(
-              result.meanAreaMm2,
-              'mm2',
-              result.meanAreaPx,
-              'px2',
-            ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            appText(language, 'Độ lệch chuẩn', 'Standard deviation'),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _StatTile(
-                  label: appText(language, 'ĐLC chiều dài', 'Length SD'),
-                  value: _formatMeasureStat(
-                    result.qcStdLengthMm,
-                    'mm',
-                    result.qcStdLengthPx,
-                    'px',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StatTile(
-                  label: appText(language, 'ĐLC chiều rộng', 'Width SD'),
-                  value: _formatMeasureStat(
-                    result.qcStdWidthMm,
-                    'mm',
-                    result.qcStdWidthPx,
-                    'px',
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _StatTile(
-            label: appText(language, 'ĐLC diện tích', 'Area SD'),
-            value: _formatMeasureStat(
-              result.qcStdAreaMm2,
-              'mm2',
-              result.qcStdAreaPx,
-              'px2',
-            ),
-          ),
-          const SizedBox(height: 18),
-          GrainStatsCharts(result: result),
-        ],
       ],
     );
   }
@@ -217,6 +95,176 @@ String _formatMeasureStat(double? primary, String primaryUnit, double? fallback,
     return '${fallback.toStringAsFixed(1)} $fallbackUnit';
   }
   return '_';
+}
+
+class _SeedVisionResultOverview extends ConsumerWidget {
+  final GrainAnalysisResult result;
+
+  const _SeedVisionResultOverview({required this.result});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(appLanguageProvider);
+    final detectedCount = int.tryParse(
+          result.segmentation['segment_count']?.toString() ?? '',
+        ) ??
+        result.count;
+    final metrics = <(String, String)>[
+      (
+        appText(language, 'Tổng hạt nhận dạng', 'Total detected grains'),
+        '$detectedCount',
+      ),
+      (
+        appText(language, 'Hạt hợp lệ', 'Valid grains'),
+        '${result.qcInlierCount}',
+      ),
+      (
+        appText(language, 'Hạt cần xem lại', 'Grains to review'),
+        '${result.qcSuspectCount}',
+      ),
+      (
+        appText(language, 'Chiều dài TB', 'Average length'),
+        _formatMeasureStat(
+          result.meanLengthMm,
+          'mm',
+          result.meanLengthPx,
+          'px',
+        ),
+      ),
+      (
+        appText(language, 'Chiều rộng TB', 'Average width'),
+        _formatMeasureStat(
+          result.meanWidthMm,
+          'mm',
+          result.meanWidthPx,
+          'px',
+        ),
+      ),
+      (
+        appText(language, 'Diện tích TB', 'Average area'),
+        _formatMeasureStat(
+          result.meanAreaMm2,
+          'mm2',
+          result.meanAreaPx,
+          'px2',
+        ),
+      ),
+      (
+        appText(language, 'ĐLC chiều dài', 'Length SD'),
+        _formatMeasureStat(
+          result.qcStdLengthMm,
+          'mm',
+          result.qcStdLengthPx,
+          'px',
+        ),
+      ),
+      (
+        appText(language, 'ĐLC chiều rộng', 'Width SD'),
+        _formatMeasureStat(
+          result.qcStdWidthMm,
+          'mm',
+          result.qcStdWidthPx,
+          'px',
+        ),
+      ),
+      (
+        appText(language, 'ĐLC diện tích', 'Area SD'),
+        _formatMeasureStat(
+          result.qcStdAreaMm2,
+          'mm2',
+          result.qcStdAreaPx,
+          'px2',
+        ),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          appText(language, 'Kết quả nhận dạng và thống kê',
+              'Detection and statistics result'),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          appText(
+            language,
+            'Số liệu và biểu đồ được tính trực tiếp từ các hạt đã nhận dạng trong ảnh.',
+            'Figures and charts are calculated directly from grains detected in the image.',
+          ),
+          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 620
+                ? 3
+                : (constraints.maxWidth >= 280 ? 2 : 1);
+            const gap = 10.0;
+            final tileWidth = columns == 1
+                ? constraints.maxWidth
+                : (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final metric in metrics)
+                  SizedBox(
+                    width: tileWidth,
+                    child: _OverviewStatTile(
+                      label: metric.$1,
+                      value: metric.$2,
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        GrainStatsCharts(result: result),
+      ],
+    );
+  }
+}
+
+class _OverviewStatTile extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _OverviewStatTile({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 82),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.bgDefault,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 String _localizedProgressPhase(AppLanguage language, String phase) {
@@ -285,9 +333,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       final currentProgress = ref.read(dashboardStateProvider).progress;
       if (currentProgress < 82) {
         ref.read(dashboardStateProvider.notifier).setProgress(
-          (currentProgress + 2).clamp(0, 82),
-          ref.read(dashboardStateProvider).progressPhase,
-        );
+              (currentProgress + 2).clamp(0, 82),
+              ref.read(dashboardStateProvider).progressPhase,
+            );
       }
     });
   }
@@ -335,7 +383,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       final bytes = await file.readAsBytes();
       final imageSize = await _imageSizeFromBytes(bytes);
       if (!mounted) return;
-      ref.read(dashboardStateProvider.notifier).setSelectedImage(bytes, imageSize, file.name);
+      ref
+          .read(dashboardStateProvider.notifier)
+          .setSelectedImage(bytes, imageSize, file.name);
       _clearPreviewCache();
     } catch (_) {
       if (!mounted) return;
@@ -363,7 +413,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     final stateVal = ref.read(dashboardStateProvider);
     final bytes = stateVal.selectedBytes;
     if (bytes == null) {
-      ref.read(dashboardStateProvider.notifier).setError('Chọn ảnh hoặc chụp ảnh trước khi xử lý.');
+      ref
+          .read(dashboardStateProvider.notifier)
+          .setError('Chọn ảnh hoặc chụp ảnh trước khi xử lý.');
       return;
     }
 
@@ -437,7 +489,8 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     final base64 = stateVal.result?.previewWithFallback('samMask');
     if (base64 == null || base64.isEmpty) return;
     final file = await _writeTempFile(
-        '${_safeStem(stateVal.fileName)}_segmentation.png', base64Decode(base64));
+        '${_safeStem(stateVal.fileName)}_segmentation.png',
+        base64Decode(base64));
     await Share.shareXFiles([XFile(file.path)],
         text: 'SeedVision segmentation PNG');
   }
@@ -472,9 +525,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     final screenWidth = MediaQuery.sizeOf(context).width;
     final cardPadding = screenWidth < 360 ? 12.0 : 18.0;
 
-    final distance = stateVal.referenceStart != null && stateVal.referenceEnd != null
-        ? (stateVal.referenceEnd! - stateVal.referenceStart!).distance
-        : null;
+    final distance =
+        stateVal.referenceStart != null && stateVal.referenceEnd != null
+            ? (stateVal.referenceEnd! - stateVal.referenceStart!).distance
+            : null;
     _referencePixels.text = distance != null ? distance.toStringAsFixed(1) : '';
     if (_referenceMm.text != stateVal.referenceMmInput) {
       _referenceMm.text = stateVal.referenceMmInput;
@@ -486,17 +540,37 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(
+              appText(language, 'Phân tích hạt SeedVision',
+                  'SeedVision grain analysis'),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              appText(
+                language,
+                'Nhận dạng từng hạt, đếm số lượng, đo kích thước và dựng biểu đồ từ cùng một ảnh.',
+                'Detect individual grains, count them, measure their size, and build charts from one image.',
+              ),
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 14),
             Wrap(
               spacing: 10,
               runSpacing: 10,
               children: [
                 OutlinedButton.icon(
-                  onPressed: stateVal.busy ? null : () => _pick(ImageSource.gallery),
+                  onPressed:
+                      stateVal.busy ? null : () => _pick(ImageSource.gallery),
                   icon: const Icon(Icons.photo_library_outlined),
                   label: Text(appText(language, 'Chọn ảnh', 'Choose image')),
                 ),
                 OutlinedButton.icon(
-                  onPressed: stateVal.busy ? null : () => _pick(ImageSource.camera),
+                  onPressed:
+                      stateVal.busy ? null : () => _pick(ImageSource.camera),
                   icon: const Icon(Icons.photo_camera_outlined),
                   label: const Text('Camera'),
                 ),
@@ -509,16 +583,19 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
               start: stateVal.referenceStart,
               end: stateVal.referenceEnd,
               enabled: !stateVal.busy && stateVal.selectedBytes != null,
-              onPickImage: stateVal.busy ? null : () => _pick(ImageSource.gallery),
+              onPickImage:
+                  stateVal.busy ? null : () => _pick(ImageSource.gallery),
               onChanged: (start, end) {
-                ref.read(dashboardStateProvider.notifier).setReferenceLine(start, end);
+                ref
+                    .read(dashboardStateProvider.notifier)
+                    .setReferenceLine(start, end);
               },
             ),
             const SizedBox(height: 12),
             LayoutBuilder(
               builder: (context, constraints) {
-                final hasReferenceLine =
-                    stateVal.referenceStart != null && stateVal.referenceEnd != null;
+                final hasReferenceLine = stateVal.referenceStart != null &&
+                    stateVal.referenceEnd != null;
                 final pixelsField = TextField(
                   controller: _referencePixels,
                   enabled: false,
@@ -535,7 +612,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                   controller: _referenceMm,
                   enabled: hasReferenceLine && !stateVal.busy,
                   onChanged: (val) {
-                    ref.read(dashboardStateProvider.notifier).setReferenceMmInput(val);
+                    ref
+                        .read(dashboardStateProvider.notifier)
+                        .setReferenceMmInput(val);
                   },
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
@@ -572,7 +651,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                 onPressed: stateVal.busy || stateVal.referenceStart == null
                     ? null
                     : () {
-                        ref.read(dashboardStateProvider.notifier).clearReference();
+                        ref
+                            .read(dashboardStateProvider.notifier)
+                            .clearReference();
                       },
                 icon: const Icon(Icons.clear),
                 label: Text(
@@ -583,7 +664,9 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: stateVal.busy || stateVal.selectedBytes == null ? null : _analyze,
+                onPressed: stateVal.busy || stateVal.selectedBytes == null
+                    ? null
+                    : _analyze,
                 icon: stateVal.busy
                     ? const SizedBox(
                         width: 16,
@@ -593,7 +676,8 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                     : const Icon(Icons.auto_awesome_motion_outlined),
                 label: Text(stateVal.busy
                     ? appText(language, 'Đang xử lý', 'Processing')
-                    : appText(language, 'Xử lý', 'Analyze')),
+                    : appText(language, 'Nhận dạng & thống kê',
+                        'Detect, count & analyze')),
               ),
             ),
             if (stateVal.error != null) ...[
@@ -611,7 +695,8 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                     child: Text(
                       stateVal.progressPhase.isEmpty
                           ? appText(language, 'Đang xử lý', 'Processing')
-                          : _localizedProgressPhase(language, stateVal.progressPhase),
+                          : _localizedProgressPhase(
+                              language, stateVal.progressPhase),
                       style: const TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 12,
@@ -625,7 +710,12 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                 ],
               ),
               const SizedBox(height: 6),
-              LinearProgressIndicator(value: (stateVal.progress / 100).clamp(0, 1)),
+              LinearProgressIndicator(
+                  value: (stateVal.progress / 100).clamp(0, 1)),
+            ],
+            if (result != null) ...[
+              const SizedBox(height: 18),
+              _SeedVisionResultOverview(result: result),
             ],
             if (result != null) ...[
               const SizedBox(height: 16),
@@ -800,11 +890,15 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     );
   }
 
-  Widget _previewChip({required String mode, required String label, required String previewMode}) {
+  Widget _previewChip(
+      {required String mode,
+      required String label,
+      required String previewMode}) {
     return ChoiceChip(
       label: Text(label),
       selected: previewMode == mode,
-      onSelected: (_) => ref.read(dashboardStateProvider.notifier).setPreviewMode(mode),
+      onSelected: (_) =>
+          ref.read(dashboardStateProvider.notifier).setPreviewMode(mode),
     );
   }
 
@@ -820,7 +914,8 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
           ? appText(language, 'Xong chỉnh hạt', 'Finish editing')
           : appText(language, 'Chỉnh hạt nghi ngờ', 'Edit suspect grains')),
       selected: active,
-      onSelected: (_) => ref.read(dashboardStateProvider.notifier).setQcEditMode(!active),
+      onSelected: (_) =>
+          ref.read(dashboardStateProvider.notifier).setQcEditMode(!active),
       selectedColor: const Color(0xFFFFEDD5),
       checkmarkColor: const Color(0xFF9A3412),
       side: BorderSide(
@@ -1967,43 +2062,6 @@ class _ReferenceLinePainter extends CustomPainter {
       selectedHandle != oldDelegate.selectedHandle ||
       fingerPosition != oldDelegate.fingerPosition ||
       activeHandlePosition != oldDelegate.activeHandlePosition;
-}
-
-class _StatTile extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _StatTile({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _ImagePlaceholder extends ConsumerWidget {

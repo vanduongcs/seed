@@ -304,9 +304,10 @@ class _MetricGrid extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final language = ref.watch(appLanguageProvider);
+    final activeDistribution = model.distributions[chartMode];
     final keys = chartMode == 'all'
         ? const ['length', 'width', 'area']
-        : <String>[chartMode, 'review'];
+        : <String>[chartMode, 'variation', 'review'];
     final tiles = [
       for (final key in keys)
         if (key == 'review')
@@ -317,6 +318,17 @@ class _MetricGrid extends ConsumerWidget {
               language,
               '${_formatNumber(model.suspectPct, 1)}% tổng số hạt.',
               '${_formatNumber(model.suspectPct, 1)}% of total grains.',
+            ),
+          )
+        else if (key == 'variation' && activeDistribution != null)
+          _MetricTile(
+            label: appText(language, 'Độ biến thiên (CV)',
+                'Coefficient of variation (CV)'),
+            value: '${_formatNumber(activeDistribution.cvPct, 1)}%',
+            helper: appText(
+              language,
+              'Độ lệch chuẩn / trung bình của các hạt hợp lệ.',
+              'Standard deviation / mean for valid grains.',
             ),
           )
         else if (model.distributions[key] case final distribution?)
@@ -666,6 +678,7 @@ class _Distribution {
   final int decimals;
   final int sampleCount;
   final double midpoint;
+  final double cvPct;
   final Color color;
   final List<_DistributionBin> bins;
   final List<double> sortedValues;
@@ -676,6 +689,7 @@ class _Distribution {
     required this.decimals,
     required this.sampleCount,
     required this.midpoint,
+    required this.cvPct,
     required this.color,
     required this.bins,
     required this.sortedValues,
@@ -798,12 +812,20 @@ _Distribution? _buildDistribution(GrainAnalysisResult result, String key) {
       ? math.max(1, values.length)
       : _clampInt(math.sqrt(values.length).round(), 4, 8);
   final bins = _buildBins(values, binCount, metric.decimals);
+  final mean = values.reduce((sum, value) => sum + value) / values.length;
+  final variance = values.fold<double>(
+        0,
+        (sum, value) => sum + math.pow(value - mean, 2).toDouble(),
+      ) /
+      values.length;
+  final standardDeviation = math.sqrt(variance);
   return _Distribution(
     title: def.title,
     unit: metric.unit,
     decimals: metric.decimals,
     sampleCount: values.length,
     midpoint: _percentile(values, 0.5),
+    cvPct: mean > 0 ? _round(standardDeviation * 100 / mean, 1) : 0,
     color: def.color,
     bins: bins,
     sortedValues: values,

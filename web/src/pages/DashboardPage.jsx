@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Box, Grid } from '@mui/material';
+import { Box, Grid, Stack, Typography } from '@mui/material';
 
 import { api, ensureFreshAccessToken, publicApi } from '@/api/axios.js';
 import { useAuthStore } from '@/store/auth.store.js';
@@ -293,9 +293,19 @@ export default function DashboardPage() {
 
   const stats = [
     {
-      label: text('Số hạt đo được', 'Measured grains'),
-      value: summary ? String(summary.count) : '0',
+      label: text('Tổng số hạt nhận dạng', 'Total detected grains'),
+      value: summary ? String(result?.segmentation?.segment_count ?? summary.count ?? 0) : '0',
       note: result ? text('Theo lần xử lý hiện tại', 'Current analysis') : text('Chưa có dữ liệu', 'No data yet'),
+    },
+    {
+      label: text('Hạt hợp lệ', 'Valid grains'),
+      value: summary ? String(summary?.qc?.inlier_count ?? summary.count ?? 0) : '0',
+      note: text('Được dùng để tính thống kê', 'Included in statistics'),
+    },
+    {
+      label: text('Hạt cần xem lại', 'Grains to review'),
+      value: summary ? String(summary?.qc?.suspect_count ?? 0) : '0',
+      note: text('Kiểm tra vùng nhận dạng màu đỏ', 'Review red detection regions'),
     },
     {
       label: text('Giá trị trung bình (dài × rộng)', 'Average value (length × width)'),
@@ -325,24 +335,51 @@ export default function DashboardPage() {
 
   return (
     <Box sx={{ maxWidth: 1280 }}>
+      <Box sx={{ mb: 2.5 }}>
+        <Typography variant="h5" fontWeight={800}>
+          {text('Phân tích hạt SeedVision', 'SeedVision grain analysis')}
+        </Typography>
+        <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+          {text(
+            'Nhận dạng từng hạt, đếm số lượng, đo kích thước và trực quan hóa phân bố từ cùng một kết quả.',
+            'Detect individual grains, count them, measure their size, and visualize distributions from one result.',
+          )}
+        </Typography>
+      </Box>
+
       {result && (
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: {
-              xs: '1fr',
-              sm: 'repeat(2, minmax(0, 1fr))',
-              md: 'repeat(3, minmax(0, 1fr))',
-              lg: 'repeat(5, minmax(0, 1fr))',
-            },
-            gap: 2,
-            mb: 3,
-          }}
-        >
-          {stats.map((item) => (
-            <StatCard key={item.label} {...item} />
-          ))}
-        </Box>
+        <Stack spacing={2} mb={3}>
+          <Box>
+            <Typography variant="h6" fontWeight={800}>
+              {text('Kết quả nhận dạng và thống kê', 'Detection and statistics result')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {text(
+                'Các số liệu và biểu đồ dưới đây được tính trực tiếp từ những hạt đã nhận dạng trong ảnh.',
+                'The figures and charts below are calculated directly from grains detected in the image.',
+              )}
+            </Typography>
+          </Box>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                sm: 'repeat(2, minmax(0, 1fr))',
+                md: 'repeat(3, minmax(0, 1fr))',
+                lg: 'repeat(4, minmax(0, 1fr))',
+              },
+              gap: 2,
+            }}
+          >
+            {stats.map((item) => (
+              <StatCard key={item.label} {...item} />
+            ))}
+          </Box>
+          {result?.measurements?.length > 0 && (
+            <GrainStatsCharts result={result} />
+          )}
+        </Stack>
       )}
 
       <Grid container spacing={2}>
@@ -392,12 +429,6 @@ export default function DashboardPage() {
           />
         </Grid>
       </Grid>
-
-      {result?.measurements?.length > 0 && (
-        <Box sx={{ mt: 2 }}>
-          <GrainStatsCharts result={result} />
-        </Box>
-      )}
     </Box>
   );
 }

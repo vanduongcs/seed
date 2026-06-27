@@ -132,6 +132,12 @@ const buildDistribution = (measurements, calibrationEnabled, metricKey) => {
 
   const min = values[0];
   const max = values[values.length - 1];
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce(
+    (sum, value) => sum + (value - mean) ** 2,
+    0,
+  ) / values.length;
+  const standardDeviation = Math.sqrt(variance);
   const binCount =
     values.length < 4
       ? Math.max(1, values.length)
@@ -169,6 +175,7 @@ const buildDistribution = (measurements, calibrationEnabled, metricKey) => {
     midpoint: percentile(values, 0.5),
     low: percentile(values, 0.1),
     high: percentile(values, 0.9),
+    cvPct: mean > 0 ? round((standardDeviation / mean) * 100, 1) : 0,
     bins: bins.map((bin) => ({
       ...bin,
       pct: round((bin.count / values.length) * 100, 1),
@@ -404,7 +411,8 @@ const SummaryCards = ({
         display: "grid",
         gridTemplateColumns: {
           xs: "1fr",
-          md: chartMode === "all" ? "repeat(3, 1fr)" : "1fr",
+          sm: chartMode === "all" ? "1fr" : "repeat(3, minmax(0, 1fr))",
+          md: "repeat(3, minmax(0, 1fr))",
         },
         gap: 1.5,
       }}
@@ -439,6 +447,27 @@ const SummaryCards = ({
           </Box>
         );
       })}
+      {chartMode !== "all" && (
+        <Box
+          sx={{
+            p: 1.5,
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: 1,
+            bgcolor: "#FBFCFA",
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Độ biến thiên (CV)
+          </Typography>
+          <Typography variant="h6" fontWeight={800} sx={{ lineHeight: 1.25 }}>
+            {formatNumber(distributions[chartMode]?.cvPct, 1)}%
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Độ lệch chuẩn / trung bình của các hạt hợp lệ.
+          </Typography>
+        </Box>
+      )}
       {chartMode !== "all" && (
         <Box
           sx={{

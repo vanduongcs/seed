@@ -161,6 +161,8 @@ const phrasePairs = [
   ['Phân bố diện tích', 'Area distribution'],
   ['Mỗi cột là một nhóm hạt có kích thước gần nhau.', 'Each column is a group of grains with similar sizes.'],
   ['Khoảng phổ biến', 'Common range'],
+  ['Độ biến thiên (CV)', 'Coefficient of variation (CV)'],
+  ['Độ lệch chuẩn / trung bình của các hạt hợp lệ.', 'Standard deviation / mean for valid grains.'],
   ['Nhóm kích thước theo', 'Size groups by'],
   ['Cỡ thường gặp theo', 'Typical size by'],
   ['chiều dài', 'length'],
