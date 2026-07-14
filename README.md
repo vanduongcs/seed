@@ -97,7 +97,7 @@ Web/mobile auth screen
 -> mobile import pending local runs qua /api/grain/runs/import
 ```
 
-## API Backend
+## API Backend App Đang Dùng
 
 Base URL local:
 
@@ -111,7 +111,11 @@ Base URL production:
 https://seed-vanb2207577-aybrd9fwhnf3hqeq.eastasia-01.azurewebsites.net/api
 ```
 
-### Auth
+README này chỉ ghi các API phục vụ web/mobile SeedVision hiện tại. Không liệt kê các route thử nghiệm hoặc module phụ không nằm trong luồng sản phẩm chính.
+
+### Auth và tài khoản
+
+Web và mobile dùng nhóm này để đăng nhập, refresh token, lấy profile và đồng bộ dữ liệu người dùng.
 
 | Method | Path | Auth | Mục đích |
 | --- | --- | --- | --- |
@@ -119,55 +123,71 @@ https://seed-vanb2207577-aybrd9fwhnf3hqeq.eastasia-01.azurewebsites.net/api
 | `POST` | `/api/auth/login` | No | Đăng nhập |
 | `POST` | `/api/auth/refresh` | No | Lấy access token mới từ refresh token |
 | `POST` | `/api/auth/logout` | Yes | Đăng xuất |
-| `GET` | `/api/auth/me` | Yes | Lấy thông tin người dùng hiện tại |
-
-### User
-
-| Method | Path | Auth | Mục đích |
-| --- | --- | --- | --- |
+| `GET` | `/api/auth/me` | Yes | Kiểm tra phiên đăng nhập hiện tại |
 | `GET` | `/api/users/me` | Yes | Lấy profile |
 | `PATCH` | `/api/users/me` | Yes | Cập nhật profile |
-| `GET` | `/api/users` | Admin | Danh sách user |
 
-### Grain Analysis
+File liên quan:
+
+```text
+backend/src/routes/auth.routes.js
+backend/src/routes/user.routes.js
+backend/src/controllers/auth.controller.js
+backend/src/config/env.js
+backend/src/utils/jwt.util.js
+web/src/api/axios.js
+web/src/store/auth.store.js
+mobile/lib/core/network/api_client.dart
+mobile/lib/features/auth/providers/auth_provider.dart
+```
+
+### Phân tích hạt và lịch sử
 
 | Method | Path | Auth | Mục đích |
 | --- | --- | --- | --- |
 | `GET` | `/api/grain/health` | No | Kiểm tra worker và default params |
-| `POST` | `/api/grain/analyze-public` | No | Web guest phân tích ảnh qua server |
-| `POST` | `/api/grain/analyze` | Yes | Phân tích ảnh và lưu run server |
+| `POST` | `/api/grain/analyze-public` | No | Web guest gửi ảnh lên server để phân tích, không lưu MongoDB |
+| `POST` | `/api/grain/analyze` | Yes | Web user đã đăng nhập gửi ảnh lên server để phân tích và lưu run |
 | `GET` | `/api/grain/runs` | Yes | Danh sách run của user |
-| `POST` | `/api/grain/runs/import` | Yes | Mobile import các run đã phân tích local |
+| `POST` | `/api/grain/runs/import` | Yes | Mobile đồng bộ các run đã phân tích local lên server |
 | `GET` | `/api/grain/runs/:id` | Yes | Chi tiết một run |
 | `PUT` | `/api/grain/runs/:id/result` | Yes | Cập nhật kết quả sau chỉnh QC |
 | `DELETE` | `/api/grain/runs/:id` | Yes | Xóa run |
 
-Request phân tích ảnh dùng `multipart/form-data` với field:
+Hai endpoint `analyze-public` và `analyze` chỉ dùng cho web/server inference. Mobile mặc định không gọi hai endpoint này để phân tích ảnh; mobile chạy ONNX local trong `OfflineGrainAnalyzer`, sau đó chỉ import kết quả đã có qua `/api/grain/runs/import`.
+
+Web gửi request phân tích bằng `multipart/form-data` từ `web/src/pages/DashboardPage.jsx`:
 
 ```text
 image=<file>
 ```
 
-Các tham số calibration thường gặp:
+Nếu người dùng đã vẽ vật mốc trên web, `DashboardPage.jsx` gửi thêm các field sau. Backend nhận chúng qua `req.body`, chuẩn hóa bằng `normalizeGrainParams()` rồi chuyển cho Python worker:
 
 ```text
-referencePixels
-referenceMm
-referencePixelSpace
-referenceX1
-referenceY1
-referenceX2
-referenceY2
+referencePixels       Độ dài đoạn mốc theo pixel trên ảnh gốc
+referenceMm           Độ dài thật của đoạn mốc, đơn vị mm
+referencePixelSpace   Thường là original
+referenceX1/Y1        Điểm đầu đoạn mốc trên ảnh gốc
+referenceX2/Y2        Điểm cuối đoạn mốc trên ảnh gốc
 ```
 
-### AI Chat
+Nếu không có `referenceMm`, hệ thống vẫn đếm/đo theo pixel nhưng các field mm có thể để trống. Nếu có `referenceMm`, backend tính `mm_per_pixel` và điền `length_mm`, `width_mm`, `area_mm2`.
 
-| Method | Path | Auth | Mục đích |
-| --- | --- | --- | --- |
-| `POST` | `/api/ai/chat` | Yes | Chat với provider cấu hình |
-| `GET` | `/api/ai/conversations` | Yes | Danh sách hội thoại |
-| `GET` | `/api/ai/conversations/:id` | Yes | Chi tiết hội thoại |
-| `DELETE` | `/api/ai/conversations/:id` | Yes | Xóa hội thoại |
+File liên quan:
+
+```text
+backend/src/routes/grain.routes.js
+backend/src/controllers/grain.controller.js
+backend/src/services/grainProcessing.service.js
+backend/config/grain.settings.json
+backend/python/analyze_grains.py
+backend/python/grain_pipeline/pipeline.py
+web/src/pages/DashboardPage.jsx
+mobile/lib/features/grain/services/offline_grain_analyzer.dart
+mobile/lib/features/grain/services/grain_analysis_api.dart
+mobile/lib/features/grain/services/local_grain_run_store.dart
+```
 
 ## Response Phân Tích Hạt
 
@@ -252,54 +272,59 @@ summary.qc.status
 
 Web và mobile đều có luồng chỉnh hạt nghi ngờ thủ công. Người dùng click/tap vào mask để đổi trạng thái `qc_outlier`, sau đó app tính lại summary và CSV.
 
-## Component Quan Trọng
+## Bản Đồ Chỉnh Sửa Nhanh
 
-### Backend
+Phần này dùng khi người mới vào repo cần biết muốn sửa một hành vi thì mở file nào trước.
 
-| File | Vai trò |
+### Backend và Python worker
+
+| Muốn chỉnh | Mở file |
 | --- | --- |
-| `backend/src/index.js` | Khởi tạo Express, static web, route `/api/*` |
-| `backend/src/routes/grain.routes.js` | Route phân tích hạt và lịch sử |
-| `backend/src/controllers/grain.controller.js` | Gọi Python worker, lưu/import run, cập nhật result |
-| `backend/python/analyze_grains.py` | CLI worker nhận ảnh và params |
-| `backend/python/grain_pipeline/pipeline.py` | Orchestrate inference, fallback, đo, QC, render |
-| `backend/python/grain_pipeline/yolo_segment.py` | ONNX Runtime YOLO segmentation |
-| `backend/python/grain_pipeline/measure.py` | Đo mask, calibration, QC, split/merge/filter |
-| `backend/python/grain_pipeline/render.py` | Render overlay/mask/labels/label map |
-| `backend/python/grain_pipeline/classical_fallback.py` | Fallback cổ điển khi YOLO thiếu hạt sáng/mảnh |
-| `backend/config/grain.settings.json` | Default params và cột CSV |
+| Thêm/sửa endpoint grain | `backend/src/routes/grain.routes.js`, `backend/src/controllers/grain.controller.js` |
+| Đổi default tham số inference, cột CSV | `backend/config/grain.settings.json` |
+| Đổi cách gọi Python worker | `backend/src/services/grainProcessing.service.js` |
+| Đổi pipeline phân tích tổng thể | `backend/python/grain_pipeline/pipeline.py` |
+| Đổi decode YOLO ONNX, mask threshold, tiled/full pass | `backend/python/grain_pipeline/yolo_segment.py` |
+| Đổi cách đo length/width/area, calibration, QC, split/merge | `backend/python/grain_pipeline/measure.py` |
+| Đổi overlay/mask/labels/label map preview | `backend/python/grain_pipeline/render.py` |
+| Đổi fallback khi YOLO phát hiện thiếu hạt | `backend/python/grain_pipeline/classical_fallback.py` |
 
 ### Web
 
-| File | Vai trò |
+| Muốn chỉnh | Mở file |
 | --- | --- |
-| `web/src/App.jsx` | Route login/register/app shell |
-| `web/src/components/Layout.jsx` | Sidebar/mobile nav, guest/account navigation |
-| `web/src/pages/DashboardPage.jsx` | Chọn ảnh, calibration, gọi API, edit QC |
-| `web/src/components/grain/DashboardPreviewPanel.jsx` | Preview overlay/mask/labels và tương tác mask |
-| `web/src/components/grain/DashboardResultPanel.jsx` | Summary kết quả |
-| `web/src/components/grain/GrainStatsCharts.jsx` | Chart thống kê |
-| `web/src/pages/StoragePage.jsx` | Lịch sử phân tích server |
-| `web/src/pages/AccountPage.jsx` | Profile, guest mode, ngôn ngữ |
-| `web/src/api/axios.js` | API client, refresh token, public client |
-| `web/src/store/auth.store.js` | Auth/guest state |
-| `web/src/i18n.jsx` | Song ngữ Việt/Anh |
+| Route login/register/app shell | `web/src/App.jsx`, `web/src/components/Layout.jsx` |
+| Chọn ảnh, vẽ vật mốc, gửi FormData phân tích | `web/src/pages/DashboardPage.jsx` |
+| Preview overlay/mask/labels và click mask chỉnh QC | `web/src/components/grain/DashboardPreviewPanel.jsx` |
+| Summary kết quả, bảng/charts | `web/src/components/grain/DashboardResultPanel.jsx`, `web/src/components/grain/GrainStatsCharts.jsx` |
+| Lịch sử phân tích | `web/src/pages/StoragePage.jsx` |
+| Tài khoản, guest mode, ngôn ngữ | `web/src/pages/AccountPage.jsx` |
+| Base API, refresh token, public/private client | `web/src/api/axios.js` |
+| Auth state web | `web/src/store/auth.store.js` |
+| Text song ngữ | `web/src/i18n.jsx` |
 
 ### Mobile
 
-| File | Vai trò |
+| Muốn chỉnh | Mở file |
 | --- | --- |
-| `mobile/lib/main.dart` | Flutter app root |
-| `mobile/lib/core/router/app_router.dart` | Route `/login`, `/register`, `/dashboard`, `/storage`, `/account` |
-| `mobile/lib/features/main/screens/main_shell.dart` | Bottom navigation shell |
-| `mobile/lib/features/dashboard/screens/dashboard_screen.dart` | Màn phân tích chính, calibration, preview, edit QC |
-| `mobile/lib/features/grain/services/offline_grain_analyzer.dart` | Local ONNX inference, đo mask, QC, preview |
-| `mobile/lib/features/grain/services/grain_analysis_api.dart` | Model kết quả, sync/import, CSV/calibration helpers |
-| `mobile/lib/features/grain/services/local_grain_run_store.dart` | Lưu lịch sử local và pending sync |
-| `mobile/lib/features/storage/screens/storage_screen.dart` | Lịch sử local/server |
-| `mobile/lib/core/network/api_client.dart` | Dio client, token refresh |
-| `mobile/lib/core/constants/app_constants.dart` | Production API URL, version constants |
-| `mobile/android/app/src/main/kotlin/.../MainActivity.kt` | Android MethodChannel cho update và memory info |
+| Route `/login`, `/register`, `/dashboard`, `/storage`, `/account` | `mobile/lib/core/router/app_router.dart` |
+| Bottom navigation | `mobile/lib/features/main/screens/main_shell.dart` |
+| Màn phân tích, chọn ảnh, vẽ vật mốc, edit QC | `mobile/lib/features/dashboard/screens/dashboard_screen.dart` |
+| Local ONNX inference, preprocess, decode mask, đo mask, QC, preview | `mobile/lib/features/grain/services/offline_grain_analyzer.dart` |
+| Result model, áp calibration sau phân tích, export CSV, sync/import | `mobile/lib/features/grain/services/grain_analysis_api.dart` |
+| Lưu lịch sử local và pending sync | `mobile/lib/features/grain/services/local_grain_run_store.dart` |
+| Màn lịch sử local/server | `mobile/lib/features/storage/screens/storage_screen.dart` |
+| Base API, Dio, refresh token | `mobile/lib/core/network/api_client.dart`, `mobile/lib/core/constants/app_constants.dart` |
+| Text song ngữ mobile | `mobile/lib/core/i18n/app_language.dart` |
+| Android MethodChannel cho update và memory info | `mobile/android/app/src/main/kotlin/.../MainActivity.kt` |
+
+Khi sửa thuật toán đo hoặc QC, cần sửa đồng bộ cả backend và mobile:
+
+```text
+backend/python/grain_pipeline/measure.py
+mobile/lib/features/grain/services/offline_grain_analyzer.dart
+mobile/lib/features/grain/services/grain_analysis_api.dart
+```
 
 ## Cài Đặt Local
 
