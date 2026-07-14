@@ -25,16 +25,6 @@
     "mergeOverlap":           { "type": "number",  "default": 0.70,   "min": 0.05, "max": 1.0 },
     "edgeMarginRatio":        { "type": "number",  "default": 0.1,    "min": 0,    "max": 0.4 },
 
-    "samEncoderModel":        { "type": "string",  "default": "previous_model/mobile_sam_encoder.onnx", "env": "GRAIN_SAM_ENCODER_MODEL" },
-    "samModel":               { "type": "string",  "default": "previous_model/mobile_sam_decoder.onnx", "env": "GRAIN_SAM_MODEL" },
-    "enableSamRefine":        { "type": "boolean", "default": false },
-    "samCandidateLimit":      { "type": "number",  "default": 80,     "min": 1,    "max": 5000 },
-    "samImgSize":             { "type": "number",  "default": 1024,   "min": 320,  "max": 2048 },
-    "samMaxDet":              { "type": "number",  "default": 1000,   "min": 1,    "max": 5000 },
-    "samConf":                { "type": "number",  "default": 0.25,   "min": 0.01, "max": 0.99 },
-    "samIou":                 { "type": "number",  "default": 0.9,    "min": 0.05, "max": 0.99 },
-    "samBoxPadding":          { "type": "number",  "default": 8,      "min": 0,    "max": 128 },
-
     "enableGrabCut":          { "type": "boolean", "default": false },
     "grabCutIter":            { "type": "number",  "default": 1,      "min": 1,    "max": 10 },
     "enableEdgeSnap":         { "type": "boolean", "default": false },

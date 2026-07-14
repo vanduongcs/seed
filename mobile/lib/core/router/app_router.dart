@@ -34,8 +34,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/account',
           builder: (_, __) => const MainShell(initialIndex: 2)),
-      GoRoute(path: '/chat', redirect: (_, __) => '/dashboard'),
-      GoRoute(path: '/chat/:id', redirect: (_, __) => '/dashboard'),
     ],
   );
 });

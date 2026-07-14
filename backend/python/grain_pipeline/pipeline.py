@@ -6,11 +6,9 @@ import numpy as np
 
 from .classical_fallback import augment_low_recall_instances
 from .config import PIPELINE_NAME, bool_param, float_param, int_param, model_path
-from .fastsam_refine import refine_instances_with_fastsam
 from .io import png_base64, read_image
 from .mask_refine import refine_instances_post
 from .measure import calibration_factor, filter_and_measure, is_seed_instance, measurements_csv, summary_for
-from .mobile_sam_refine import is_mobile_sam_model, refine_instances_with_mobile_sam
 from .preprocess import apply_light_preprocessing
 from .render import instance_mask_rgb, label_map_rgb, label_rgb, mask_rgb, overlay_rgb
 from .yolo_segment import predict_instances
@@ -26,25 +24,10 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     yolo_instances = predict_instances(segment_input, params)
     yolo_instances, classical_fallback_stats = augment_low_recall_instances(segment_input, yolo_instances, params)
 
-    # ── Stage 2: FastSAM-s ONNX refine (opt-in) ─────────────────────────────
-    sam_enabled = bool_param(params, "enableSamRefine")
-    sam_candidate_limit = int_param(params, "samCandidateLimit")
-    use_sam = sam_enabled and len(yolo_instances) <= sam_candidate_limit
-    sam_model = str(params.get("samModel") or "previous_model/mobile_sam_decoder.onnx")
-    if use_sam and is_mobile_sam_model(sam_model):
-        instances = refine_instances_with_mobile_sam(segment_input, yolo_instances, params)
-        refiner_name = "MobileSAM ONNX"
-    elif use_sam:
-        instances = refine_instances_with_fastsam(segment_input, yolo_instances, params)
-        refiner_name = "FastSAM-s.onnx"
-    else:
-        instances = yolo_instances
-        refiner_name = "disabled"
-    refiner_skip_reason = ""
-    if sam_enabled and not use_sam:
-        refiner_skip_reason = f"candidate_count>{sam_candidate_limit}"
+    # ── Stage 2: optional CPU mask refinement ──────────────────────────────
+    instances = yolo_instances
 
-    # ── Stage 3: CPU mask refinement — GrabCut + edge-snap (opt-in) ─────────
+    # ── Stage 3: GrabCut, edge-snap, boundary refine, and split heuristics ──
     instances = refine_instances_post(segment_input, instances, params)
 
     # ── Stage 4: filter & measure ────────────────────────────────────────────
@@ -65,7 +48,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     labels_image  = label_rgb(labels, measurements)
     mask_image    = mask_rgb(labels, measurements)
     label_map     = label_map_rgb(labels)
-    sam_mask_image = instance_mask_rgb(instances)
+    instance_mask_image = instance_mask_rgb(instances)
     mask_pixels   = int(np.count_nonzero(labels))
     mm_per_pixel  = calibration_factor(params, prepared.scale)
 
@@ -87,20 +70,12 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             },
         },
         "segmentation": {
-            "pipeline":                "yolo_sam_onnx",
+            "pipeline":                "yolo_onnx",
             "execution":               "server_onnxruntime",
             "model":                   model_path(params),
-            "refiner":                 refiner_name,
-            "refiner_applied":         use_sam,
-            "refiner_skip_reason":     refiner_skip_reason,
-            "refiner_encoder_model":   str(params.get("samEncoderModel") or "previous_model/mobile_sam_encoder.onnx"),
-            "refiner_model":           sam_model,
-            "refiner_candidate_limit": sam_candidate_limit,
-            "refiner_imgsz":           int_param(params, "samImgSize"),
-            "refiner_max_det":         int_param(params, "samMaxDet"),
-            "refiner_conf":            float_param(params, "samConf"),
-            "refiner_iou":             float_param(params, "samIou"),
-            "refiner_box_padding":     int_param(params, "samBoxPadding"),
+            "refiner":                 "disabled",
+            "refiner_applied":         False,
+            "refiner_skip_reason":     "",
             "cpu_refine": {
                 "grabcut_enabled":  bool_param(params, "enableGrabCut"),
                 "grabcut_iter":     int_param(params, "grabCutIter"),
@@ -201,7 +176,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
         "original_png_base64":     png_base64(prepared.rgb),
         "preprocessed_png_base64": png_base64(segment_input),
         "overlay_png_base64":      png_base64(overlay),
-        "sam_mask_png_base64":     png_base64(sam_mask_image),
+        "sam_mask_png_base64":     png_base64(instance_mask_image),
         "mask_png_base64":         png_base64(mask_image),
         "labels_png_base64":       png_base64(labels_image),
         "label_map_png_base64":    png_base64(label_map),

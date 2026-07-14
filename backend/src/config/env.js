@@ -47,12 +47,6 @@ export const env = {
     ACCESS_EXPIRES_IN: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
-  AI: {
-    PROVIDER: process.env.AI_PROVIDER || 'openai',
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
-    OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-  },
   ALLOWED_ORIGINS: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
     .split(',')
     .map((origin) => origin.trim())

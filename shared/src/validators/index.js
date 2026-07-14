@@ -11,12 +11,6 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Mật khẩu không được trống'),
 });
 
-export const chatSchema = z.object({
-  message: z.string().min(1, 'Tin nhắn không được trống').max(4000),
-  conversationId: z.string().optional(),
-  model: z.string().optional(),
-});
-
 export const updateProfileSchema = z.object({
   name: z.string().min(2).max(50).optional(),
   avatar: z.string().url().optional(),

@@ -16,7 +16,6 @@ import { errorHandler, notFound } from './middleware/error.middleware.js';
 
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
-import aiRoutes from './routes/ai.routes.js';
 import grainRoutes from './routes/grain.routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -87,7 +86,6 @@ app.get('/api/mobile/version', (_req, res) => {
 // ---- Routes ----
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/ai', aiRoutes);
 app.use('/api/grain', grainRoutes);
 
 // In production Docker, the React build is copied into backend/public.
@@ -122,7 +120,6 @@ const start = async () => {
   await connectDB();
   httpServer.listen(env.PORT, () => {
     console.log(`🚀 Server: http://localhost:${env.PORT}`);
-    console.log(`📡 AI Provider: ${env.AI.PROVIDER}`);
     console.log(`🌍 Environment: ${env.NODE_ENV}`);
   });
 };

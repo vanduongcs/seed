@@ -14,7 +14,6 @@ Repository này là monorepo gồm backend, web và mobile. Web phân tích ản
   - Server: `backend/model/main_model/best.onnx`
   - Mobile safe 640: `mobile/assets/models/best_mobile_yolo26_640.onnx`
   - Mobile high-quality 1024 int8: `mobile/assets/models/best_1024_int8_static.onnx`
-- `mobile/assets/models/best.onnx` không phải runtime chính hiện tại.
 
 ## Sơ Đồ Thư Mục
 

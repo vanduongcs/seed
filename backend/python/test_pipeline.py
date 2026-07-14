@@ -46,7 +46,6 @@ def run(label, params):
 
 # 1. Baseline: YOLO ONNX only
 r_base, _ = run("YOLO ONNX only (baseline)", {
-    "enableSamRefine":   False,
     "enableGrabCut":     False,
     "enableEdgeSnap":    False,
     "maskContourSmooth": 0,
@@ -57,7 +56,6 @@ save_img(r_base, "sam_mask_png_base64", "01_yolo_only_mask.png")
 
 # 2. GrabCut + EdgeSnap
 r_cpu, _ = run("YOLO ONNX + GrabCut + EdgeSnap", {
-    "enableSamRefine":   False,
     "enableGrabCut":     True,
     "enableEdgeSnap":    True,
     "maskContourSmooth": 1.0,

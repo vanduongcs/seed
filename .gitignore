@@ -82,9 +82,15 @@ artifacts/
 /*.onnx
 /test_outputs/
 
-# Mobile offline runtime intentionally ships the production ONNX model.
-!mobile/assets/models/*.onnx
+# Mobile offline runtime intentionally ships only these production ONNX models.
+mobile/assets/models/*.onnx
+!mobile/assets/models/best_1024_int8_static.onnx
+!mobile/assets/models/best_mobile_yolo26_640.onnx
+
+# Keep old/export experiment models local.
+backend/model/previous_model/
 mobile/assets/models/best_1024_yolo26.onnx
 mobile/assets/models/best_mobile_stable.onnx
+
 # Azure/server builds require the same production model in source artifacts.
-!backend/model/best.onnx
+!backend/model/main_model/best.onnx

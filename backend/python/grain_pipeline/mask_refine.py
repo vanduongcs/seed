@@ -38,7 +38,7 @@ def refine_instances_post(
     if not (enable_boundary_refine or enable_grabcut or enable_edge_snap or smooth_sigma > 0):
         return instances
 
-    padding      = max(int_param(params, "samBoxPadding"), int_param(params, "boundaryRefinePadding"))
+    padding      = int_param(params, "boundaryRefinePadding")
     grabcut_iter = int_param(params, "grabCutIter")
     snap_radius  = int_param(params, "edgeSnapRadius")
     snap_sigma   = float_param(params, "edgeSnapSigma")

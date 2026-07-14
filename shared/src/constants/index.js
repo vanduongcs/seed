@@ -11,10 +11,6 @@ export const API_ROUTES = {
     BASE: '/api/users',
     ME: '/api/users/me',
   },
-  AI: {
-    CHAT: '/api/ai/chat',
-    CONVERSATIONS: '/api/ai/conversations',
-  },
   GRAIN: {
     HEALTH: '/api/grain/health',
     ANALYZE: '/api/grain/analyze',
