@@ -26,15 +26,27 @@ export default function Layout() {
     { label: text('Lưu trữ', 'Storage'), path: '/storage' },
     { label: text('Tài khoản', 'Account'), path: '/account' },
   ];
-  const navItems = isGuest ? accountNavItems.slice(0, 2) : accountNavItems;
+  const navItems = accountNavItems;
 
   const currentPath = location.pathname;
-  const showAccount = !isGuest && isAuthenticated && (accessToken || refreshToken);
+  const showAccount = isGuest || (!isGuest && isAuthenticated && (accessToken || refreshToken));
+  const currentNavItem = navItems.find((item) => currentPath.startsWith(item.path)) || navItems[0];
+  const isKnownPath = navItems.some((item) => currentPath.startsWith(item.path));
 
-  // Redirect bare '/' to '/dashboard'
+  // Redirect bare or unknown app paths to the dashboard.
   useEffect(() => {
     if (currentPath === '/') navigate('/dashboard', { replace: true });
-  }, [currentPath, navigate]);
+    if (currentPath !== '/' && !isKnownPath) navigate('/dashboard', { replace: true });
+  }, [currentPath, isKnownPath, navigate]);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [currentPath]);
+
+  const handleNavigate = (path) => {
+    navigate(path);
+    setMobileOpen(false);
+  };
 
   const handleLogout = async () => {
     try {
@@ -88,7 +100,7 @@ export default function Layout() {
           return (
             <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton
-                onClick={() => navigate(item.path)}
+                onClick={() => handleNavigate(item.path)}
                 sx={{
                   borderRadius: 1,
                   py: 1.1,
@@ -108,10 +120,10 @@ export default function Layout() {
       <Box sx={{ p: 2 }}>
         {isGuest ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Button fullWidth size="small" variant="contained" onClick={() => navigate('/login')}>
+            <Button fullWidth size="small" variant="contained" onClick={() => handleNavigate('/login')}>
               {text('Đăng nhập để đồng bộ', 'Log in to sync')}
             </Button>
-            <Button fullWidth size="small" variant="outlined" onClick={() => navigate('/register')}>
+            <Button fullWidth size="small" variant="outlined" onClick={() => handleNavigate('/register')}>
               {text('Đăng ký', 'Sign up')}
             </Button>
           </Box>
@@ -128,8 +140,17 @@ export default function Layout() {
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       <AppBar position="fixed" sx={{ display: { md: 'none' }, zIndex: (t) => t.zIndex.drawer + 1 }}>
         <Toolbar>
-          <IconButton color="inherit" onClick={() => setMobileOpen(!mobileOpen)}><MenuIcon /></IconButton>
-          <Typography variant="h6" fontWeight={700} ml={1}>Menu</Typography>
+          <IconButton
+            color="inherit"
+            edge="start"
+            aria-label={text('Mở menu', 'Open menu')}
+            onClick={() => setMobileOpen(!mobileOpen)}
+          >
+            <MenuIcon />
+          </IconButton>
+          <Typography variant="h6" fontWeight={700} ml={1} noWrap sx={{ minWidth: 0 }}>
+            {currentNavItem?.label || text('Trang chủ', 'Home')}
+          </Typography>
         </Toolbar>
       </AppBar>
 

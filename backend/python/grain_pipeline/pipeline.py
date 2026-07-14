@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .classical_fallback import augment_low_recall_instances
 from .config import PIPELINE_NAME, bool_param, float_param, int_param, model_path
 from .fastsam_refine import refine_instances_with_fastsam
 from .io import png_base64, read_image
@@ -23,6 +24,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
 
     # ── Stage 1: YOLO-seg ONNX inference ────────────────────────────────────
     yolo_instances = predict_instances(segment_input, params)
+    yolo_instances, classical_fallback_stats = augment_low_recall_instances(segment_input, yolo_instances, params)
 
     # ── Stage 2: FastSAM-s ONNX refine (opt-in) ─────────────────────────────
     sam_enabled = bool_param(params, "enableSamRefine")
@@ -46,7 +48,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     instances = refine_instances_post(segment_input, instances, params)
 
     # ── Stage 4: filter & measure ────────────────────────────────────────────
-    labels, measurements, excluded_reference_object_count = filter_and_measure(
+    labels, measurements, excluded_reference_object_count, filter_stats = filter_and_measure(
         instances,
         params,
         prepared.scale,
@@ -133,6 +135,11 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "confidence":              float_param(params, "yoloConf"),
             "iou":                     float_param(params, "yoloIou"),
             "max_det":                 int_param(params, "yoloMaxDet"),
+            "mask_threshold":          float_param(params, "maskThreshold"),
+            "long_mask_threshold":     float_param(params, "longMaskThreshold"),
+            "long_mask_aspect_ratio":  float_param(params, "longMaskAspectRatio"),
+            "mask_crop_padding_ratio": float_param(params, "maskCropPaddingRatio"),
+            "long_mask_crop_padding_ratio": float_param(params, "longMaskCropPaddingRatio"),
             "tiled_inference":         bool_param(params, "enableTiledInference"),
             "full_image_pass":         bool_param(params, "enableFullImagePass"),
             "tile_size":               int_param(params, "tileSize"),
@@ -156,9 +163,17 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "mask_filter": {
                 "component_count_before": len(instances),
                 "component_count_after":  len(measurements),
-                "ignored_ref_count":      ref_candidate_count,
+                "ignored_ref_count":      max(
+                    0,
+                    ref_candidate_count - int(filter_stats.get("accepted_ref_class_seed_count", 0)),
+                ),
                 "excluded_reference_object_count": excluded_reference_object_count,
+                "accepted_ref_class_seed_count": int(filter_stats.get("accepted_ref_class_seed_count", 0)),
+                "auto_excluded_non_seed_count": int(filter_stats.get("auto_excluded_non_seed_count", 0)),
+                "fragment_merge_count": int(filter_stats.get("fragment_merge_count", 0)),
+                "suggested_reference_available": bool(filter_stats.get("suggested_reference")),
             },
+            "classical_fallback":       classical_fallback_stats,
             "effective_thresholds": {
                 "minArea":                int_param(params, "minArea"),
                 "maxArea":                int_param(params, "maxArea"),
@@ -178,6 +193,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "enabled":            mm_per_pixel > 0,
             "mm_per_pixel":       round(mm_per_pixel, 8),
             "excluded_reference_object_count": excluded_reference_object_count,
+            "suggested_reference": filter_stats.get("suggested_reference"),
         },
         "summary":                 summary,
         "measurements":            measurements,

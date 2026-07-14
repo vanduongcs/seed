@@ -1,7 +1,7 @@
 ﻿name: seed_mobile
 description: SeedVision Mobile App - Flutter cross-platform client
 publish_to: 'none'
-version: 1.0.16+17
+version: 1.0.16+18
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -36,6 +36,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
   flutter_lints: ^3.0.0
 
 flutter:
@@ -45,4 +47,5 @@ flutter:
     - assets/images/calibration_guide_2.webp
     - assets/images/calibration_guide_3.webp
     - assets/images/calibration_guide_4.webp
+    - assets/models/best_1024_int8_static.onnx
     - assets/models/best_mobile_yolo26_640.onnx

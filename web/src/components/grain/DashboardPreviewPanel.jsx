@@ -25,6 +25,7 @@ import {
   CheckCircle,
   Cancel,
 } from "@mui/icons-material";
+import { useLanguage } from "@/i18n.jsx";
 
 const PREVIEW_MODES = [
   ["overlay", "Đánh dấu"],
@@ -146,6 +147,7 @@ export const DashboardPreviewPanel = ({
   onCalibrationChange,
   onDrawingCalibrationChange,
   onPreviewModeChange,
+  onShowCalibrationImage,
   getCalibrationPoint,
   renderCalibrationOverlay,
   progress,
@@ -155,6 +157,7 @@ export const DashboardPreviewPanel = ({
   onConfirmSuspect,
   onDeleteSuspect,
 }) => {
+  const { text } = useLanguage();
   const [guideOpen, setGuideOpen] = useState(false);
   const [qcGuideOpen, setQcGuideOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
@@ -205,6 +208,9 @@ export const DashboardPreviewPanel = ({
   const currentGuideSlide =
     CALIBRATION_GUIDE_SLIDES[currentStep] ?? CALIBRATION_GUIDE_SLIDES[0];
   const previewBoxHeight = { xs: 300, sm: 360 };
+  const suggestedReferencePending =
+    result?.calibration?.suggested_reference?.available === true &&
+    result?.calibration?.enabled !== true;
 
   const imageWidth =
     Number(result?.image?.width) || imageRef.current?.naturalWidth || 1;
@@ -365,6 +371,18 @@ export const DashboardPreviewPanel = ({
                 </Alert>
               )}
             </Stack>
+          )}
+
+          {result && suggestedReferencePending && (
+            <Alert severity="info" sx={{ py: 0.75, mb: 1.5 }}>
+              <AlertTitle sx={{ mb: 0.25, fontWeight: 750 }}>
+                {text("Đã gợi ý vật mốc", "Reference marker suggested")}
+              </AlertTitle>
+              {text(
+                "Hệ thống đã tạo sẵn đường đo trên vật mốc. Nhập kích thước thật (mm), chỉnh lại hai chốt nếu cần rồi chạy lại để quy đổi kết quả sang mm.",
+                "A measurement line was placed on the reference marker. Enter its real size in mm, adjust the handles if needed, then run analysis again to convert results to mm.",
+              )}
+            </Alert>
           )}
 
           <Box
@@ -741,6 +759,15 @@ export const DashboardPreviewPanel = ({
                       : "Kéo 1 đoạn trên vật mốc"
                   }
                 />
+                {result && !calibrationImage && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={onShowCalibrationImage}
+                  >
+                    {text("Vẽ/chỉnh vật mốc", "Draw/edit reference")}
+                  </Button>
+                )}
                 <Button
                   size="small"
                   variant="text"

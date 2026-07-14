@@ -373,10 +373,129 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
     }
   }
 
+  void _applySuggestedReferenceLine(GrainAnalysisResult result) {
+    final current = ref.read(dashboardStateProvider);
+    if (current.referenceStart != null && current.referenceEnd != null) return;
+    final suggestion = result.calibration['suggested_reference'];
+    if (suggestion is! Map || suggestion['available'] != true) return;
+    final start = _suggestedReferenceOffset(suggestion, 'x1', 'y1');
+    final end = _suggestedReferenceOffset(suggestion, 'x2', 'y2');
+    if (start == null || end == null || (end - start).distance <= 1) return;
+    ref.read(dashboardStateProvider.notifier).setReferenceLine(start, end);
+  }
+
+  Offset? _suggestedReferenceOffset(
+    Map<dynamic, dynamic> suggestion,
+    String xKey,
+    String yKey,
+  ) {
+    final x = (suggestion[xKey] as num?)?.toDouble();
+    final y = (suggestion[yKey] as num?)?.toDouble();
+    if (x == null ||
+        y == null ||
+        !x.isFinite ||
+        !y.isFinite ||
+        x < 0 ||
+        y < 0) {
+      return null;
+    }
+    return Offset(x, y);
+  }
+
+  bool _hasSuggestedReference(GrainAnalysisResult? result) {
+    final suggestion = result?.calibration['suggested_reference'];
+    return suggestion is Map && suggestion['available'] == true;
+  }
+
+  ({double pixels, String pixelSpace, String source})? _calibrationReference(
+      GrainAnalysisResult result) {
+    final suggestion = result.calibration['suggested_reference'];
+    if (suggestion is Map && suggestion['available'] == true) {
+      final pixels = _asDouble(suggestion['pixels']);
+      if (pixels > 1) {
+        return (
+          pixels: pixels,
+          pixelSpace: 'original',
+          source: 'detected_ref_post_analysis'
+        );
+      }
+      final processed = suggestion['processed'];
+      if (processed is Map) {
+        final processedPixels = _asDouble(processed['pixels']);
+        if (processedPixels > 1) {
+          return (
+            pixels: processedPixels,
+            pixelSpace: 'processed',
+            source: 'detected_ref_post_analysis'
+          );
+        }
+      }
+    }
+
+    final stateVal = ref.read(dashboardStateProvider);
+    final start = stateVal.referenceStart;
+    final end = stateVal.referenceEnd;
+    if (start == null || end == null) return null;
+    final pixels = (end - start).distance;
+    if (pixels <= 1) return null;
+    return (
+      pixels: pixels,
+      pixelSpace: 'original',
+      source: 'manual_line_post_analysis'
+    );
+  }
+
+  double? _parsePositiveNumber(String value) {
+    final parsed = double.tryParse(value.trim().replaceAll(',', '.'));
+    return parsed != null && parsed.isFinite && parsed > 0 ? parsed : null;
+  }
+
+  Future<void> _applyCalibrationFromCurrentReference() async {
+    final stateVal = ref.read(dashboardStateProvider);
+    final result = stateVal.result;
+    if (result == null) return;
+    final reference = _calibrationReference(result);
+    if (reference == null) {
+      ref.read(dashboardStateProvider.notifier).setError(
+          'Vẽ đường tham chiếu trên vật mốc trước khi áp dụng đơn vị mm.');
+      return;
+    }
+    final referenceMm = _parsePositiveNumber(_referenceMm.text);
+    if (referenceMm == null) {
+      ref.read(dashboardStateProvider.notifier).setError(
+          'Nhập kích thước thật của vật mốc theo mm trước khi áp dụng.');
+      return;
+    }
+
+    final next = result.withAppliedCalibration(
+      referencePixels: reference.pixels,
+      referenceMm: referenceMm,
+      referenceX1: stateVal.referenceStart?.dx,
+      referenceY1: stateVal.referenceStart?.dy,
+      referenceX2: stateVal.referenceEnd?.dx,
+      referenceY2: stateVal.referenceEnd?.dy,
+      referencePixelSpace: reference.pixelSpace,
+      source: reference.source,
+    );
+    await _applyEditedResult(next);
+    ref.read(dashboardStateProvider.notifier).markCalibrationApplied();
+  }
+
+  void _confirmPixelOnly() {
+    ref.read(dashboardStateProvider.notifier).confirmPixelOnly();
+  }
+
+  void _requestManualCalibration() {
+    ref.read(dashboardStateProvider.notifier).requestManualCalibration();
+  }
+
   Future<void> _pick(ImageSource source) async {
     try {
       final file = await _picker.pickImage(
         source: source,
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 92,
         requestFullMetadata: false,
       );
       if (file == null) return;
@@ -433,18 +552,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
         'Phân tích trực tiếp trên thiết bị',
       );
       _startProgressDrift();
-      final referencePixels = double.tryParse(_referencePixels.text.trim());
-      final referenceMm = double.tryParse(_referenceMm.text.trim());
       final result = await _api
           .analyzeImage(
             bytes: bytes,
             fileName: stateVal.fileName,
-            referencePixels: referencePixels,
-            referenceMm: referenceMm,
-            referenceX1: stateVal.referenceStart?.dx,
-            referenceY1: stateVal.referenceStart?.dy,
-            referenceX2: stateVal.referenceEnd?.dx,
-            referenceY2: stateVal.referenceEnd?.dy,
             onProgress: (value, phase) {
               if (mounted) _setProgress(value, phase);
             },
@@ -453,7 +564,10 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
       _stopProgress();
       _setProgress(96, 'Lưu kết quả');
       if (!mounted) return;
-      ref.read(dashboardStateProvider.notifier).setResult(result);
+      final notifier = ref.read(dashboardStateProvider.notifier);
+      notifier.setResult(result);
+      notifier.resetCalibrationDecision();
+      _applySuggestedReferenceLine(result);
       _clearPreviewCache();
       widget.onResultChanged(result);
       _setProgress(100, 'Hoàn tất');
@@ -529,7 +643,17 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
         stateVal.referenceStart != null && stateVal.referenceEnd != null
             ? (stateVal.referenceEnd! - stateVal.referenceStart!).distance
             : null;
-    _referencePixels.text = distance != null ? distance.toStringAsFixed(1) : '';
+    final suggestedReferenceAvailable = _hasSuggestedReference(result);
+    final showReferenceTools = result != null &&
+        !result.calibrated &&
+        !stateVal.pixelOnlyConfirmed &&
+        (suggestedReferenceAvailable || stateVal.manualCalibrationRequested);
+    final calibrationReference =
+        result == null ? null : _calibrationReference(result);
+    final displayReferencePixels = calibrationReference?.pixels ?? distance;
+    _referencePixels.text = displayReferencePixels != null
+        ? displayReferencePixels.toStringAsFixed(1)
+        : '';
     if (_referenceMm.text != stateVal.referenceMmInput) {
       _referenceMm.text = stateVal.referenceMmInput;
     }
@@ -582,7 +706,11 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
               imageSize: stateVal.selectedImageSize,
               start: stateVal.referenceStart,
               end: stateVal.referenceEnd,
-              enabled: !stateVal.busy && stateVal.selectedBytes != null,
+              enabled: showReferenceTools &&
+                  !stateVal.busy &&
+                  stateVal.selectedBytes != null,
+              showReferenceTools: showReferenceTools,
+              referenceDetected: suggestedReferenceAvailable,
               onPickImage:
                   stateVal.busy ? null : () => _pick(ImageSource.gallery),
               onChanged: (start, end) {
@@ -590,75 +718,6 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
                     .read(dashboardStateProvider.notifier)
                     .setReferenceLine(start, end);
               },
-            ),
-            const SizedBox(height: 12),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final hasReferenceLine = stateVal.referenceStart != null &&
-                    stateVal.referenceEnd != null;
-                final pixelsField = TextField(
-                  controller: _referencePixels,
-                  enabled: false,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText:
-                        appText(language, 'Kích thước (px)', 'Size (px)'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                );
-                final millimetersField = TextField(
-                  controller: _referenceMm,
-                  enabled: hasReferenceLine && !stateVal.busy,
-                  onChanged: (val) {
-                    ref
-                        .read(dashboardStateProvider.notifier)
-                        .setReferenceMmInput(val);
-                  },
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: appText(
-                        language, 'Kích thước thật (mm)', 'Real size (mm)'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                );
-
-                if (constraints.maxWidth < 380) {
-                  return Column(
-                    children: [
-                      pixelsField,
-                      const SizedBox(height: 10),
-                      millimetersField,
-                    ],
-                  );
-                }
-
-                return Row(
-                  children: [
-                    Expanded(child: pixelsField),
-                    const SizedBox(width: 10),
-                    Expanded(child: millimetersField),
-                  ],
-                );
-              },
-            ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: stateVal.busy || stateVal.referenceStart == null
-                    ? null
-                    : () {
-                        ref
-                            .read(dashboardStateProvider.notifier)
-                            .clearReference();
-                      },
-                icon: const Icon(Icons.clear),
-                label: Text(
-                    appText(language, 'Xóa vật mốc', 'Clear reference marker')),
-              ),
             ),
             const SizedBox(height: 6),
             SizedBox(
@@ -712,6 +771,15 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
               const SizedBox(height: 6),
               LinearProgressIndicator(
                   value: (stateVal.progress / 100).clamp(0, 1)),
+            ],
+            if (result != null && !result.calibrated) ...[
+              const SizedBox(height: 12),
+              _buildCalibrationDecisionPanel(
+                language: language,
+                stateVal: stateVal,
+                result: result,
+                suggestedReferenceAvailable: suggestedReferenceAvailable,
+              ),
             ],
             if (result != null) ...[
               const SizedBox(height: 18),
@@ -886,6 +954,251 @@ class _BackendAnalysisCardState extends ConsumerState<_BackendAnalysisCard>
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildCalibrationDecisionPanel({
+    required AppLanguage language,
+    required DashboardState stateVal,
+    required GrainAnalysisResult result,
+    required bool suggestedReferenceAvailable,
+  }) {
+    final hasReferenceLine =
+        stateVal.referenceStart != null && stateVal.referenceEnd != null;
+    final reference = _calibrationReference(result);
+    final canApplyCalibration = reference != null &&
+        _parsePositiveNumber(_referenceMm.text) != null &&
+        !stateVal.busy;
+
+    Widget statusText(String title, String description, Color color) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            suggestedReferenceAvailable
+                ? Icons.straighten_outlined
+                : Icons.tune_outlined,
+            size: 20,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textSecondary,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget referenceFields() {
+      final pixelsField = TextField(
+        controller: _referencePixels,
+        enabled: false,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: appText(language, 'Vật mốc (px ảnh)', 'Marker size (px)'),
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+      );
+      final millimetersField = TextField(
+        controller: _referenceMm,
+        enabled: !stateVal.busy,
+        onChanged: (val) {
+          ref.read(dashboardStateProvider.notifier).setReferenceMmInput(val);
+        },
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText:
+              appText(language, 'Kích thước thật (mm)', 'Real size (mm)'),
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+      );
+
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 380) {
+            return Column(
+              children: [
+                pixelsField,
+                const SizedBox(height: 10),
+                millimetersField,
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(child: pixelsField),
+              const SizedBox(width: 10),
+              Expanded(child: millimetersField),
+            ],
+          );
+        },
+      );
+    }
+
+    if (stateVal.pixelOnlyConfirmed && !stateVal.manualCalibrationRequested) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAF7),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            statusText(
+              appText(language, 'Đang dùng kích thước tương đối',
+                  'Using relative size'),
+              appText(
+                language,
+                'Kết quả đã sẵn sàng theo pixel. Nếu cần đơn vị mm, có thể vẽ đường tham chiếu và nhập kích thước thật mà không chạy lại nhận dạng.',
+                'The result is ready in pixels. If millimeters are needed, draw a reference line and enter its real size without running detection again.',
+              ),
+              AppTheme.textSecondary,
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: stateVal.busy ? null : _requestManualCalibration,
+              icon: const Icon(Icons.straighten_outlined),
+              label: Text(appText(language, 'Đổi sang mm', 'Convert to mm')),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final needsReferenceInput =
+        suggestedReferenceAvailable || stateVal.manualCalibrationRequested;
+    final title = suggestedReferenceAvailable
+        ? appText(language, 'Đã phát hiện vật mốc', 'Reference marker detected')
+        : appText(language, 'Chưa phát hiện vật mốc', 'No marker detected');
+    final description = suggestedReferenceAvailable
+        ? appText(
+            language,
+            'App đã đặt sẵn đường đo trên vật mốc. Nhập kích thước thật theo mm rồi áp dụng để đổi kết quả hiện tại sang đơn vị mm.',
+            'A measurement line was placed on the marker. Enter its real size in mm to convert the current result to millimeters.',
+          )
+        : stateVal.manualCalibrationRequested
+            ? appText(
+                language,
+                hasReferenceLine
+                    ? 'Kiểm tra lại hai chốt trên ảnh, nhập kích thước thật của đường vừa vẽ rồi áp dụng mm.'
+                    : 'Vẽ một đường trên vật có kích thước thật đã biết, sau đó nhập kích thước của đường đó theo mm.',
+                hasReferenceLine
+                    ? 'Check the two handles on the image, enter the real size of the line, then apply millimeters.'
+                    : 'Draw a line over an object with known real size, then enter that line size in millimeters.',
+              )
+            : appText(
+                language,
+                'Kết quả pixel đã sẵn sàng. Nếu cần kích thước thật, hãy vẽ đường tham chiếu trên một vật có kích thước đã biết; nếu không, dùng kết quả pixel ngay.',
+                'Pixel results are ready. For real-world size, draw a reference line over an object with known size; otherwise, use the pixel result now.',
+              );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: suggestedReferenceAvailable
+            ? const Color(0xFFEFF6FF)
+            : const Color(0xFFF8FAF7),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: suggestedReferenceAvailable
+              ? const Color(0xFFBFDBFE)
+              : AppTheme.border,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          statusText(
+            title,
+            description,
+            suggestedReferenceAvailable
+                ? const Color(0xFF1D4ED8)
+                : AppTheme.textPrimary,
+          ),
+          if (needsReferenceInput) ...[
+            const SizedBox(height: 12),
+            referenceFields(),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: canApplyCalibration
+                      ? _applyCalibrationFromCurrentReference
+                      : null,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: Text(appText(language, 'Áp dụng mm', 'Apply mm')),
+                ),
+                OutlinedButton.icon(
+                  onPressed: stateVal.busy ? null : _confirmPixelOnly,
+                  icon: const Icon(Icons.grid_4x4_outlined),
+                  label: Text(appText(language, 'Dùng pixel', 'Use pixels')),
+                ),
+                if (hasReferenceLine)
+                  TextButton.icon(
+                    onPressed: stateVal.busy
+                        ? null
+                        : () {
+                            ref
+                                .read(dashboardStateProvider.notifier)
+                                .clearReference();
+                          },
+                    icon: const Icon(Icons.clear),
+                    label:
+                        Text(appText(language, 'Xóa đường đo', 'Clear line')),
+                  ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: stateVal.busy ? null : _requestManualCalibration,
+                  icon: const Icon(Icons.straighten_outlined),
+                  label: Text(appText(language, 'Cần kết quả mm', 'Need mm')),
+                ),
+                OutlinedButton.icon(
+                  onPressed: stateVal.busy ? null : _confirmPixelOnly,
+                  icon: const Icon(Icons.grid_4x4_outlined),
+                  label: Text(appText(language, 'Dùng pixel', 'Use pixels')),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1223,6 +1536,8 @@ class _ReferenceImageSelector extends ConsumerStatefulWidget {
   final Offset? start;
   final Offset? end;
   final bool enabled;
+  final bool showReferenceTools;
+  final bool referenceDetected;
   final VoidCallback? onPickImage;
   final void Function(Offset start, Offset end) onChanged;
 
@@ -1232,6 +1547,8 @@ class _ReferenceImageSelector extends ConsumerStatefulWidget {
     required this.start,
     required this.end,
     required this.enabled,
+    required this.showReferenceTools,
+    required this.referenceDetected,
     required this.onPickImage,
     required this.onChanged,
   });
@@ -1419,41 +1736,61 @@ class _ReferenceImageSelectorState
                   Row(
                     children: [
                       Text(
-                        appText(language, 'Hướng dẫn', 'Guide'),
+                        widget.showReferenceTools
+                            ? appText(
+                                language,
+                                'Hiệu chỉnh kích thước',
+                                'Size calibration',
+                              )
+                            : appText(language, 'Ảnh đầu vào', 'Input image'),
                         style: const TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                           color: AppTheme.textPrimary,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.help_outline,
-                          color: AppTheme.primary,
-                          size: 20,
+                      if (widget.showReferenceTools) ...[
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.help_outline,
+                            color: AppTheme.primary,
+                            size: 20,
+                          ),
+                          onPressed: showGuideModal,
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip:
+                              appText(language, 'Xem hướng dẫn', 'View guide'),
                         ),
-                        onPressed: showGuideModal,
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        tooltip:
-                            appText(language, 'Xem hướng dẫn', 'View guide'),
-                      ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    hasLine
-                        ? appText(
-                            language,
-                            'Kéo chốt A hoặc chốt B để khớp chính xác hai mép vật mốc.',
-                            'Drag handle A or B to match the two marker edges precisely.',
-                          )
+                    widget.showReferenceTools
+                        ? (hasLine
+                            ? appText(
+                                language,
+                                'Kéo chốt A hoặc chốt B để khớp chính xác hai mép vật mốc.',
+                                'Drag handle A or B to match the two marker edges precisely.',
+                              )
+                            : widget.referenceDetected
+                                ? appText(
+                                    language,
+                                    'App đã gợi ý vị trí vật mốc. Nếu đường chưa hiện đúng, chạm vào ảnh để đặt lại đường đo.',
+                                    'A marker was suggested. If the line is not placed correctly, tap the image to set it again.',
+                                  )
+                                : appText(
+                                    language,
+                                    'Nhấn vào vùng bất kỳ trên ảnh để khởi tạo đoạn thẳng tham chiếu kích thước.',
+                                    'Tap anywhere on the image to initialize the size reference line.',
+                                  ))
                         : appText(
                             language,
-                            'Nhấn vào vùng bất kỳ trên ảnh để khởi tạo đoạn thẳng tham chiếu kích thước.',
-                            'Tap anywhere on the image to initialize the size reference line.',
+                            'Chọn hoặc chụp ảnh rồi bấm nhận dạng. Kết quả pixel sẽ có trước, phần mm có thể bổ sung sau.',
+                            'Choose or capture an image, then run detection. Pixel results appear first, and millimeters can be added later.',
                           ),
                     style: const TextStyle(
                       color: AppTheme.textSecondary,
@@ -1464,8 +1801,10 @@ class _ReferenceImageSelectorState
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            buildFixedMagnifierBox(),
+            if (widget.showReferenceTools) ...[
+              const SizedBox(width: 12),
+              buildFixedMagnifierBox(),
+            ],
           ],
         ),
         const SizedBox(height: 10),

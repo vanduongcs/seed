@@ -277,6 +277,57 @@ class GrainAnalysisResult {
     return '';
   }
 
+  GrainAnalysisResult withAppliedCalibration({
+    required double referencePixels,
+    required double referenceMm,
+    double? referenceX1,
+    double? referenceY1,
+    double? referenceX2,
+    double? referenceY2,
+    String referencePixelSpace = 'original',
+    String source = 'manual_post_analysis',
+  }) {
+    final safeScale =
+        _asDouble(image['scale']) > 0 ? _asDouble(image['scale']) : 1.0;
+    final processedReferencePixels = referencePixelSpace == 'original'
+        ? referencePixels * safeScale
+        : referencePixels;
+    if (referencePixels <= 0 ||
+        referenceMm <= 0 ||
+        processedReferencePixels <= 0) {
+      return this;
+    }
+    final mmPerPixel = referenceMm / processedReferencePixels;
+    final nextMeasurements = measurements.map((measurement) {
+      final copy = Map<String, dynamic>.from(measurement);
+      final areaPx = _asDouble(copy['area_px']);
+      final lengthPx = _asDouble(copy['length_px']);
+      final widthPx = _asDouble(copy['width_px']);
+      copy['area_mm2'] = _round(areaPx * mmPerPixel * mmPerPixel, 6);
+      copy['length_mm'] = _round(lengthPx * mmPerPixel, 6);
+      copy['width_mm'] = _round(widthPx * mmPerPixel, 6);
+      return copy;
+    }).toList();
+    final nextCalibration = {
+      ...calibration,
+      'enabled': true,
+      'mm_per_pixel': _round(mmPerPixel, 10),
+      'referencePixels': _round(referencePixels, 6),
+      'processedReferencePixels': _round(processedReferencePixels, 6),
+      'referenceMm': _round(referenceMm, 6),
+      'referencePixelSpace': referencePixelSpace,
+      'referenceX1': referenceX1 ?? calibration['referenceX1'] ?? -1,
+      'referenceY1': referenceY1 ?? calibration['referenceY1'] ?? -1,
+      'referenceX2': referenceX2 ?? calibration['referenceX2'] ?? -1,
+      'referenceY2': referenceY2 ?? calibration['referenceY2'] ?? -1,
+      'source': source,
+      'post_analysis_applied': true,
+    };
+
+    return _copyWithMeasurements(nextMeasurements,
+        calibration: nextCalibration);
+  }
+
   GrainAnalysisResult withConfirmedGrain(int measurementId) {
     final nextMeasurements = measurements.map((measurement) {
       final copy = Map<String, dynamic>.from(measurement);
@@ -317,13 +368,14 @@ class GrainAnalysisResult {
   GrainAnalysisResult _copyWithMeasurements(
     List<Map<String, dynamic>> nextMeasurements, {
     Map<String, dynamic>? segmentation,
+    Map<String, dynamic>? calibration,
   }) {
     return GrainAnalysisResult(
       run: run,
       image: image,
       summary: _recomputeSummary(summary, nextMeasurements),
       segmentation: segmentation ?? this.segmentation,
-      calibration: calibration,
+      calibration: calibration ?? this.calibration,
       measurements: nextMeasurements,
       csv: _measurementsCsv(nextMeasurements, csv),
       previews: _renderQcPreviews(previews, nextMeasurements),
@@ -573,6 +625,7 @@ Map<String, dynamic> _recomputeSummary(
         'manual_override': true,
         'status': 'ok',
       },
+      'quality': _qualitySummary(const []),
     };
   }
   final inliers = [
@@ -664,6 +717,43 @@ Map<String, dynamic> _recomputeSummary(
           ? 'review_required'
           : (suspectIds.isNotEmpty ? 'suspects_flagged' : 'ok'),
     },
+    'quality': _qualitySummary(measurements),
+  };
+}
+
+Map<String, dynamic> _qualitySummary(List<Map<String, dynamic>> measurements) {
+  final flagCounts = <String, int>{};
+  const problemFlags = {
+    'loose_mask',
+    'touches_image_edge',
+    'extreme_aspect',
+    'partial_tile_mask',
+  };
+  var problemCount = 0;
+  for (final measurement in measurements) {
+    final flags = (measurement['quality_flags']?.toString() ?? '')
+        .split(',')
+        .map((flag) => flag.trim())
+        .where((flag) => flag.isNotEmpty)
+        .toSet();
+    if (flags.any(problemFlags.contains)) {
+      problemCount++;
+    }
+    for (final flag in flags) {
+      flagCounts[flag] = (flagCounts[flag] ?? 0) + 1;
+    }
+  }
+  final labelConfusionCount = flagCounts['model_label_ref_as_seed'] ?? 0;
+  final count = measurements.length;
+  return {
+    'flag_counts': flagCounts,
+    'problem_count': problemCount,
+    'problem_ratio': count == 0 ? 0 : _round(problemCount / count, 6),
+    'label_confusion_count': labelConfusionCount,
+    'label_confusion_ratio':
+        count == 0 ? 0 : _round(labelConfusionCount / count, 6),
+    'review_required': problemCount > 0,
+    'status': problemCount > 0 ? 'review_required' : 'ok',
   };
 }
 
@@ -692,16 +782,22 @@ String _measurementsCsv(
           'solidity',
           'extent',
           'aspect_ratio',
+          'measurement_method',
           'confidence',
           'class_id',
           'class_name',
+          'detected_class_id',
+          'detected_class_name',
+          'quality_flags',
           'qc_outlier',
           'qc_reason',
         ]
       : firstLine.split(',');
-  final columns = baseColumns.contains('qc_manual_override')
-      ? baseColumns
-      : [...baseColumns, 'qc_manual_override'];
+  final columns = [
+    ...baseColumns,
+    if (!baseColumns.contains('measurement_method')) 'measurement_method',
+    if (!baseColumns.contains('qc_manual_override')) 'qc_manual_override',
+  ];
   final rows = [
     columns.join(','),
     for (final measurement in measurements)

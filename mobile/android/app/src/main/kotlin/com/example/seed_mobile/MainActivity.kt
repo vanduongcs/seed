@@ -1,6 +1,8 @@
 package vn.mekonglab.seedvision
 
+import android.app.ActivityManager
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import io.flutter.embedding.android.FlutterActivity
@@ -24,6 +26,33 @@ class MainActivity : FlutterActivity() {
             openStore(playStoreUrl)
             result.success(null)
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "vn.mekonglab.seedvision/device_memory",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "getMemoryInfo") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+
+            result.success(getMemoryInfo())
+        }
+    }
+
+    private fun getMemoryInfo(): Map<String, Any> {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        val mb = 1024L * 1024L
+        return mapOf(
+            "lowMemory" to memoryInfo.lowMemory,
+            "availableMb" to (memoryInfo.availMem / mb).toInt(),
+            "totalMb" to (memoryInfo.totalMem / mb).toInt(),
+            "thresholdMb" to (memoryInfo.threshold / mb).toInt(),
+            "memoryClassMb" to activityManager.memoryClass,
+            "largeMemoryClassMb" to activityManager.largeMemoryClass,
+            "lowRamDevice" to activityManager.isLowRamDevice,
+        )
     }
 
     private fun openStore(playStoreUrl: String) {

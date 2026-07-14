@@ -17,6 +17,8 @@ class DashboardState {
   final double progress;
   final String progressPhase;
   final String referenceMmInput;
+  final bool pixelOnlyConfirmed;
+  final bool manualCalibrationRequested;
 
   const DashboardState({
     this.selectedBytes,
@@ -32,6 +34,8 @@ class DashboardState {
     this.progress = 0,
     this.progressPhase = '',
     this.referenceMmInput = '',
+    this.pixelOnlyConfirmed = false,
+    this.manualCalibrationRequested = false,
   });
 
   DashboardState copyWith({
@@ -48,11 +52,17 @@ class DashboardState {
     double? progress,
     String? progressPhase,
     String? referenceMmInput,
+    bool? pixelOnlyConfirmed,
+    bool? manualCalibrationRequested,
   }) {
     return DashboardState(
-      selectedBytes: selectedBytes != null ? selectedBytes() : this.selectedBytes,
-      selectedImageSize: selectedImageSize != null ? selectedImageSize() : this.selectedImageSize,
-      referenceStart: referenceStart != null ? referenceStart() : this.referenceStart,
+      selectedBytes:
+          selectedBytes != null ? selectedBytes() : this.selectedBytes,
+      selectedImageSize: selectedImageSize != null
+          ? selectedImageSize()
+          : this.selectedImageSize,
+      referenceStart:
+          referenceStart != null ? referenceStart() : this.referenceStart,
       referenceEnd: referenceEnd != null ? referenceEnd() : this.referenceEnd,
       fileName: fileName ?? this.fileName,
       result: result != null ? result() : this.result,
@@ -63,6 +73,9 @@ class DashboardState {
       progress: progress ?? this.progress,
       progressPhase: progressPhase ?? this.progressPhase,
       referenceMmInput: referenceMmInput ?? this.referenceMmInput,
+      pixelOnlyConfirmed: pixelOnlyConfirmed ?? this.pixelOnlyConfirmed,
+      manualCalibrationRequested:
+          manualCalibrationRequested ?? this.manualCalibrationRequested,
     );
   }
 }
@@ -82,6 +95,8 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
       previewMode: 'overlay',
       qcEditMode: false,
       referenceMmInput: '',
+      pixelOnlyConfirmed: false,
+      manualCalibrationRequested: false,
     );
   }
 
@@ -102,6 +117,37 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
 
   void setReferenceMmInput(String val) {
     state = state.copyWith(referenceMmInput: val);
+  }
+
+  void confirmPixelOnly() {
+    state = state.copyWith(
+      pixelOnlyConfirmed: true,
+      manualCalibrationRequested: false,
+      error: () => null,
+    );
+  }
+
+  void requestManualCalibration() {
+    state = state.copyWith(
+      pixelOnlyConfirmed: false,
+      manualCalibrationRequested: true,
+      error: () => null,
+    );
+  }
+
+  void markCalibrationApplied() {
+    state = state.copyWith(
+      pixelOnlyConfirmed: false,
+      manualCalibrationRequested: false,
+      error: () => null,
+    );
+  }
+
+  void resetCalibrationDecision() {
+    state = state.copyWith(
+      pixelOnlyConfirmed: false,
+      manualCalibrationRequested: false,
+    );
   }
 
   void setBusy(bool busy) {

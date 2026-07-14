@@ -13,6 +13,13 @@ import { saveGuestRun, updateGuestRunResult } from '@/utils/guestRuns.js';
 
 const emptyCalibration = { start: null, end: null, referenceMm: '' };
 
+const suggestedReferencePoint = (suggestion, xKey, yKey) => {
+  const x = Number(suggestion?.[xKey]);
+  const y = Number(suggestion?.[yKey]);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return null;
+  return { x, y };
+};
+
 export default function DashboardPage() {
   const isGuest = useAuthStore((state) => state.isGuest);
   const { text } = useLanguage();
@@ -28,6 +35,7 @@ export default function DashboardPage() {
   const [result, setResult] = useState(null);
   const [previewMode, setPreviewMode] = useState('overlay');
   const [calibration, setCalibration] = useState(emptyCalibration);
+  const [calibrationPreviewRequested, setCalibrationPreviewRequested] = useState(false);
   const [drawingCalibration, setDrawingCalibration] = useState(false);
   const [qcEditMode, setQcEditMode] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -46,6 +54,7 @@ export default function DashboardPage() {
     setResult(null);
     setPreviewMode('overlay');
     setCalibration(emptyCalibration);
+    setCalibrationPreviewRequested(false);
     setQcEditMode(false);
   };
 
@@ -107,6 +116,18 @@ export default function DashboardPage() {
   const calibrationMm = Number(calibration.referenceMm);
   const calibrationLineReady = calibrationPixels > 1;
   const calibrationReady = calibrationLineReady && Number.isFinite(calibrationMm) && calibrationMm > 0;
+
+  useEffect(() => {
+    const suggestion = result?.calibration?.suggested_reference;
+    if (suggestion?.available !== true) return;
+    const start = suggestedReferencePoint(suggestion, 'x1', 'y1');
+    const end = suggestedReferencePoint(suggestion, 'x2', 'y2');
+    if (!start || !end) return;
+    setCalibration((current) => {
+      if (current.start && current.end) return current;
+      return { ...current, start, end };
+    });
+  }, [result]);
 
   const renderCalibrationOverlay = () => {
     const image = imageRef.current;
@@ -209,6 +230,7 @@ export default function DashboardPage() {
       setProgressPhase(text('Lưu kết quả', 'Saving result'));
       qcRenderSeqRef.current += 1;
       setResult(data.data);
+      setCalibrationPreviewRequested(false);
       if (isGuest) {
         saveGuestRun({ result: data.data, sourceFileName: file.name });
       }
@@ -284,8 +306,17 @@ export default function DashboardPage() {
     preprocessed: result?.preprocessed_png_base64,
   };
   const activePreview = previewImages[previewMode] || result?.overlay_png_base64;
-  const displayImage = activePreview ? `data:image/png;base64,${activePreview}` : previewUrl;
-  const calibrationImage = previewUrl && !activePreview;
+  const showCalibrationPreview = Boolean(
+    previewUrl &&
+      (calibrationPreviewRequested ||
+        (result && calibrationLineReady && result?.calibration?.enabled !== true)),
+  );
+  const displayImage = showCalibrationPreview
+    ? previewUrl
+    : activePreview
+      ? `data:image/png;base64,${activePreview}`
+      : previewUrl;
+  const calibrationImage = Boolean(previewUrl && (!activePreview || showCalibrationPreview));
   const useRobustStats = summary?.qc?.robust_used_for_reporting !== false;
   const reportedStat = (rawKey, robustKey) => (
     useRobustStats ? (summary?.[robustKey] ?? summary?.[rawKey]) : summary?.[rawKey]
@@ -406,7 +437,14 @@ export default function DashboardPage() {
             onProcess={handleProcess}
             onCalibrationChange={setCalibration}
             onDrawingCalibrationChange={setDrawingCalibration}
-            onPreviewModeChange={setPreviewMode}
+            onPreviewModeChange={(mode) => {
+              setCalibrationPreviewRequested(false);
+              setPreviewMode(mode);
+            }}
+            onShowCalibrationImage={() => {
+              setQcEditMode(false);
+              setCalibrationPreviewRequested(true);
+            }}
             getCalibrationPoint={getCalibrationPoint}
             renderCalibrationOverlay={renderCalibrationOverlay}
             progress={progress}
@@ -691,6 +729,7 @@ const recomputeSummaryFromMeasurements = (previousSummary = {}, measurements) =>
         manual_override: true,
         status: 'ok',
       },
+      quality: qualitySummary([]),
     };
   }
   const inliers = measurements.filter((measurement) => measurement.qc_outlier !== true);
@@ -765,6 +804,36 @@ const recomputeSummaryFromMeasurements = (previousSummary = {}, measurements) =>
         ? 'review_required'
         : (suspectIds.length ? 'suspects_flagged' : 'ok'),
     },
+    quality: qualitySummary(measurements),
+  };
+};
+
+const qualitySummary = (measurements) => {
+  const flagCounts = {};
+  const problemFlags = new Set(['loose_mask', 'touches_image_edge', 'extreme_aspect', 'partial_tile_mask']);
+  let problemCount = 0;
+  measurements.forEach((measurement) => {
+    const flags = new Set(String(measurement.quality_flags || '')
+      .split(',')
+      .map((flag) => flag.trim())
+      .filter(Boolean));
+    if ([...flags].some((flag) => problemFlags.has(flag))) {
+      problemCount += 1;
+    }
+    flags.forEach((flag) => {
+      flagCounts[flag] = (flagCounts[flag] || 0) + 1;
+    });
+  });
+  const labelConfusionCount = flagCounts.model_label_ref_as_seed || 0;
+  const count = measurements.length;
+  return {
+    flag_counts: flagCounts,
+    problem_count: problemCount,
+    problem_ratio: count ? round(problemCount / count, 6) : 0,
+    label_confusion_count: labelConfusionCount,
+    label_confusion_ratio: count ? round(labelConfusionCount / count, 6) : 0,
+    review_required: problemCount > 0,
+    status: problemCount > 0 ? 'review_required' : 'ok',
   };
 };
 
@@ -776,6 +845,7 @@ const measurementsToCsv = (measurements, existingCsv = '') => {
       'id', 'area_px', 'length_px', 'width_px', 'area_mm2', 'length_mm', 'width_mm',
       'centroid_x', 'centroid_y', 'bbox_x', 'bbox_y', 'bbox_w', 'bbox_h', 'angle_deg',
       'solidity', 'extent', 'aspect_ratio', 'confidence', 'class_id', 'class_name',
+      'detected_class_id', 'detected_class_name', 'quality_flags',
       'qc_outlier', 'qc_reason',
     ];
   const columns = baseColumns.includes('qc_manual_override')

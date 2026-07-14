@@ -20,6 +20,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 
 import { api } from '@/api/axios.js';
 import { languages, useLanguage } from '@/i18n.jsx';
@@ -27,8 +28,10 @@ import { useAuthStore } from '@/store/auth.store.js';
 
 export default function AccountPage() {
   const user = useAuthStore((s) => s.user);
+  const isGuest = useAuthStore((s) => s.isGuest);
   const setUser = useAuthStore((s) => s.setUser);
   const { language, setLanguage, text } = useLanguage();
+  const navigate = useNavigate();
   const [form, setForm] = useState({ name: user?.name || '', email: user?.email || '', role: user?.role || 'user' });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -37,6 +40,13 @@ export default function AccountPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (isGuest) {
+      setLoading(false);
+      setError('');
+      setMessage('');
+      return;
+    }
+
     const loadProfile = async () => {
       setLoading(true);
       setError('');
@@ -57,7 +67,59 @@ export default function AccountPage() {
     };
 
     loadProfile();
-  }, [setUser]);
+  }, [isGuest, setUser]);
+
+  if (isGuest) {
+    return (
+      <Box sx={{ maxWidth: 860 }}>
+        <Typography variant="h5" fontWeight={700} mb={0.75}>{text('Tài khoản', 'Account')}</Typography>
+        <Typography variant="body2" color="text.secondary" mb={2.5}>
+          {text('Quản lý chế độ khách, ngôn ngữ và đồng bộ dữ liệu.', 'Manage guest mode, language, and data sync.')}
+        </Typography>
+
+        <Card>
+          <CardContent sx={{ p: 3 }}>
+            <Typography variant="h6" fontWeight={700} mb={1}>{text('Chế độ không đăng nhập', 'Guest mode')}</Typography>
+            <Typography variant="body2" color="text.secondary" mb={2.5}>
+              {text(
+                'Các lần phân tích đang được lưu trên trình duyệt này. Đăng nhập hoặc đăng ký để đồng bộ chúng lên tài khoản của bạn.',
+                'Your analyses are saved in this browser. Log in or sign up to sync them to your account.',
+              )}
+            </Typography>
+
+            <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
+              {text('Ngôn ngữ', 'Language')}
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              fullWidth
+              size="small"
+              value={language}
+              onChange={(_, nextLanguage) => {
+                if (nextLanguage) setLanguage(nextLanguage);
+              }}
+              sx={{ mb: 2.5, maxWidth: 360 }}
+            >
+              {languages.map((item) => (
+                <ToggleButton key={item.code} value={item.code} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                  {item.label}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button variant="contained" onClick={() => navigate('/login')}>
+                {text('Đăng nhập để đồng bộ', 'Log in to sync')}
+              </Button>
+              <Button variant="outlined" onClick={() => navigate('/register')}>
+                {text('Đăng ký tài khoản', 'Create account')}
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  }
 
   const handleSave = async () => {
     setSaving(true);

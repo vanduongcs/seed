@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
 
@@ -14,31 +15,69 @@ const _qcMinOutlierMetrics = 2;
 
 class OfflineGrainAnalyzer {
   static const modelAssetPath = 'assets/models/best_mobile_yolo26_640.onnx';
+  static const optimizedHighQualityModelAssetPath =
+      'assets/models/best_1024_int8_static.onnx';
 
   // Keep these aligned with backend/config/grain.settings.json.
-  static const _inputSize = 640;
-  static const _protoSize = 160;
   static const _classCount = 2;
   static const _maskCoefficientCount = 32;
   static const _predictionFeatureCount =
       4 + _classCount + _maskCoefficientCount;
-  static const _maxSide = 1280;
-  static const _confidence = 0.05;
+  static const _safeModelProfile = _OfflineModelProfile(
+    name: 'mobile_640_small_int8_safe',
+    modelAssetPath: modelAssetPath,
+    inputSize: 640,
+    protoSize: 160,
+    enableRoiPrepass: false,
+    enableFullImagePass: true,
+    enableTiledInference: false,
+    tileSize: 640,
+    tileOverlap: 0.25,
+    roiMaxPasses: 0,
+    previewMaxSide: 640,
+    intraOpThreads: 1,
+  );
+  static const _fastHighQualityModelProfile = _OfflineModelProfile(
+    name: 'mobile_1024_int8_fast',
+    modelAssetPath: optimizedHighQualityModelAssetPath,
+    inputSize: 1024,
+    protoSize: 256,
+    enableRoiPrepass: false,
+    enableFullImagePass: true,
+    enableTiledInference: false,
+    tileSize: 1024,
+    tileOverlap: 0,
+    roiMaxPasses: 0,
+    allowZeroCountFallback: true,
+    previewMaxSide: 768,
+    intraOpThreads: 1,
+  );
+  static const _deviceMemoryChannel =
+      MethodChannel('vn.mekonglab.seedvision/device_memory');
+  static const _minFastHighQualityLargeHeapMb = 192;
+  static const _minFastHighQualityAvailableMb = 256;
+  static const _maxSide = 1024;
+  static const _confidence = 0.04;
   static const _iou = 0.70;
   static const _maxDetections = 5000;
-  static const _enableTiledInference = false;
-  static const _enableFullImagePass = true;
-  static const _tileSize = 640;
-  static const _tileOverlap = 0.25;
+  static const _maskThreshold = 0.50;
+  static const _longMaskThreshold = 0.40;
+  static const _longMaskAspectRatio = 2.15;
+  static const _maskCropPaddingRatio = 0.01;
+  static const _longMaskCropPaddingRatio = 0.08;
   static const _mergeIou = 0.35;
   static const _mergeOverlap = 0.70;
-  static const _enableRoiPrepass = true;
+  static const _edgeMarginRatio = 0.10;
   static const _roiDetectionSide = 768;
   static const _roiPadding = 40;
   static const _roiMergeMaxSide = 640;
   static const _roiMinArea = 48;
   static const _roiMinBoxSide = 6;
-  static const _roiMaxPasses = 24;
+  // Low-end Android devices can be killed by many consecutive 640px ONNX
+  // passes. Keep a small ROI budget and fall back to one full-image pass when
+  // an image is too fragmented.
+  static const _roiMaxPasses = 8;
+  static const _roiOverflowProbePasses = _roiMaxPasses + 1;
   static const _minArea = 20;
   static const _maxArea = 200000;
   static const _maxAspectRatio = 14.0;
@@ -54,33 +93,63 @@ class OfflineGrainAnalyzer {
   static const _mergedSplitWidthRatio = 1.32;
   static const _mergedSplitMadZ = 3.0;
   static const _mergedSplitMaxParts = 4;
+  static const _enableFragmentMerge = true;
+  static const _fragmentMergeMaxGapRatio = 0.08;
+  static const _fragmentMergeMaxAreaRatio = 1.28;
+  static const _fragmentMergeMinAreaRatio = 0.65;
+  static const _fragmentMergeMaxLengthRatio = 1.20;
+  static const _fragmentMergeMaxWidthRatio = 1.22;
+  static const _enableClassicalFallback = true;
+  static const _classicalFallbackMaxYoloCandidates = 12;
+  static const _classicalFallbackMinCandidates = 25;
+  static const _classicalFallbackMaxAdded = 180;
+  static const _classicalFallbackConfidence = 0.085;
+  static const _classicalFallbackBrightPercentile = 96.0;
+  static const _classicalFallbackMinBrightDelta = 6.0;
+  static const _classicalFallbackBackgroundRadius = 15;
+  static const _classicalFallbackDilateIterations = 1;
+  static const _classicalFallbackMaxAspect = 18.0;
 
   OrtSession? _session;
+  _OfflineModelProfile? _sessionProfile;
 
   Future<OfflineModelInfo> loadModelInfo() async {
-    final session = await _loadSession();
-    return OfflineModelInfo(
-      modelAssetPath: modelAssetPath,
-      inputTensors: [
-        OfflineTensorInfo(
-          name: session.inputNames.first,
-          shape: const [1, 3, _inputSize, _inputSize],
-          type: 'float32',
-        ),
-      ],
-      outputTensors: [
-        OfflineTensorInfo(
-          name: session.outputNames.first,
-          shape: const [1, 300, _predictionFeatureCount],
-          type: 'float32',
-        ),
-        OfflineTensorInfo(
-          name: session.outputNames.last,
-          shape: const [1, 32, _protoSize, _protoSize],
-          type: 'float32',
-        ),
-      ],
-    );
+    final profiles = await _choosePreferredProfiles();
+    for (var index = 0; index < profiles.length; index++) {
+      final profile = profiles[index];
+      try {
+        final session = await _loadSession(profile);
+        return OfflineModelInfo(
+          modelAssetPath: profile.modelAssetPath,
+          inputTensors: [
+            OfflineTensorInfo(
+              name: session.inputNames.first,
+              shape: [1, 3, profile.inputSize, profile.inputSize],
+              type: 'float32',
+            ),
+          ],
+          outputTensors: [
+            OfflineTensorInfo(
+              name: session.outputNames.first,
+              shape: const [1, 300, _predictionFeatureCount],
+              type: 'float32',
+            ),
+            OfflineTensorInfo(
+              name: session.outputNames.last,
+              shape: [1, 32, profile.protoSize, profile.protoSize],
+              type: 'float32',
+            ),
+          ],
+        );
+      } catch (error) {
+        if (index + 1 >= profiles.length ||
+            !_canFallbackFromProfile(profile, error)) {
+          rethrow;
+        }
+        await close();
+      }
+    }
+    throw StateError('Cannot load offline grain model.');
   }
 
   Future<OfflineAnalyzeResult> analyze(
@@ -93,13 +162,72 @@ class OfflineGrainAnalyzer {
     double? referenceY2,
     OfflineProgressCallback? onProgress,
   }) async {
+    final profiles = await _choosePreferredProfiles();
+    Object? lastError;
+    String? fallbackReason;
+    for (var index = 0; index < profiles.length; index++) {
+      final profile = profiles[index];
+      try {
+        final result = await _analyzeWithProfile(
+          profile,
+          imageBytes,
+          referencePixels: referencePixels,
+          referenceMm: referenceMm,
+          referenceX1: referenceX1,
+          referenceY1: referenceY1,
+          referenceX2: referenceX2,
+          referenceY2: referenceY2,
+          onProgress: onProgress,
+          fallbackReason: fallbackReason,
+        );
+        if (profile.allowZeroCountFallback &&
+            _shouldRetryZeroDetection(result) &&
+            index + 1 < profiles.length) {
+          await close();
+          fallbackReason = 'fast_model_zero_detections';
+          onProgress?.call(
+            58,
+            'Model 1024 tối ưu không phát hiện hạt, kiểm tra bằng 640 an toàn',
+          );
+          await Future<void>.delayed(Duration.zero);
+          continue;
+        }
+        return result;
+      } catch (error) {
+        lastError = error;
+        if (index + 1 < profiles.length &&
+            _canFallbackFromProfile(profile, error)) {
+          await close();
+          fallbackReason = _profileFallbackReason(profile, error);
+          onProgress?.call(58, _profileFallbackMessage(profile, error));
+          await Future<void>.delayed(Duration.zero);
+          continue;
+        }
+        rethrow;
+      }
+    }
+    throw StateError(lastError?.toString() ?? 'Offline analysis failed.');
+  }
+
+  Future<OfflineAnalyzeResult> _analyzeWithProfile(
+    _OfflineModelProfile profile,
+    Uint8List imageBytes, {
+    double? referencePixels,
+    double? referenceMm,
+    double? referenceX1,
+    double? referenceY1,
+    double? referenceX2,
+    double? referenceY2,
+    OfflineProgressCallback? onProgress,
+    String? fallbackReason,
+  }) async {
     Future<void> reportProgress(double value, String phase) async {
       onProgress?.call(value, phase);
       await Future<void>.delayed(Duration.zero);
     }
 
     await reportProgress(54, 'Chuẩn bị nhận dạng trên thiết bị');
-    final session = await _loadSession();
+    final session = await _loadSession(profile);
     await reportProgress(60, 'Chuẩn bị ảnh để nhận dạng');
     final original = img.decodeImage(imageBytes);
     if (original == null) throw StateError('Cannot decode selected image.');
@@ -122,10 +250,15 @@ class OfflineGrainAnalyzer {
     var passCount = 0;
     var roiPassCount = 0;
     var tilePassCount = 0;
+    var roiBudgetExceeded = false;
+    var detectedRoiRegionCount = 0;
     var roiRegions = const <_RoiBox>[];
     await reportProgress(68, 'Đang nhận dạng hạt trên thiết bị');
-    if (_enableRoiPrepass) {
-      roiRegions = _detectRoiRegions(processed);
+    if (profile.enableRoiPrepass) {
+      final detectedRoiRegions = _detectRoiRegions(processed);
+      detectedRoiRegionCount = detectedRoiRegions.length;
+      roiBudgetExceeded = detectedRoiRegions.length > profile.roiMaxPasses;
+      roiRegions = roiBudgetExceeded ? const <_RoiBox>[] : detectedRoiRegions;
       for (var i = 0; i < roiRegions.length; i++) {
         final roi = roiRegions[i];
         await reportProgress(
@@ -139,30 +272,54 @@ class OfflineGrainAnalyzer {
           width: roi.width,
           height: roi.height,
         );
-        final pass =
-            await _runInferencePass(session, crop, roi.x, roi.y, 'roi');
-        final decoded = _decodePassInstances(pass);
+        final pass = await _runInferencePass(
+          profile,
+          session,
+          crop,
+          roi.x,
+          roi.y,
+          'roi',
+        );
+        final decoded = _decodePassInstances(
+          pass,
+          imageWidth: processed.width,
+          imageHeight: processed.height,
+        );
         rawDetectionCount += decoded.rawDetectionCount;
         rawInstances.addAll(decoded.instances);
         passCount++;
         roiPassCount++;
       }
     }
-    if (rawInstances.isEmpty && _enableFullImagePass) {
-      final pass = await _runInferencePass(session, processed, 0, 0, 'full');
-      final decoded = _decodePassInstances(pass);
+    if ((rawInstances.isEmpty || roiBudgetExceeded) &&
+        profile.enableFullImagePass) {
+      final pass =
+          await _runInferencePass(profile, session, processed, 0, 0, 'full');
+      final decoded = _decodePassInstances(
+        pass,
+        imageWidth: processed.width,
+        imageHeight: processed.height,
+      );
       rawDetectionCount += decoded.rawDetectionCount;
       rawInstances.addAll(decoded.instances);
       passCount++;
     }
-    if (_enableTiledInference &&
-        (!_enableFullImagePass ||
-            processed.width > _tileSize ||
-            processed.height > _tileSize)) {
-      for (final y in _tileStarts(processed.height, _tileSize)) {
-        for (final x in _tileStarts(processed.width, _tileSize)) {
-          final tileWidth = math.min(_tileSize, processed.width - x);
-          final tileHeight = math.min(_tileSize, processed.height - y);
+    if (profile.enableTiledInference &&
+        (!profile.enableFullImagePass ||
+            processed.width > profile.tileSize ||
+            processed.height > profile.tileSize)) {
+      for (final y in _tileStarts(
+        processed.height,
+        profile.tileSize,
+        profile.tileOverlap,
+      )) {
+        for (final x in _tileStarts(
+          processed.width,
+          profile.tileSize,
+          profile.tileOverlap,
+        )) {
+          final tileWidth = math.min(profile.tileSize, processed.width - x);
+          final tileHeight = math.min(profile.tileSize, processed.height - y);
           final tile = img.copyCrop(
             processed,
             x: x,
@@ -170,8 +327,13 @@ class OfflineGrainAnalyzer {
             width: tileWidth,
             height: tileHeight,
           );
-          final pass = await _runInferencePass(session, tile, x, y, 'tile');
-          final decoded = _decodePassInstances(pass);
+          final pass =
+              await _runInferencePass(profile, session, tile, x, y, 'tile');
+          final decoded = _decodePassInstances(
+            pass,
+            imageWidth: processed.width,
+            imageHeight: processed.height,
+          );
           rawDetectionCount += decoded.rawDetectionCount;
           rawInstances.addAll(decoded.instances);
           passCount++;
@@ -191,13 +353,16 @@ class OfflineGrainAnalyzer {
         rawInstances: mergedInstances,
         rawDetectionCount: rawDetectionCount,
         passCount: passCount,
-        roiRegionCount: roiRegions.length,
+        roiRegionCount: detectedRoiRegionCount,
+        roiBudgetExceeded: roiBudgetExceeded,
         roiPassCount: roiPassCount,
         tilePassCount: tilePassCount,
         width: processed.width,
         height: processed.height,
         originalWidth: originalWidth,
         originalHeight: originalHeight,
+        profile: profile,
+        fallbackReason: fallbackReason,
         scale: scale,
         referencePixels: referencePixels,
         referenceMm: referenceMm,
@@ -210,22 +375,34 @@ class OfflineGrainAnalyzer {
   }
 
   static _DecodedInferencePass _decodePassInstances(
-      _OfflineInferencePass pass) {
-    final detections = _decodePredictions(pass.predictions);
-    final instances = detections
-        .map(
-          (detection) => _decodeMask(
-            pass.protos,
-            detection,
-            width: pass.width,
-            height: pass.height,
-            paddedSide: pass.paddedSide,
-            offsetX: pass.offsetX,
-            offsetY: pass.offsetY,
-          ),
-        )
-        .whereType<_Instance>()
-        .toList();
+    _OfflineInferencePass pass, {
+    required int imageWidth,
+    required int imageHeight,
+  }) {
+    final detections = _decodePredictions(pass.predictions, pass.profile);
+    final instances = <_Instance>[];
+    for (final detection in detections) {
+      final instance = _decodeMask(
+        pass.protos,
+        detection,
+        width: pass.width,
+        height: pass.height,
+        paddedSide: pass.paddedSide,
+        inputSize: pass.profile.inputSize,
+        offsetX: pass.offsetX,
+        offsetY: pass.offsetY,
+        source: pass.source,
+      );
+      if (instance == null) continue;
+      instances.add(
+        _withPassEdgeMetadata(
+          instance,
+          pass,
+          imageWidth: imageWidth,
+          imageHeight: imageHeight,
+        ),
+      );
+    }
     return _DecodedInferencePass(
       rawDetectionCount: detections.length,
       instances: instances,
@@ -233,6 +410,7 @@ class OfflineGrainAnalyzer {
   }
 
   Future<_OfflineInferencePass> _runInferencePass(
+    _OfflineModelProfile profile,
     OrtSession session,
     img.Image source,
     int offsetX,
@@ -246,25 +424,27 @@ class OfflineGrainAnalyzer {
     img.compositeImage(square, source, dstX: 0, dstY: 0);
     final resized = img.copyResize(
       square,
-      width: _inputSize,
-      height: _inputSize,
+      width: profile.inputSize,
+      height: profile.inputSize,
       interpolation: img.Interpolation.linear,
     );
 
-    final input = Float32List(1 * 3 * _inputSize * _inputSize);
-    const channelSize = _inputSize * _inputSize;
-    for (var y = 0; y < _inputSize; y++) {
-      for (var x = 0; x < _inputSize; x++) {
+    final input = Float32List(1 * 3 * profile.inputSize * profile.inputSize);
+    final channelSize = profile.inputSize * profile.inputSize;
+    for (var y = 0; y < profile.inputSize; y++) {
+      for (var x = 0; x < profile.inputSize; x++) {
         final pixel = resized.getPixel(x, y);
-        final index = y * _inputSize + x;
+        final index = y * profile.inputSize + x;
         input[index] = pixel.r / 255.0;
         input[channelSize + index] = pixel.g / 255.0;
         input[channelSize * 2 + index] = pixel.b / 255.0;
       }
     }
 
-    final inputTensor =
-        await OrtValue.fromList(input, const [1, 3, _inputSize, _inputSize]);
+    final inputTensor = await OrtValue.fromList(
+      input,
+      [1, 3, profile.inputSize, profile.inputSize],
+    );
     final outputs = await session.run({session.inputNames.first: inputTensor});
     try {
       return _OfflineInferencePass(
@@ -280,6 +460,7 @@ class OfflineGrainAnalyzer {
         offsetX: offsetX,
         offsetY: offsetY,
         source: sourceName,
+        profile: profile,
       );
     } finally {
       await inputTensor.dispose();
@@ -402,7 +583,7 @@ class OfflineGrainAnalyzer {
     if (components.isEmpty) return const [];
     return _mergeRoiBoxes(components)
         .where((box) => box.width > 8 && box.height > 8)
-        .take(_roiMaxPasses)
+        .take(_roiOverflowProbePasses)
         .toList();
   }
 
@@ -470,7 +651,8 @@ class OfflineGrainAnalyzer {
     _OfflinePostprocessInput input,
   ) {
     final rawDetectionCount = input.rawDetectionCount;
-    final instances = input.rawInstances;
+    final fallback = _augmentLowRecallInstances(processed, input.rawInstances);
+    final instances = fallback.instances;
     final filtered = _filterAndMeasure(
       instances,
       processed,
@@ -485,13 +667,17 @@ class OfflineGrainAnalyzer {
       referenceY2: input.referenceY2,
     );
     final summary = _summaryFor(filtered.measurements);
-    final overlay = _renderOverlay(processed, filtered);
-    final mask = _renderMask(filtered);
-    final labels = _renderLabels(filtered);
-    final labelMap = _renderLabelMap(filtered);
+    final preview = _previewRenderInput(processed, filtered, input.profile);
+    final overlay = _renderOverlay(preview.rgb, preview.result);
+    final mask = _renderMask(preview.result);
+    final labels = _renderLabels(
+      preview.result,
+      coordinateScaleX: preview.coordinateScaleX,
+      coordinateScaleY: preview.coordinateScaleY,
+    );
+    final labelMap = _renderLabelMap(preview.result);
 
-    final seedCandidateCount =
-        instances.where((instance) => instance.classId == 0).length;
+    final seedCandidateCount = instances.where(_isSeedClassInstance).length;
     final refCandidateCount = instances.length - seedCandidateCount;
     return OfflineAnalyzeResult(
       originalPng: Uint8List(0),
@@ -520,10 +706,19 @@ class OfflineGrainAnalyzer {
         'referenceY2': input.referenceY2 ?? -1,
         'excluded_reference_object_count':
             filtered.excludedReferenceObjectCount,
+        'suggested_reference': filtered.suggestedReference,
       },
       segmentation: {
         'pipeline': 'yolo_sam_onnx',
-        'model': modelAssetPath,
+        'model': input.profile.modelAssetPath,
+        'model_profile': input.profile.name,
+        'model_input_size': input.profile.inputSize,
+        'model_quality': input.profile.isHighQuality ? 'high' : 'safe',
+        'intra_op_threads': input.profile.intraOpThreads,
+        'preview_width': preview.result.width,
+        'preview_height': preview.result.height,
+        'preview_scale': _round(preview.coordinateScaleX, 6),
+        'fallback_reason': input.fallbackReason,
         'refiner': 'disabled',
         'refiner_applied': false,
         'confidence': _confidence,
@@ -531,18 +726,21 @@ class OfflineGrainAnalyzer {
         'max_det': _maxDetections,
         'merged_split_method': 'distance_marker_projection',
         'merged_split_evidence_gate': 'distance_core_or_low_extent',
-        'multi_pass_enabled': _enableRoiPrepass || _enableTiledInference,
+        'multi_pass_enabled': input.profile.enableRoiPrepass ||
+            input.profile.enableTiledInference,
         'multi_pass_count': input.passCount,
-        'roi_prepass_enabled': _enableRoiPrepass,
+        'roi_prepass_enabled': input.profile.enableRoiPrepass,
         'roi_region_count': input.roiRegionCount,
+        'roi_pass_budget': input.profile.roiMaxPasses,
+        'roi_budget_exceeded': input.roiBudgetExceeded,
         'roi_pass_count': input.roiPassCount,
         'roi_detection_side': _roiDetectionSide,
         'roi_padding': _roiPadding,
         'roi_merge_max_side': _roiMergeMaxSide,
-        'tiled_inference': _enableTiledInference,
-        'full_image_pass': _enableFullImagePass,
-        'tile_size': _tileSize,
-        'tile_overlap': _tileOverlap,
+        'tiled_inference': input.profile.enableTiledInference,
+        'full_image_pass': input.profile.enableFullImagePass,
+        'tile_size': input.profile.tileSize,
+        'tile_overlap': input.profile.tileOverlap,
         'tile_pass_count': input.tilePassCount,
         'candidate_count': rawDetectionCount,
         'refined_candidate_count': instances.length,
@@ -554,10 +752,18 @@ class OfflineGrainAnalyzer {
         'mask_filter': {
           'component_count_before': instances.length,
           'component_count_after': filtered.measurements.length,
-          'ignored_ref_count': refCandidateCount,
+          'ignored_ref_count': math.max(
+            0,
+            refCandidateCount - filtered.acceptedRefClassSeedCount,
+          ),
           'excluded_reference_object_count':
               filtered.excludedReferenceObjectCount,
+          'accepted_ref_class_seed_count': filtered.acceptedRefClassSeedCount,
+          'auto_excluded_non_seed_count': filtered.autoExcludedNonSeedCount,
+          'fragment_merge_count': filtered.fragmentMergeCount,
+          'suggested_reference_available': filtered.suggestedReference != null,
         },
+        'classical_fallback': fallback.stats,
         'effective_thresholds': {
           'minArea': _minArea,
           'maxArea': _maxArea,
@@ -576,6 +782,17 @@ class OfflineGrainAnalyzer {
           'mergedSplitWidthRatio': _mergedSplitWidthRatio,
           'mergedSplitMadZ': _mergedSplitMadZ,
           'mergedSplitMaxParts': _mergedSplitMaxParts,
+          'fragmentMerge': _enableFragmentMerge,
+          'fragmentMergeMaxGapRatio': _fragmentMergeMaxGapRatio,
+          'fragmentMergeMaxAreaRatio': _fragmentMergeMaxAreaRatio,
+          'classicalFallback': _enableClassicalFallback,
+          'classicalFallbackMaxYoloCandidates':
+              _classicalFallbackMaxYoloCandidates,
+          'classicalFallbackMinCandidates': _classicalFallbackMinCandidates,
+          'classicalFallbackBrightPercentile':
+              _classicalFallbackBrightPercentile,
+          'classicalFallbackDilateIterations':
+              _classicalFallbackDilateIterations,
           'mergedSplitMethod': 'distance_marker_projection',
           'mergedSplitEvidenceGate': 'distance_core_or_low_extent',
         },
@@ -586,16 +803,19 @@ class OfflineGrainAnalyzer {
     );
   }
 
-  static List<_Detection> _decodePredictions(Float32List prediction) {
-    final candidateCount = prediction.length ~/ _predictionFeatureCount;
-    if (candidateCount <= 0 ||
-        prediction.length % _predictionFeatureCount != 0) {
+  static List<_Detection> _decodePredictions(
+    Float32List prediction,
+    _OfflineModelProfile profile,
+  ) {
+    final featureCount = profile.predictionFeatureCount;
+    final candidateCount = prediction.length ~/ featureCount;
+    if (candidateCount <= 0 || prediction.length % featureCount != 0) {
       return const [];
     }
     final candidateMajor = candidateCount == 300;
     double valueAt(int feature, int candidate) {
       return candidateMajor
-          ? prediction[candidate * _predictionFeatureCount + feature]
+          ? prediction[candidate * featureCount + feature]
           : prediction[feature * candidateCount + candidate];
     }
 
@@ -644,8 +864,10 @@ class OfflineGrainAnalyzer {
     required int width,
     required int height,
     required int paddedSide,
+    required int inputSize,
     int offsetX = 0,
     int offsetY = 0,
+    required String source,
   }) {
     final protoPlaneSize = protos.length ~/ _maskCoefficientCount;
     final protoSize = math.sqrt(protoPlaneSize).round();
@@ -653,15 +875,39 @@ class OfflineGrainAnalyzer {
         protoSize * protoSize * _maskCoefficientCount != protos.length) {
       return null;
     }
-    final scale = paddedSide / _inputSize;
-    final x1 = (detection.x1 * scale).floor().clamp(0, width);
-    final y1 = (detection.y1 * scale).floor().clamp(0, height);
-    final x2 = (detection.x2 * scale).ceil().clamp(0, width);
-    final y2 = (detection.y2 * scale).ceil().clamp(0, height);
+    final scale = paddedSide / inputSize;
+    final boxWidth = math.max(detection.x2 - detection.x1, 1.0);
+    final boxHeight = math.max(detection.y2 - detection.y1, 1.0);
+    final boxAspect = math.max(boxWidth, boxHeight) /
+        math.max(math.min(boxWidth, boxHeight), 1.0);
+    final isLongBox = boxAspect >= _longMaskAspectRatio;
+    final threshold = isLongBox ? _longMaskThreshold : _maskThreshold;
+    final paddingRatio =
+        isLongBox ? _longMaskCropPaddingRatio : _maskCropPaddingRatio;
+    final cropPadding = paddingRatio <= 0
+        ? 0.0
+        : math.max(1.0, math.max(boxWidth, boxHeight) * paddingRatio);
+    final cropX1 = detection.x1 - cropPadding;
+    final cropY1 = detection.y1 - cropPadding;
+    final cropX2 = detection.x2 + cropPadding;
+    final cropY2 = detection.y2 + cropPadding;
+    final x1 = (cropX1 * scale).floor().clamp(0, width);
+    final y1 = (cropY1 * scale).floor().clamp(0, height);
+    final x2 = (cropX2 * scale).ceil().clamp(0, width);
+    final y2 = (cropY2 * scale).ceil().clamp(0, height);
     if (x2 <= x1 || y2 <= y1) return null;
     final maskWidth = x2 - x1;
     final maskHeight = y2 - y1;
     final pixels = Uint8List(maskWidth * maskHeight);
+    final protoX1 =
+        ((cropX1 / inputSize) * protoSize).floor().clamp(0, protoSize);
+    final protoY1 =
+        ((cropY1 / inputSize) * protoSize).floor().clamp(0, protoSize);
+    final protoX2 =
+        ((cropX2 / inputSize) * protoSize).ceil().clamp(0, protoSize);
+    final protoY2 =
+        ((cropY2 / inputSize) * protoSize).ceil().clamp(0, protoSize);
+    if (protoX2 <= protoX1 || protoY2 <= protoY1) return null;
 
     var area = 0;
     for (var y = y1; y < y2; y++) {
@@ -683,13 +929,29 @@ class OfflineGrainAnalyzer {
           final channelOffset = c * protoSize * protoSize;
           final row0 = channelOffset + py0 * protoSize;
           final row1 = channelOffset + py1 * protoSize;
-          final value = protos[row0 + px0] * topLeftWeight +
-              protos[row0 + px1] * topRightWeight +
-              protos[row1 + px0] * bottomLeftWeight +
-              protos[row1 + px1] * bottomRightWeight;
+          final topLeft =
+              px0 >= protoX1 && px0 < protoX2 && py0 >= protoY1 && py0 < protoY2
+                  ? protos[row0 + px0]
+                  : 0.0;
+          final topRight =
+              px1 >= protoX1 && px1 < protoX2 && py0 >= protoY1 && py0 < protoY2
+                  ? protos[row0 + px1]
+                  : 0.0;
+          final bottomLeft =
+              px0 >= protoX1 && px0 < protoX2 && py1 >= protoY1 && py1 < protoY2
+                  ? protos[row1 + px0]
+                  : 0.0;
+          final bottomRight =
+              px1 >= protoX1 && px1 < protoX2 && py1 >= protoY1 && py1 < protoY2
+                  ? protos[row1 + px1]
+                  : 0.0;
+          final value = topLeft * topLeftWeight +
+              topRight * topRightWeight +
+              bottomLeft * bottomLeftWeight +
+              bottomRight * bottomRightWeight;
           logit += detection.coefficients[c] * value;
         }
-        if (_sigmoid(logit) <= 0.5) continue;
+        if (_sigmoid(logit) <= threshold) continue;
         pixels[(y - y1) * maskWidth + (x - x1)] = 1;
         area++;
       }
@@ -703,12 +965,50 @@ class OfflineGrainAnalyzer {
       y: y1 + offsetY,
       width: maskWidth,
       height: maskHeight,
+      source: source,
     );
   }
 
-  static List<int> _tileStarts(int length, int tileSize) {
+  static _Instance _withPassEdgeMetadata(
+    _Instance instance,
+    _OfflineInferencePass pass, {
+    required int imageWidth,
+    required int imageHeight,
+  }) {
+    if (pass.source != 'tile') return instance;
+    final margin =
+        (math.min(pass.width, pass.height) * _edgeMarginRatio).round();
+    if (margin <= 0) return instance;
+    final localX1 = instance.x - pass.offsetX;
+    final localY1 = instance.y - pass.offsetY;
+    final localX2 = localX1 + instance.width;
+    final localY2 = localY1 + instance.height;
+    final touchesInternalEdge = (pass.offsetX > 0 && localX1 <= margin) ||
+        (pass.offsetY > 0 && localY1 <= margin) ||
+        (pass.offsetX + pass.width < imageWidth &&
+            localX2 >= pass.width - margin) ||
+        (pass.offsetY + pass.height < imageHeight &&
+            localY2 >= pass.height - margin);
+    if (!touchesInternalEdge) return instance;
+    return _Instance(
+      mask: instance.mask,
+      confidence: instance.confidence * 0.84,
+      classId: instance.classId,
+      x: instance.x,
+      y: instance.y,
+      width: instance.width,
+      height: instance.height,
+      source: '${instance.source}_edge',
+    );
+  }
+
+  static List<int> _tileStarts(
+    int length,
+    int tileSize,
+    double tileOverlap,
+  ) {
     if (length <= tileSize) return [0];
-    final step = math.max(1, (tileSize * (1.0 - _tileOverlap)).round()).toInt();
+    final step = math.max(1, (tileSize * (1.0 - tileOverlap)).round()).toInt();
     final starts = <int>[];
     for (var value = 0; value <= length - tileSize; value += step) {
       starts.add(value);
@@ -746,6 +1046,379 @@ class OfflineGrainAnalyzer {
       }
     }
     return selected;
+  }
+
+  static _ClassicalFallbackResult _augmentLowRecallInstances(
+    img.Image rgb,
+    List<_Instance> instances,
+  ) {
+    final yoloSeedCount = instances.where(_isSeedClassInstance).length;
+    final stats = <String, dynamic>{
+      'enabled': _enableClassicalFallback,
+      'applied': false,
+      'reason': _enableClassicalFallback ? 'not_evaluated' : 'disabled',
+      'yolo_seed_count': yoloSeedCount,
+      'classical_candidate_count': 0,
+      'dilate_iterations': _classicalFallbackDilateIterations,
+      'added_count': 0,
+    };
+    if (!_enableClassicalFallback) {
+      return _ClassicalFallbackResult(instances, stats);
+    }
+    if (yoloSeedCount > _classicalFallbackMaxYoloCandidates) {
+      stats['reason'] = 'yolo_candidate_count_ok';
+      return _ClassicalFallbackResult(instances, stats);
+    }
+
+    final classical = _lightSeedFallbackInstances(rgb);
+    stats['classical_candidate_count'] = classical.length;
+    if (classical.length < _classicalFallbackMinCandidates) {
+      stats['reason'] = 'not_enough_classical_candidates';
+      return _ClassicalFallbackResult(instances, stats);
+    }
+
+    final merged = [...instances];
+    var added = 0;
+    for (final candidate in classical) {
+      if (added >= _classicalFallbackMaxAdded) break;
+      if (_duplicatesExistingInstance(candidate, merged)) continue;
+      merged.add(candidate);
+      added++;
+    }
+    stats['added_count'] = added;
+    stats['applied'] = added > 0;
+    stats['reason'] = added > 0 ? 'applied' : 'all_classical_duplicates';
+    return _ClassicalFallbackResult(merged, stats);
+  }
+
+  static List<_Instance> _lightSeedFallbackInstances(img.Image rgb) {
+    final width = rgb.width;
+    final height = rgb.height;
+    if (width <= 0 || height <= 0) return const [];
+    final imageArea = math.max(1, width * height);
+    final shortSide = math.max(1, math.min(width, height));
+    final luma = Float64List(width * height);
+    final saturation = Float64List(width * height);
+    final value = Float64List(width * height);
+    for (var y = 0; y < height; y++) {
+      final row = y * width;
+      for (var x = 0; x < width; x++) {
+        final pixel = rgb.getPixel(x, y);
+        final r = pixel.r.toDouble();
+        final g = pixel.g.toDouble();
+        final b = pixel.b.toDouble();
+        final maxChannel = math.max(r, math.max(g, b));
+        final minChannel = math.min(r, math.min(g, b));
+        final index = row + x;
+        luma[index] = _luma(r, g, b);
+        value[index] = maxChannel;
+        saturation[index] =
+            maxChannel <= 1e-9 ? 0 : (maxChannel - minChannel) / maxChannel;
+      }
+    }
+
+    final background =
+        _boxBlur(luma, width, height, _classicalFallbackBackgroundRadius);
+    final localBright = Uint8List(width * height);
+    final hist = Int32List(256);
+    for (var i = 0; i < localBright.length; i++) {
+      final diff = (luma[i] - background[i]).round().clamp(0, 255).toInt();
+      localBright[i] = diff;
+      hist[diff]++;
+    }
+    final percentileValue =
+        _histogramPercentile(hist, _classicalFallbackBrightPercentile);
+    final threshold = math.max(
+      _classicalFallbackMinBrightDelta,
+      percentileValue.toDouble(),
+    );
+    final binary = Uint8List(width * height);
+    for (var i = 0; i < binary.length; i++) {
+      final bright = localBright[i] >= threshold;
+      final coloredSeed = saturation[i] > 35 / 255 &&
+          value[i] > 100 &&
+          localBright[i] >=
+              math.max(4.0, _classicalFallbackMinBrightDelta * 0.75);
+      if (bright || coloredSeed) binary[i] = 1;
+    }
+    final closed = _erode3(_dilate3(binary, width, height), width, height);
+
+    final minArea = math.max(_minArea, (imageArea * 0.00009).round());
+    final maxArea =
+        math.min(_maxArea, math.max(650, (imageArea * 0.0042).round()));
+    final minLength = math.max(7.0, shortSide * 0.016);
+    final minWidth = math.max(2.0, shortSide * 0.0045);
+    final maxWidth = math.max(28.0, shortSide * 0.065);
+    return _connectedLightSeedInstances(
+      closed,
+      width,
+      height,
+      minArea: minArea,
+      maxArea: maxArea,
+      minLength: minLength,
+      minWidth: minWidth,
+      maxWidth: maxWidth,
+    );
+  }
+
+  static Float64List _boxBlur(
+    Float64List values,
+    int width,
+    int height,
+    int radius,
+  ) {
+    final integral = Float64List((width + 1) * (height + 1));
+    for (var y = 0; y < height; y++) {
+      var rowSum = 0.0;
+      final srcRow = y * width;
+      final integralRow = (y + 1) * (width + 1);
+      final previousIntegralRow = y * (width + 1);
+      for (var x = 0; x < width; x++) {
+        rowSum += values[srcRow + x];
+        integral[integralRow + x + 1] =
+            integral[previousIntegralRow + x + 1] + rowSum;
+      }
+    }
+    final output = Float64List(width * height);
+    for (var y = 0; y < height; y++) {
+      final y1 = math.max(0, y - radius);
+      final y2 = math.min(height - 1, y + radius);
+      for (var x = 0; x < width; x++) {
+        final x1 = math.max(0, x - radius);
+        final x2 = math.min(width - 1, x + radius);
+        final a = y1 * (width + 1) + x1;
+        final b = y1 * (width + 1) + x2 + 1;
+        final c = (y2 + 1) * (width + 1) + x1;
+        final d = (y2 + 1) * (width + 1) + x2 + 1;
+        final sum = integral[d] - integral[b] - integral[c] + integral[a];
+        output[y * width + x] = sum / ((x2 - x1 + 1) * (y2 - y1 + 1));
+      }
+    }
+    return output;
+  }
+
+  static int _histogramPercentile(Int32List hist, double percentile) {
+    final total = hist.fold<int>(0, (sum, value) => sum + value);
+    if (total <= 0) return 0;
+    final target = (total * percentile / 100).ceil();
+    var cumulative = 0;
+    for (var i = 0; i < hist.length; i++) {
+      cumulative += hist[i];
+      if (cumulative >= target) return i;
+    }
+    return hist.length - 1;
+  }
+
+  static Uint8List _dilate3(Uint8List binary, int width, int height) {
+    final output = Uint8List(binary.length);
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        var found = false;
+        for (var dy = -1; dy <= 1 && !found; dy++) {
+          final yy = y + dy;
+          if (yy < 0 || yy >= height) continue;
+          final row = yy * width;
+          for (var dx = -1; dx <= 1; dx++) {
+            final xx = x + dx;
+            if (xx < 0 || xx >= width) continue;
+            if (binary[row + xx] != 0) {
+              found = true;
+              break;
+            }
+          }
+        }
+        if (found) output[y * width + x] = 1;
+      }
+    }
+    return output;
+  }
+
+  static Uint8List _erode3(Uint8List binary, int width, int height) {
+    final output = Uint8List(binary.length);
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        var keep = true;
+        for (var dy = -1; dy <= 1 && keep; dy++) {
+          final yy = y + dy;
+          if (yy < 0 || yy >= height) {
+            keep = false;
+            break;
+          }
+          final row = yy * width;
+          for (var dx = -1; dx <= 1; dx++) {
+            final xx = x + dx;
+            if (xx < 0 || xx >= width || binary[row + xx] == 0) {
+              keep = false;
+              break;
+            }
+          }
+        }
+        if (keep) output[y * width + x] = 1;
+      }
+    }
+    return output;
+  }
+
+  static List<_Instance> _connectedLightSeedInstances(
+    Uint8List binary,
+    int width,
+    int height, {
+    required int minArea,
+    required int maxArea,
+    required double minLength,
+    required double minWidth,
+    required double maxWidth,
+  }) {
+    final visited = Uint8List(binary.length);
+    final queue = Int32List(binary.length);
+    final instances = <_Instance>[];
+    for (var start = 0; start < binary.length; start++) {
+      if (binary[start] == 0 || visited[start] != 0) continue;
+      var head = 0;
+      var tail = 0;
+      queue[tail++] = start;
+      visited[start] = 1;
+      var minX = start % width;
+      var maxX = minX;
+      var minY = start ~/ width;
+      var maxY = minY;
+      while (head < tail) {
+        final index = queue[head++];
+        final y = index ~/ width;
+        final x = index - y * width;
+        minX = math.min(minX, x);
+        maxX = math.max(maxX, x);
+        minY = math.min(minY, y);
+        maxY = math.max(maxY, y);
+        for (var dy = -1; dy <= 1; dy++) {
+          final yy = y + dy;
+          if (yy < 0 || yy >= height) continue;
+          final row = yy * width;
+          for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            final xx = x + dx;
+            if (xx < 0 || xx >= width) continue;
+            final ni = row + xx;
+            if (binary[ni] == 0 || visited[ni] != 0) continue;
+            visited[ni] = 1;
+            queue[tail++] = ni;
+          }
+        }
+      }
+      final area = tail;
+      if (area < minArea || area > maxArea) continue;
+      final boxWidth = maxX - minX + 1;
+      final boxHeight = maxY - minY + 1;
+      final mask = Uint8List(boxWidth * boxHeight);
+      for (var i = 0; i < tail; i++) {
+        final index = queue[i];
+        final y = index ~/ width;
+        final x = index - y * width;
+        mask[(y - minY) * boxWidth + (x - minX)] = 1;
+      }
+      final metrics = _maskMetrics(
+        mask,
+        boxWidth,
+        boxHeight,
+        offsetX: minX,
+        offsetY: minY,
+      );
+      if (metrics == null) continue;
+      final length = (metrics['length_px'] as num).toDouble();
+      final seedWidth = (metrics['width_px'] as num).toDouble();
+      final aspect = (metrics['aspect_ratio'] as num).toDouble();
+      final extent = (metrics['extent'] as num).toDouble();
+      final solidity = (metrics['solidity'] as num).toDouble();
+      if (length < minLength ||
+          seedWidth < minWidth ||
+          seedWidth > maxWidth ||
+          aspect < 1.2 ||
+          aspect > _classicalFallbackMaxAspect ||
+          extent < 0.18 ||
+          solidity < 0.45) {
+        continue;
+      }
+      final instance = _Instance(
+        mask: mask,
+        confidence: _classicalFallbackConfidence,
+        classId: 0,
+        x: minX,
+        y: minY,
+        width: boxWidth,
+        height: boxHeight,
+        source: 'classical_light_seed_fallback',
+      );
+      instances.add(
+        _dilateFallbackInstance(
+          instance,
+          imageWidth: width,
+          imageHeight: height,
+          iterations: _classicalFallbackDilateIterations,
+        ),
+      );
+    }
+    return instances;
+  }
+
+  static _Instance _dilateFallbackInstance(
+    _Instance instance, {
+    required int imageWidth,
+    required int imageHeight,
+    required int iterations,
+  }) {
+    if (iterations <= 0) return instance;
+    final padding = iterations;
+    final x = math.max(0, instance.x - padding);
+    final y = math.max(0, instance.y - padding);
+    final right = math.min(imageWidth, instance.x + instance.width + padding);
+    final bottom =
+        math.min(imageHeight, instance.y + instance.height + padding);
+    final width = right - x;
+    final height = bottom - y;
+    if (width <= 0 || height <= 0) return instance;
+
+    var mask = Uint8List(width * height);
+    final offsetX = instance.x - x;
+    final offsetY = instance.y - y;
+    for (var row = 0; row < instance.height; row++) {
+      final srcRow = row * instance.width;
+      final dstRow = (row + offsetY) * width + offsetX;
+      for (var col = 0; col < instance.width; col++) {
+        mask[dstRow + col] = instance.mask[srcRow + col];
+      }
+    }
+    for (var i = 0; i < iterations; i++) {
+      mask = _dilate3(mask, width, height);
+    }
+    return _Instance(
+      mask: mask,
+      confidence: instance.confidence,
+      classId: instance.classId,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      source: instance.source,
+    );
+  }
+
+  static bool _duplicatesExistingInstance(
+    _Instance candidate,
+    List<_Instance> instances,
+  ) {
+    final candidateArea = _instanceArea(candidate);
+    if (candidateArea <= 0) return true;
+    for (final instance in instances) {
+      if (!_instanceBboxIntersects(candidate, instance)) continue;
+      final otherArea = _instanceArea(instance);
+      final inter = _instanceIntersectionArea(candidate, instance);
+      if (inter == 0) continue;
+      final union = candidateArea + otherArea - inter;
+      final iou = inter / math.max(union, 1);
+      final overlap = inter / math.max(math.min(candidateArea, otherArea), 1);
+      if (iou >= 0.30 || overlap >= 0.58) return true;
+    }
+    return false;
   }
 
   static int _instanceArea(_Instance instance) {
@@ -819,7 +1492,7 @@ class OfflineGrainAnalyzer {
     final candidates = <_MeasurementCandidate>[];
     instances.sort((a, b) => b.confidence.compareTo(a.confidence));
     for (final instance in instances) {
-      if (instance.classId != 0) continue;
+      if (!_isMeasurementCandidateInstance(instance)) continue;
       if (processedLine != null &&
           _isReferenceObjectMask(
             instance,
@@ -852,7 +1525,10 @@ class OfflineGrainAnalyzer {
         metrics,
         color,
         imageArea,
+        width,
+        height,
         null,
+        source: instance.source,
       )) {
         continue;
       }
@@ -860,22 +1536,97 @@ class OfflineGrainAnalyzer {
     }
 
     var sizeReference = _sizeReferenceFor(candidates);
+    final fragmentMerge = _mergeFragmentCandidates(
+      candidates,
+      rgb,
+      sizeReference,
+      imageArea,
+      width,
+      height,
+    );
+    sizeReference =
+        _sizeReferenceFor(fragmentMerge.candidates) ?? sizeReference;
     final splitCandidates =
-        _splitMergedCandidates(candidates, rgb, sizeReference);
+        _splitMergedCandidates(fragmentMerge.candidates, rgb, sizeReference);
     sizeReference = _sizeReferenceFor(splitCandidates) ?? sizeReference;
-    final selected = splitCandidates
-        .where(
-          (candidate) => _passesCandidateFilter(
+    final markerReference =
+        sizeReference ?? _sizeReferenceFor(splitCandidates, minCandidates: 3);
+    final suggestedReference = _suggestedReferenceLine(
+      splitCandidates,
+      imageArea,
+      width,
+      height,
+      markerReference,
+      scale,
+    );
+    final satelliteFragmentIndices =
+        _satelliteFragmentIndices(splitCandidates, sizeReference);
+    var autoExcludedNonSeedCount = 0;
+    final selected = <_MeasurementCandidate>[];
+    for (var i = 0; i < splitCandidates.length; i++) {
+      final candidate = splitCandidates[i];
+      final excluded = satelliteFragmentIndices.contains(i) ||
+          _isImplausibleReferenceSeedCandidate(
+            candidate.instance,
+            candidate.metrics,
+            sizeReference,
+          ) ||
+          _isAdaptiveNonSeedArtifact(
+            candidate.metrics,
+            candidate.color,
+            imageArea,
+            width,
+            height,
+            markerReference,
+          ) ||
+          _isTinyDimensionFragment(
+            candidate.instance.confidence,
+            candidate.metrics,
+            sizeReference,
+            source: candidate.instance.source,
+          ) ||
+          _isTileEdgeFragment(
+            candidate.instance.source,
+            candidate.instance.confidence,
+            candidate.metrics,
+            sizeReference,
+          ) ||
+          _looksLikeSeedShadow(
+              candidate.metrics, candidate.color, sizeReference) ||
+          _looksLikeDarkBackgroundArtifact(
+            candidate.instance.confidence,
+            candidate.metrics,
+            candidate.color,
+            sizeReference,
+          );
+      if (excluded) {
+        autoExcludedNonSeedCount++;
+        continue;
+      }
+      if (_passesCandidateFilter(
             candidate.instance.confidence,
             candidate.metrics,
             candidate.color,
             imageArea,
+            width,
+            height,
             sizeReference,
-          ),
-        )
-        .toList()
-      ..sort((a, b) => b.priority.compareTo(a.priority));
+            source: candidate.instance.source,
+          ) &&
+          !_isAdaptiveNonSeedArtifact(
+            candidate.metrics,
+            candidate.color,
+            imageArea,
+            width,
+            height,
+            markerReference,
+          )) {
+        selected.add(candidate);
+      }
+    }
+    selected.sort((a, b) => b.priority.compareTo(a.priority));
 
+    var acceptedRefClassSeedCount = 0;
     for (final candidate in selected) {
       final instance = candidate.instance;
       final available = Uint8List(instance.width * instance.height);
@@ -911,12 +1662,46 @@ class OfflineGrainAnalyzer {
         metrics,
         color,
         imageArea,
+        width,
+        height,
+        sizeReference,
+        source: instance.source,
+      )) {
+        continue;
+      }
+      if (_isAdaptiveNonSeedArtifact(
+        metrics,
+        color,
+        imageArea,
+        width,
+        height,
+        markerReference,
+      )) {
+        autoExcludedNonSeedCount++;
+        continue;
+      }
+      if (_isImplausibleReferenceSeedCandidate(
+        instance,
+        metrics,
         sizeReference,
       )) {
+        autoExcludedNonSeedCount++;
+        continue;
+      }
+      if (_isAvailableSatelliteFragment(
+        metrics,
+        color,
+        measurements,
+        sizeReference,
+      )) {
+        autoExcludedNonSeedCount++;
         continue;
       }
       final area = metrics['area_px'] as int;
       final id = measurements.length + 1;
+      if (_isReferenceClassInstance(instance)) {
+        acceptedRefClassSeedCount++;
+      }
       for (var localY = 0; localY < instance.height; localY++) {
         final globalRow = (instance.y + localY) * width + instance.x;
         final localRow = localY * instance.width;
@@ -940,6 +1725,15 @@ class OfflineGrainAnalyzer {
         'confidence': _round(instance.confidence, 6),
         'class_id': 0,
         'class_name': 'seed',
+        'detected_class_id': instance.classId,
+        'detected_class_name':
+            _isReferenceClassInstance(instance) ? 'Ref' : 'seed',
+        'quality_flags': _measurementQualityFlags(
+          metrics,
+          instance,
+          width,
+          height,
+        ),
       });
     }
     return _FilteredResult(
@@ -949,6 +1743,10 @@ class OfflineGrainAnalyzer {
       width: width,
       height: height,
       excludedReferenceObjectCount: excludedReferenceObjectCount,
+      acceptedRefClassSeedCount: acceptedRefClassSeedCount,
+      autoExcludedNonSeedCount: autoExcludedNonSeedCount,
+      fragmentMergeCount: fragmentMerge.mergeCount,
+      suggestedReference: suggestedReference,
     );
   }
 
@@ -983,25 +1781,68 @@ class OfflineGrainAnalyzer {
     if (points.isEmpty) return null;
     final hull = _convexHull(points);
     final hullArea = math.max(_polygonArea(hull), 1.0);
-    final rectangle = _minimumBoundingRectangle(hull);
+    final feret = _feretShapeMetrics(hull, points);
     final bboxWidth = maxX - minX + 1;
     final bboxHeight = maxY - minY + 1;
     final area = points.length;
+    final solidity = math.min(area / hullArea, 1.0);
     return {
       'area_px': area,
-      'length_px': _round(rectangle.length, 3),
-      'width_px': _round(rectangle.width, 3),
+      'length_px': _round(feret.length, 3),
+      'width_px': _round(feret.width, 3),
       'centroid_x': _round(sumX / area, 3),
       'centroid_y': _round(sumY / area, 3),
       'bbox_x': minX,
       'bbox_y': minY,
       'bbox_w': bboxWidth,
       'bbox_h': bboxHeight,
-      'angle_deg': _round(rectangle.angleDegrees, 3),
-      'solidity': _round(area / hullArea, 6),
+      'angle_deg': _round(feret.angleDegrees, 3),
+      'solidity': _round(solidity, 6),
       'extent': _round(area / math.max(bboxWidth * bboxHeight, 1), 6),
-      'aspect_ratio': _round(rectangle.length / rectangle.width, 6),
+      'aspect_ratio': _round(feret.length / feret.width, 6),
+      'measurement_method': 'smartgrain_feret_chord',
     };
+  }
+
+  static String _measurementQualityFlags(
+    Map<String, dynamic> metrics,
+    _Instance instance,
+    int imageWidth,
+    int imageHeight,
+  ) {
+    final flags = <String>[];
+    if (_isReferenceClassInstance(instance)) {
+      flags.add('model_label_ref_as_seed');
+    }
+    if (instance.confidence < 0.16) {
+      flags.add('low_confidence');
+    }
+    final solidity = (metrics['solidity'] as num?)?.toDouble() ?? 1.0;
+    final extent = (metrics['extent'] as num?)?.toDouble() ?? 1.0;
+    final aspect = (metrics['aspect_ratio'] as num?)?.toDouble() ?? 1.0;
+    final minExtent = aspect >= 3.2 ? 0.24 : (aspect >= 2.2 ? 0.28 : 0.35);
+    if (solidity < 0.72 || extent < minExtent) {
+      flags.add('loose_mask');
+    }
+    if (_isTileEdgeSource(instance.source) &&
+        instance.confidence < 0.16 &&
+        extent < 0.45) {
+      flags.add('partial_tile_mask');
+    }
+    if (aspect > 8.0) {
+      flags.add('extreme_aspect');
+    }
+    final x = (metrics['bbox_x'] as num?)?.toInt() ?? 0;
+    final y = (metrics['bbox_y'] as num?)?.toInt() ?? 0;
+    final width = (metrics['bbox_w'] as num?)?.toInt() ?? 0;
+    final height = (metrics['bbox_h'] as num?)?.toInt() ?? 0;
+    if (x <= 1 ||
+        y <= 1 ||
+        x + width >= imageWidth - 1 ||
+        y + height >= imageHeight - 1) {
+      flags.add('touches_image_edge');
+    }
+    return flags.join(',');
   }
 
   static img.Image _renderOverlay(img.Image rgb, _FilteredResult result) {
@@ -1085,6 +1926,80 @@ class OfflineGrainAnalyzer {
     return labelMap;
   }
 
+  static _PreviewRenderInput _previewRenderInput(
+    img.Image processed,
+    _FilteredResult filtered,
+    _OfflineModelProfile profile,
+  ) {
+    final maxSide = profile.previewMaxSide;
+    final longestSide = math.max(filtered.width, filtered.height);
+    if (maxSide <= 0 || longestSide <= maxSide) {
+      return _PreviewRenderInput(
+        rgb: processed,
+        result: filtered,
+        coordinateScaleX: 1,
+        coordinateScaleY: 1,
+      );
+    }
+    final scale = maxSide / longestSide;
+    final previewWidth = math.max(1, (filtered.width * scale).round());
+    final previewHeight = math.max(1, (filtered.height * scale).round());
+    final resizedRgb = img.copyResize(
+      processed,
+      width: previewWidth,
+      height: previewHeight,
+      interpolation: img.Interpolation.linear,
+    );
+    final resizedLabels = _resizeLabelsNearest(
+      filtered.labels,
+      filtered.width,
+      filtered.height,
+      previewWidth,
+      previewHeight,
+    );
+    return _PreviewRenderInput(
+      rgb: resizedRgb,
+      result: _FilteredResult(
+        labels: resizedLabels,
+        measurements: filtered.measurements,
+        mmPerPixel: filtered.mmPerPixel,
+        width: previewWidth,
+        height: previewHeight,
+        excludedReferenceObjectCount: filtered.excludedReferenceObjectCount,
+        acceptedRefClassSeedCount: filtered.acceptedRefClassSeedCount,
+        autoExcludedNonSeedCount: filtered.autoExcludedNonSeedCount,
+        fragmentMergeCount: filtered.fragmentMergeCount,
+        suggestedReference: filtered.suggestedReference,
+      ),
+      coordinateScaleX: previewWidth / filtered.width,
+      coordinateScaleY: previewHeight / filtered.height,
+    );
+  }
+
+  static Int32List _resizeLabelsNearest(
+    Int32List labels,
+    int sourceWidth,
+    int sourceHeight,
+    int targetWidth,
+    int targetHeight,
+  ) {
+    final resized = Int32List(targetWidth * targetHeight);
+    for (var y = 0; y < targetHeight; y++) {
+      final sourceY = ((y + 0.5) * sourceHeight / targetHeight).floor().clamp(
+            0,
+            sourceHeight - 1,
+          );
+      for (var x = 0; x < targetWidth; x++) {
+        final sourceX = ((x + 0.5) * sourceWidth / targetWidth).floor().clamp(
+              0,
+              sourceWidth - 1,
+            );
+        resized[y * targetWidth + x] = labels[sourceY * sourceWidth + sourceX];
+      }
+    }
+    return resized;
+  }
+
   static Set<int> _outlierIds(List<Map<String, dynamic>> measurements) {
     return {
       for (final measurement in measurements)
@@ -1092,6 +2007,14 @@ class OfflineGrainAnalyzer {
           ((measurement['id'] as num?)?.toInt() ?? -1),
     }..remove(-1);
   }
+
+  static bool _isSeedClassInstance(_Instance instance) => instance.classId == 0;
+
+  static bool _isReferenceClassInstance(_Instance instance) =>
+      instance.classId == 1;
+
+  static bool _isMeasurementCandidateInstance(_Instance instance) =>
+      _isSeedClassInstance(instance) || _isReferenceClassInstance(instance);
 
   static bool _passesConfidenceAwareShapeFilter(
     double confidence,
@@ -1117,8 +2040,11 @@ class OfflineGrainAnalyzer {
     Map<String, dynamic> metrics,
     _MaskColorMetrics color,
     int imageArea,
-    _SizeReference? sizeReference,
-  ) {
+    int imageWidth,
+    int imageHeight,
+    _SizeReference? sizeReference, {
+    String source = '',
+  }) {
     final area = metrics['area_px'] as int;
     final aspect = (metrics['aspect_ratio'] as num).toDouble();
     final solidity = (metrics['solidity'] as num).toDouble();
@@ -1127,16 +2053,289 @@ class OfflineGrainAnalyzer {
     if (aspect > _maxAspectRatio) return false;
     if (solidity < _minSolidity || extent < _minExtent) return false;
     if (!_passesConfidenceAwareShapeFilter(confidence, metrics)) return false;
-    if (_looksLikeLargeSkinObject(area, imageArea, color, sizeReference)) {
+    if (_looksLikeLargeSkinObject(area, imageArea, color, sizeReference) &&
+        !_couldBeReferenceMarkerWithoutSize(metrics, imageArea)) {
+      return false;
+    }
+    if (_isAdaptiveNonSeedArtifact(
+      metrics,
+      color,
+      imageArea,
+      imageWidth,
+      imageHeight,
+      sizeReference,
+    )) {
+      return false;
+    }
+    if (_isTileEdgeFragment(source, confidence, metrics, sizeReference)) {
+      return false;
+    }
+    if (_isTinyDimensionFragment(
+      confidence,
+      metrics,
+      sizeReference,
+      source: source,
+    )) {
+      return false;
+    }
+    if (_looksLikeSeedShadow(metrics, color, sizeReference)) return false;
+    if (_looksLikeDarkBackgroundArtifact(
+      confidence,
+      metrics,
+      color,
+      sizeReference,
+    )) {
       return false;
     }
     if (_isDynamicNonSeedSize(metrics, color, imageArea, sizeReference)) {
+      return false;
+    }
+    if (_isLowConfidenceReferenceFragment(
+      confidence,
+      metrics,
+      sizeReference,
+    )) {
       return false;
     }
     if (_isLowConfidenceOversize(confidence, metrics, sizeReference)) {
       return false;
     }
     return true;
+  }
+
+  static bool _isAdaptiveNonSeedArtifact(
+    Map<String, dynamic> metrics,
+    _MaskColorMetrics color,
+    int imageArea,
+    int imageWidth,
+    int imageHeight,
+    _SizeReference? reference,
+  ) {
+    if (reference == null) return false;
+    if (_isPartialBorderArtifact(metrics, imageWidth, imageHeight, reference)) {
+      return true;
+    }
+    if (_looksLikeReferenceMarker(metrics, imageArea, reference)) {
+      return true;
+    }
+    if (_looksLikeNeutralReferenceFragment(
+      metrics,
+      color,
+      imageArea,
+      reference,
+    )) {
+      return true;
+    }
+    return false;
+  }
+
+  static bool _isPartialBorderArtifact(
+    Map<String, dynamic> metrics,
+    int imageWidth,
+    int imageHeight,
+    _SizeReference reference,
+  ) {
+    final area = (metrics['area_px'] as num).toDouble();
+    if (area >= reference.area * 0.75) return false;
+    final x = (metrics['bbox_x'] as num).toInt();
+    final y = (metrics['bbox_y'] as num).toInt();
+    final width = (metrics['bbox_w'] as num).toInt();
+    final height = (metrics['bbox_h'] as num).toInt();
+    return x <= 1 ||
+        y <= 1 ||
+        x + width >= imageWidth - 1 ||
+        y + height >= imageHeight - 1;
+  }
+
+  static bool _looksLikeReferenceMarker(
+    Map<String, dynamic> metrics,
+    int imageArea,
+    _SizeReference reference,
+  ) {
+    final area = (metrics['area_px'] as num).toDouble();
+    final length = (metrics['length_px'] as num).toDouble();
+    final width = (metrics['width_px'] as num).toDouble();
+    final aspect = (metrics['aspect_ratio'] as num).toDouble();
+    final solidity = (metrics['solidity'] as num).toDouble();
+    final extent = (metrics['extent'] as num).toDouble();
+    final areaRatio = area / math.max(reference.area, 1.0);
+    final lengthRatio = length / math.max(reference.length, 1.0);
+    final widthRatio = width / math.max(reference.width, 1.0);
+    final markerAreaFloor =
+        math.max(reference.areaSplitUpper, reference.area * 2.8);
+    final axesAreLarge =
+        areaRatio >= 3.0 && lengthRatio >= 1.35 && widthRatio >= 1.35;
+    final roundOversize =
+        areaRatio >= 2.8 && aspect <= 1.85 && widthRatio >= 1.65;
+    final roundAndSolid = aspect <= 1.75 && solidity >= 0.88 && extent >= 0.45;
+    final notMostOfImage = area / math.max(imageArea, 1) <= 0.12;
+    return area >= markerAreaFloor &&
+        (axesAreLarge || roundOversize) &&
+        roundAndSolid &&
+        notMostOfImage;
+  }
+
+  static bool _looksLikeNeutralReferenceFragment(
+    Map<String, dynamic> metrics,
+    _MaskColorMetrics color,
+    int imageArea,
+    _SizeReference reference,
+  ) {
+    final area = (metrics['area_px'] as num).toDouble();
+    final length = (metrics['length_px'] as num).toDouble();
+    final width = (metrics['width_px'] as num).toDouble();
+    final aspect = (metrics['aspect_ratio'] as num).toDouble();
+    final solidity = (metrics['solidity'] as num).toDouble();
+    final extent = (metrics['extent'] as num).toDouble();
+    final areaRatio = area / math.max(reference.area, 1.0);
+    final lengthRatio = length / math.max(reference.length, 1.0);
+    final widthRatio = width / math.max(reference.width, 1.0);
+
+    if (area / math.max(imageArea, 1) > 0.12) return false;
+    if (areaRatio < 3.2) return false;
+    if (solidity < 0.82 || extent < 0.48) return false;
+    final neutralSurface = color.neutralRatio >= 0.72 || color.chroma <= 24.0;
+    final brightOrMetal = color.luma >= 135.0 || color.neutralRatio >= 0.92;
+    if (!(neutralSurface && brightOrMetal)) return false;
+
+    final broadFragment =
+        lengthRatio >= 1.75 && widthRatio >= 1.55 && aspect <= 4.2;
+    final roundFragment = widthRatio >= 1.85 && aspect <= 1.55;
+    return broadFragment || roundFragment;
+  }
+
+  static Map<String, dynamic>? _suggestedReferenceLine(
+    List<_MeasurementCandidate> candidates,
+    int imageArea,
+    int imageWidth,
+    int imageHeight,
+    _SizeReference? reference,
+    double scale,
+  ) {
+    if (reference == null) return null;
+    final markerCandidates = candidates
+        .where(
+          (candidate) =>
+              !_isPartialBorderArtifact(
+                candidate.metrics,
+                imageWidth,
+                imageHeight,
+                reference,
+              ) &&
+              _looksLikeReferenceMarker(
+                candidate.metrics,
+                imageArea,
+                reference,
+              ) &&
+              _isSuggestableReferenceMarker(
+                candidate,
+                imageArea,
+              ),
+        )
+        .toList();
+    if (markerCandidates.isEmpty) return null;
+    markerCandidates.sort(
+      (a, b) =>
+          _referenceMarkerPriority(b).compareTo(_referenceMarkerPriority(a)),
+    );
+    return _referenceLineFromCandidate(
+      markerCandidates.first,
+      imageWidth,
+      imageHeight,
+      scale,
+    );
+  }
+
+  static double _referenceMarkerPriority(_MeasurementCandidate candidate) {
+    final area =
+        ((candidate.metrics['area_px'] as num?)?.toDouble() ?? 1).clamp(1, 1e9);
+    final refBonus = _isReferenceClassInstance(candidate.instance) ? 1.0 : 0.0;
+    return refBonus + candidate.instance.confidence + math.log(area) / 20;
+  }
+
+  static bool _isSuggestableReferenceMarker(
+    _MeasurementCandidate candidate,
+    int imageArea,
+  ) {
+    if (_isReferenceClassInstance(candidate.instance)) return true;
+    final area = ((candidate.metrics['area_px'] as num?)?.toDouble() ?? 0.0);
+    if (area / math.max(imageArea, 1) > 0.08) return false;
+    if (candidate.color.neutralRatio >= 0.85 && candidate.color.luma >= 225.0) {
+      return false;
+    }
+    return true;
+  }
+
+  static Map<String, dynamic>? _referenceLineFromCandidate(
+    _MeasurementCandidate candidate,
+    int imageWidth,
+    int imageHeight,
+    double scale,
+  ) {
+    final instance = candidate.instance;
+    final metrics = candidate.metrics;
+    final centerX = (metrics['centroid_x'] as num).toDouble();
+    final centerY = (metrics['centroid_y'] as num).toDouble();
+    var covXx = 0.0;
+    var covXy = 0.0;
+    var covYy = 0.0;
+    var count = 0;
+    for (var localY = 0; localY < instance.height; localY++) {
+      final row = localY * instance.width;
+      for (var localX = 0; localX < instance.width; localX++) {
+        if (instance.mask[row + localX] == 0) continue;
+        final dx = instance.x + localX - centerX;
+        final dy = instance.y + localY - centerY;
+        covXx += dx * dx;
+        covXy += dx * dy;
+        covYy += dy * dy;
+        count++;
+      }
+    }
+    if (count < 2) return null;
+    final angle = 0.5 * math.atan2(2 * covXy, covXx - covYy);
+    var axisX = math.cos(angle);
+    var axisY = math.sin(angle);
+    if (!axisX.isFinite || !axisY.isFinite) {
+      axisX = 1;
+      axisY = 0;
+    }
+    final halfLength =
+        math.max((metrics['length_px'] as num).toDouble(), 2.0) / 2;
+    final maxX = math.max(imageWidth.toDouble() - 1, 0.0);
+    final maxY = math.max(imageHeight.toDouble() - 1, 0.0);
+    final x1 = (centerX - axisX * halfLength).clamp(0.0, maxX).toDouble();
+    final y1 = (centerY - axisY * halfLength).clamp(0.0, maxY).toDouble();
+    final x2 = (centerX + axisX * halfLength).clamp(0.0, maxX).toDouble();
+    final y2 = (centerY + axisY * halfLength).clamp(0.0, maxY).toDouble();
+    final processedPixels = math.sqrt(
+      math.pow(x2 - x1, 2).toDouble() + math.pow(y2 - y1, 2).toDouble(),
+    );
+    if (processedPixels <= 1) return null;
+    final safeScale = scale > 1e-6 ? scale : 1.0;
+    return {
+      'available': true,
+      'source': 'detected_ref',
+      'pixel_space': 'original',
+      'x1': _round(x1 / safeScale, 3),
+      'y1': _round(y1 / safeScale, 3),
+      'x2': _round(x2 / safeScale, 3),
+      'y2': _round(y2 / safeScale, 3),
+      'pixels': _round(processedPixels / safeScale, 3),
+      'processed': {
+        'x1': _round(x1, 3),
+        'y1': _round(y1, 3),
+        'x2': _round(x2, 3),
+        'y2': _round(y2, 3),
+        'pixels': _round(processedPixels, 3),
+      },
+      'confidence': _round(instance.confidence, 6),
+      'class_id': 1,
+      'class_name': 'Ref',
+      'detected_class_id': instance.classId,
+      'detected_class_name':
+          _isReferenceClassInstance(instance) ? 'Ref' : 'seed',
+    };
   }
 
   static bool _looksLikeLargeSkinObject(
@@ -1165,6 +2364,21 @@ class OfflineGrainAnalyzer {
     return false;
   }
 
+  static bool _couldBeReferenceMarkerWithoutSize(
+    Map<String, dynamic> metrics,
+    int imageArea,
+  ) {
+    final area = (metrics['area_px'] as num).toDouble();
+    final aspect = (metrics['aspect_ratio'] as num).toDouble();
+    final solidity = (metrics['solidity'] as num).toDouble();
+    final extent = (metrics['extent'] as num).toDouble();
+    if (area / math.max(imageArea, 1) > 0.12) return false;
+    return area >= math.max(1200.0, imageArea * 0.008) &&
+        aspect <= 1.9 &&
+        solidity >= 0.86 &&
+        extent >= 0.44;
+  }
+
   static bool _isDynamicNonSeedSize(
     Map<String, dynamic> metrics,
     _MaskColorMetrics color,
@@ -1187,15 +2401,344 @@ class OfflineGrainAnalyzer {
     return (metrics['area_px'] as num).toDouble() > reference.area * 1.65;
   }
 
-  static _SizeReference? _sizeReferenceFor(
-    List<_MeasurementCandidate> candidates,
+  static bool _isLowConfidenceReferenceFragment(
+    double confidence,
+    Map<String, dynamic> metrics,
+    _SizeReference? reference,
   ) {
-    if (candidates.length < _adaptiveMinCandidates) return null;
-    var referenceCandidates = candidates
+    if (reference == null || confidence >= 0.24) return false;
+    final area = (metrics['area_px'] as num).toDouble();
+    final length = (metrics['length_px'] as num).toDouble();
+    final width = (metrics['width_px'] as num).toDouble();
+    final aspect = (metrics['aspect_ratio'] as num).toDouble();
+    final refArea = math.max(reference.area, 1.0);
+    final refLength = math.max(reference.length, 1.0);
+    final refWidth = math.max(reference.width, 1.0);
+    if (refLength / refWidth < 1.45) return false;
+    final areaLarge = area >= refArea * 1.32;
+    final axesLarge = length >= refLength * 1.22 && width >= refWidth * 1.18;
+    final roundOversize = aspect <= 1.38 && width >= refWidth * 1.22;
+    return areaLarge && (axesLarge || roundOversize);
+  }
+
+  static bool _looksLikeSeedShadow(
+    Map<String, dynamic> metrics,
+    _MaskColorMetrics color,
+    _SizeReference? reference,
+  ) {
+    if (reference == null) return false;
+    if (reference.chroma < 24.0 && reference.neutralRatio > 0.70) {
+      return false;
+    }
+    final area = (metrics['area_px'] as num).toDouble();
+    final areaRatio = area / math.max(reference.area, 1.0);
+    if (areaRatio < 0.12 || areaRatio > 2.6) return false;
+
+    final lowColor = color.neutralRatio >= 0.86 &&
+        color.chroma <= math.max(18.0, reference.chroma * 0.46);
+    final brighterThanSeed = color.luma >= reference.luma + 24.0;
+    final veryNeutral = color.neutralRatio >= 0.96 && color.chroma <= 14.0;
+    return lowColor && (brighterThanSeed || veryNeutral);
+  }
+
+  static bool _looksLikeDarkBackgroundArtifact(
+    double confidence,
+    Map<String, dynamic> metrics,
+    _MaskColorMetrics color,
+    _SizeReference? reference,
+  ) {
+    if (reference == null) return false;
+    if (reference.luma < 145.0) return false;
+    final areaRatio =
+        (metrics['area_px'] as num).toDouble() / math.max(reference.area, 1.0);
+    if (areaRatio < 0.10 || areaRatio > 2.6) return false;
+
+    final muchDarker =
+        color.luma <= reference.luma - math.max(42.0, reference.luma * 0.24);
+    final woodLike = color.skinRatio >= 0.72 &&
+        color.chroma >= math.max(40.0, reference.chroma * 0.48) &&
+        color.neutralRatio <= 0.28;
+    final lowConfDark = confidence < 0.12 &&
+        color.luma <= reference.luma - 75.0 &&
+        color.neutralRatio <= 0.45;
+    return muchDarker && (woodLike || lowConfDark);
+  }
+
+  static Set<int> _satelliteFragmentIndices(
+    List<_MeasurementCandidate> candidates,
+    _SizeReference? reference,
+  ) {
+    if (reference == null || candidates.length < 2) return <int>{};
+    final refArea = math.max(reference.area, 1.0);
+    final refLength = math.max(reference.length, 1.0);
+    final refWidth = math.max(reference.width, 1.0);
+    final refAspect = refLength / refWidth;
+    if (refAspect >= 2.25) return <int>{};
+    final maxGap = math.max(3.0, refWidth * 0.38);
+    final maxCenterDistance = math.max(refLength * 0.82, refWidth * 2.2);
+    final anchors = <int, _MeasurementCandidate>{};
+    for (var i = 0; i < candidates.length; i++) {
+      if ((candidates[i].metrics['area_px'] as num).toDouble() >=
+          refArea * 0.55) {
+        anchors[i] = candidates[i];
+      }
+    }
+    final result = <int>{};
+    for (var i = 0; i < candidates.length; i++) {
+      final candidate = candidates[i];
+      final area = (candidate.metrics['area_px'] as num).toDouble();
+      final areaRatio = area / refArea;
+      final looksLikeShadow =
+          _looksLikeSeedShadow(candidate.metrics, candidate.color, reference);
+      final tinyFragment = refAspect < 1.65
+          ? areaRatio <= 0.24
+          : areaRatio <= 0.30 &&
+              (((candidate.metrics['width_px'] as num).toDouble() / refWidth) <=
+                      0.55 ||
+                  ((candidate.metrics['length_px'] as num).toDouble() /
+                          refLength) <=
+                      0.72);
+      final smallSuspicious = areaRatio <= 0.40 &&
+          (looksLikeShadow || candidate.instance.confidence < 0.12);
+      if (!(tinyFragment || smallSuspicious)) continue;
+      if ((candidate.metrics['length_px'] as num).toDouble() >
+              refLength * 0.88 &&
+          (candidate.metrics['width_px'] as num).toDouble() > refWidth * 0.75) {
+        continue;
+      }
+      for (final entry in anchors.entries) {
+        if (entry.key == i) continue;
+        final anchorMetrics = entry.value.metrics;
+        final anchorArea = (anchorMetrics['area_px'] as num).toDouble();
+        if (anchorArea < math.max(refArea * 0.55, area * 1.8)) continue;
+        if (_bboxGap(candidate.metrics, anchorMetrics) > maxGap) continue;
+        if (_centerDistance(candidate.metrics, anchorMetrics) >
+            maxCenterDistance) {
+          continue;
+        }
+        if (_combinedBBoxTooLarge(
+          candidate.metrics,
+          anchorMetrics,
+          refLength,
+          refWidth,
+        )) {
+          continue;
+        }
+        result.add(i);
+        break;
+      }
+    }
+    return result;
+  }
+
+  static bool _isAvailableSatelliteFragment(
+    Map<String, dynamic> metrics,
+    _MaskColorMetrics color,
+    List<Map<String, dynamic>> measurements,
+    _SizeReference? reference,
+  ) {
+    if (reference == null || measurements.isEmpty) return false;
+    final refArea = math.max(reference.area, 1.0);
+    final refLength = math.max(reference.length, 1.0);
+    final refWidth = math.max(reference.width, 1.0);
+    if (refLength / refWidth >= 1.65) return false;
+    final areaRatio = (metrics['area_px'] as num).toDouble() / refArea;
+    if (areaRatio > 0.30) return false;
+    if (!_looksLikeSeedShadow(metrics, color, reference) &&
+        (metrics['length_px'] as num).toDouble() > refLength * 0.70) {
+      return false;
+    }
+    final maxGap = math.max(3.0, refWidth * 0.38);
+    final maxCenterDistance = math.max(refLength * 0.82, refWidth * 2.2);
+    for (final measurement in measurements) {
+      final measurementArea =
+          (measurement['area_px'] as num?)?.toDouble() ?? 0.0;
+      if (measurementArea < refArea * 0.55) {
+        continue;
+      }
+      if (_bboxGap(metrics, measurement) <= maxGap &&
+          _centerDistance(metrics, measurement) <= maxCenterDistance) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool _isTileEdgeSource(String source) {
+    final value = source.trim().toLowerCase();
+    return value.contains('tile') && value.contains('edge');
+  }
+
+  static bool _isTileEdgeFragment(
+    String source,
+    double confidence,
+    Map<String, dynamic> metrics,
+    _SizeReference? reference,
+  ) {
+    if (!_isTileEdgeSource(source)) return false;
+    final width = (metrics['width_px'] as num).toDouble();
+    if (reference == null) return confidence < 0.10 && width <= 8.0;
+    final areaRatio =
+        (metrics['area_px'] as num).toDouble() / math.max(reference.area, 1.0);
+    final lengthRatio = (metrics['length_px'] as num).toDouble() /
+        math.max(reference.length, 1.0);
+    final widthRatio = width / math.max(reference.width, 1.0);
+    final refAspect = reference.length / math.max(reference.width, 1.0);
+
+    if (areaRatio <= 0.24 && (widthRatio <= 0.75 || lengthRatio <= 0.90)) {
+      return true;
+    }
+    if (refAspect < 2.35 &&
+        areaRatio <= 0.34 &&
+        widthRatio <= 0.62 &&
+        lengthRatio <= 0.78) {
+      return true;
+    }
+    if (confidence < 0.16 &&
+        areaRatio <= 0.70 &&
+        (widthRatio <= 0.72 || lengthRatio <= 0.82)) {
+      return true;
+    }
+    return false;
+  }
+
+  static bool _isTinyDimensionFragment(
+    double confidence,
+    Map<String, dynamic> metrics,
+    _SizeReference? reference, {
+    String source = '',
+  }) {
+    if (reference == null) return false;
+    final areaRatio =
+        (metrics['area_px'] as num).toDouble() / math.max(reference.area, 1.0);
+    final lengthRatio = (metrics['length_px'] as num).toDouble() /
+        math.max(reference.length, 1.0);
+    final widthRatio = (metrics['width_px'] as num).toDouble() /
+        math.max(reference.width, 1.0);
+    final refAspect = reference.length / math.max(reference.width, 1.0);
+
+    if (refAspect < 1.65) {
+      return areaRatio <= 0.38 && widthRatio <= 0.52 && lengthRatio <= 1.15;
+    }
+
+    if (refAspect < 2.25) {
+      if (areaRatio <= 0.18 && (widthRatio <= 0.72 || lengthRatio <= 0.92)) {
+        return true;
+      }
+      if (areaRatio <= 0.32 && widthRatio <= 0.60 && lengthRatio <= 0.76) {
+        return true;
+      }
+      if (_isTileEdgeSource(source) &&
+          areaRatio <= 0.38 &&
+          (widthRatio <= 0.68 || lengthRatio <= 0.82)) {
+        return true;
+      }
+      return false;
+    }
+
+    // Long crops such as rice have legitimate narrow masks, so only remove
+    // very small, low-confidence stubs that are far below the local size model.
+    if (confidence < 0.14) {
+      return areaRatio <= 0.18 && lengthRatio <= 0.48 && widthRatio <= 0.60;
+    }
+    return areaRatio <= 0.11 && lengthRatio <= 0.38 && widthRatio <= 0.45;
+  }
+
+  static bool _isImplausibleReferenceSeedCandidate(
+    _Instance instance,
+    Map<String, dynamic> metrics,
+    _SizeReference? reference,
+  ) {
+    if (!_isReferenceClassInstance(instance) || reference == null) {
+      return false;
+    }
+    final areaRatio =
+        (metrics['area_px'] as num).toDouble() / math.max(reference.area, 1.0);
+    final lengthRatio = (metrics['length_px'] as num).toDouble() /
+        math.max(reference.length, 1.0);
+    final widthRatio = (metrics['width_px'] as num).toDouble() /
+        math.max(reference.width, 1.0);
+    final refAspect = reference.length / math.max(reference.width, 1.0);
+
+    if (areaRatio < 0.42 || areaRatio > 2.40) return true;
+    if (refAspect >= 1.65) {
+      return lengthRatio < 0.62 || widthRatio < 0.48;
+    }
+    return lengthRatio < 0.55 || widthRatio < 0.55;
+  }
+
+  static double _bboxGap(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+  ) {
+    final ax1 = (a['bbox_x'] as num).toDouble();
+    final ay1 = (a['bbox_y'] as num).toDouble();
+    final ax2 = ax1 + (a['bbox_w'] as num).toDouble();
+    final ay2 = ay1 + (a['bbox_h'] as num).toDouble();
+    final bx1 = (b['bbox_x'] as num).toDouble();
+    final by1 = (b['bbox_y'] as num).toDouble();
+    final bx2 = bx1 + (b['bbox_w'] as num).toDouble();
+    final by2 = by1 + (b['bbox_h'] as num).toDouble();
+    final dx = [bx1 - ax2, ax1 - bx2, 0.0].reduce(math.max);
+    final dy = [by1 - ay2, ay1 - by2, 0.0].reduce(math.max);
+    return math.sqrt(dx * dx + dy * dy);
+  }
+
+  static double _centerDistance(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+  ) {
+    final dx = (a['centroid_x'] as num).toDouble() -
+        (b['centroid_x'] as num).toDouble();
+    final dy = (a['centroid_y'] as num).toDouble() -
+        (b['centroid_y'] as num).toDouble();
+    return math.sqrt(dx * dx + dy * dy);
+  }
+
+  static bool _combinedBBoxTooLarge(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+    double refLength,
+    double refWidth,
+  ) {
+    final x1 = math.min(
+      (a['bbox_x'] as num).toDouble(),
+      (b['bbox_x'] as num).toDouble(),
+    );
+    final y1 = math.min(
+      (a['bbox_y'] as num).toDouble(),
+      (b['bbox_y'] as num).toDouble(),
+    );
+    final x2 = math.max(
+      (a['bbox_x'] as num).toDouble() + (a['bbox_w'] as num).toDouble(),
+      (b['bbox_x'] as num).toDouble() + (b['bbox_w'] as num).toDouble(),
+    );
+    final y2 = math.max(
+      (a['bbox_y'] as num).toDouble() + (a['bbox_h'] as num).toDouble(),
+      (b['bbox_y'] as num).toDouble() + (b['bbox_h'] as num).toDouble(),
+    );
+    final spanX = x2 - x1;
+    final spanY = y2 - y1;
+    final diagonal = math.sqrt(spanX * spanX + spanY * spanY);
+    return diagonal > math.max(refLength * 1.85, refWidth * 3.0);
+  }
+
+  static _SizeReference? _sizeReferenceFor(
+    List<_MeasurementCandidate> candidates, {
+    int minCandidates = _adaptiveMinCandidates,
+  }) {
+    final candidateFloor = math.max(3, minCandidates);
+    if (candidates.length < candidateFloor) return null;
+    final seedCandidates = candidates
+        .where((candidate) => _isSeedClassInstance(candidate.instance))
+        .toList();
+    final referenceSource =
+        seedCandidates.length >= candidateFloor ? seedCandidates : candidates;
+    var referenceCandidates = referenceSource
         .where((candidate) => candidate.color.skinRatio < 0.35)
         .toList();
-    if (referenceCandidates.length < _adaptiveMinCandidates) {
-      referenceCandidates = candidates;
+    if (referenceCandidates.length < candidateFloor) {
+      referenceCandidates = referenceSource;
     }
     final areas = [
       for (final candidate in referenceCandidates)
@@ -1213,14 +2756,31 @@ class OfflineGrainAnalyzer {
       for (final candidate in referenceCandidates)
         (candidate.metrics['aspect_ratio'] as num).toDouble(),
     ];
+    final colorCandidates =
+        candidates.length >= candidateFloor ? candidates : referenceCandidates;
+    final chromas = [
+      for (final candidate in colorCandidates) candidate.color.chroma,
+    ];
+    final neutralRatios = [
+      for (final candidate in colorCandidates) candidate.color.neutralRatio,
+    ];
+    final lumas = [
+      for (final candidate in colorCandidates) candidate.color.luma,
+    ];
     final areaMedian = _median(areas);
     final lengthMedian = _median(lengths);
     final widthMedian = _median(widths);
     final aspectMedian = _median(aspects);
+    final chromaMedian = _median(chromas);
+    final neutralRatioMedian = _median(neutralRatios);
+    final lumaMedian = _median(lumas);
     return _SizeReference(
       area: areaMedian,
       length: lengthMedian,
       width: widthMedian,
+      chroma: chromaMedian,
+      neutralRatio: neutralRatioMedian,
+      luma: lumaMedian,
       splitEnabled: aspectMedian >= 1.75 &&
           _madRatio(areas, areaMedian) <= 0.35 &&
           _madRatio(lengths, lengthMedian) <= 0.25 &&
@@ -1269,6 +2829,248 @@ class OfflineGrainAnalyzer {
     if (values.isEmpty || center <= 1e-9) return 1;
     final deviations = values.map((value) => (value - center).abs()).toList();
     return _median(deviations) / center;
+  }
+
+  static _FragmentMergeResult _mergeFragmentCandidates(
+    List<_MeasurementCandidate> candidates,
+    img.Image rgb,
+    _SizeReference? reference,
+    int imageArea,
+    int imageWidth,
+    int imageHeight,
+  ) {
+    if (!_enableFragmentMerge || reference == null || candidates.length < 2) {
+      return _FragmentMergeResult(candidates, 0);
+    }
+    var pending = [...candidates];
+    var mergeCount = 0;
+    final maxMerges = math.max(1, pending.length ~/ 2);
+    for (var pass = 0; pass < maxMerges; pass++) {
+      ({double score, int i, int j, _MeasurementCandidate candidate})? best;
+      for (var i = 0; i < pending.length - 1; i++) {
+        for (var j = i + 1; j < pending.length; j++) {
+          final candidate = _fragmentMergeCandidate(
+            pending[i],
+            pending[j],
+            rgb,
+            reference,
+            imageArea,
+            imageWidth,
+            imageHeight,
+          );
+          if (candidate == null) continue;
+          if (best == null || candidate.score < best.score) {
+            best = (
+              score: candidate.score,
+              i: i,
+              j: j,
+              candidate: candidate.candidate
+            );
+          }
+        }
+      }
+      if (best == null) break;
+      final next = <_MeasurementCandidate>[];
+      for (var index = 0; index < pending.length; index++) {
+        if (index == best.i || index == best.j) continue;
+        next.add(pending[index]);
+      }
+      next.add(best.candidate);
+      pending = next;
+      mergeCount++;
+    }
+    return _FragmentMergeResult(pending, mergeCount);
+  }
+
+  static ({double score, _MeasurementCandidate candidate})?
+      _fragmentMergeCandidate(
+    _MeasurementCandidate a,
+    _MeasurementCandidate b,
+    img.Image rgb,
+    _SizeReference reference,
+    int imageArea,
+    int imageWidth,
+    int imageHeight,
+  ) {
+    final refArea = math.max(reference.area, 1.0);
+    final refLength = math.max(reference.length, 1.0);
+    final refWidth = math.max(reference.width, 1.0);
+    final refAspect = refLength / refWidth;
+    final gap = _bboxGap(a.metrics, b.metrics);
+    final maxGap = math.max(2.0, refWidth * _fragmentMergeMaxGapRatio);
+    if (gap > maxGap) return null;
+    final centerDistance = _centerDistance(a.metrics, b.metrics);
+    if (centerDistance > math.max(refLength * 0.78, refWidth * 1.80)) {
+      return null;
+    }
+    if (_combinedBBoxTooLarge(a.metrics, b.metrics, refLength, refWidth)) {
+      return null;
+    }
+
+    final aAreaRatio = (a.metrics['area_px'] as num).toDouble() / refArea;
+    final bAreaRatio = (b.metrics['area_px'] as num).toDouble() / refArea;
+    final aLengthRatio = (a.metrics['length_px'] as num).toDouble() / refLength;
+    final bLengthRatio = (b.metrics['length_px'] as num).toDouble() / refLength;
+    final aWidthRatio = (a.metrics['width_px'] as num).toDouble() / refWidth;
+    final bWidthRatio = (b.metrics['width_px'] as num).toDouble() / refWidth;
+    final partialA = aAreaRatio <= 0.68 ||
+        aLengthRatio <= 0.74 ||
+        aWidthRatio <= 0.68 ||
+        a.instance.confidence < 0.12;
+    final partialB = bAreaRatio <= 0.68 ||
+        bLengthRatio <= 0.74 ||
+        bWidthRatio <= 0.68 ||
+        b.instance.confidence < 0.12;
+    if (!(partialA && partialB)) return null;
+    final widthHalfPattern = aWidthRatio <= 0.74 &&
+        bWidthRatio <= 0.74 &&
+        math.max(aLengthRatio, bLengthRatio) <= 1.16;
+    final lengthHalfPattern = aLengthRatio <= 0.74 &&
+        bLengthRatio <= 0.74 &&
+        math.max(aWidthRatio, bWidthRatio) <= 1.16;
+    final compactHalfPattern = aAreaRatio <= 0.58 &&
+        bAreaRatio <= 0.58 &&
+        math.max(aLengthRatio, bLengthRatio) <= 1.05 &&
+        math.max(aWidthRatio, bWidthRatio) <= 1.05;
+    if (!(widthHalfPattern || lengthHalfPattern || compactHalfPattern)) {
+      return null;
+    }
+    if (aAreaRatio + bAreaRatio > _fragmentMergeMaxAreaRatio) return null;
+    if (math.max(aAreaRatio, bAreaRatio) > 1.08 &&
+        math.min(aAreaRatio, bAreaRatio) > 0.38) {
+      return null;
+    }
+    if (refAspect >= 1.65 && _axisSimilarity(a.metrics, b.metrics) < 0.72) {
+      return null;
+    }
+
+    final merged = _unionInstances(a.instance, b.instance);
+    final metrics = _maskMetrics(
+      merged.mask,
+      merged.width,
+      merged.height,
+      offsetX: merged.x,
+      offsetY: merged.y,
+    );
+    if (metrics == null) return null;
+    final color = _maskColorMetrics(
+      rgb,
+      merged.mask,
+      merged.width,
+      merged.height,
+      offsetX: merged.x,
+      offsetY: merged.y,
+    );
+    final mergedAreaRatio = (metrics['area_px'] as num).toDouble() / refArea;
+    final mergedLengthRatio =
+        (metrics['length_px'] as num).toDouble() / refLength;
+    final mergedWidthRatio = (metrics['width_px'] as num).toDouble() / refWidth;
+    if (mergedAreaRatio < _fragmentMergeMinAreaRatio ||
+        mergedAreaRatio > _fragmentMergeMaxAreaRatio) {
+      return null;
+    }
+    if (mergedLengthRatio > _fragmentMergeMaxLengthRatio ||
+        mergedWidthRatio > _fragmentMergeMaxWidthRatio ||
+        mergedLengthRatio < 0.52 ||
+        mergedWidthRatio < 0.42) {
+      return null;
+    }
+    final mergedAspect = (metrics['aspect_ratio'] as num).toDouble();
+    if (refAspect >= 1.65) {
+      if (mergedAspect < math.max(1.18, refAspect * 0.48) ||
+          mergedAspect > refAspect * 1.75) {
+        return null;
+      }
+    } else if (mergedAspect > 2.35) {
+      return null;
+    }
+    final confidence =
+        math.max(a.instance.confidence, b.instance.confidence) * 0.995;
+    if (!_passesCandidateFilter(
+      confidence,
+      metrics,
+      color,
+      imageArea,
+      imageWidth,
+      imageHeight,
+      reference,
+      source: 'fragment_merge',
+    )) {
+      return null;
+    }
+    final score = (mergedAreaRatio - 1).abs() +
+        (mergedLengthRatio - 1).abs() * 0.65 +
+        (mergedWidthRatio - 1).abs() * 0.65 +
+        gap / math.max(refWidth, 1.0) * 0.45;
+    return (
+      score: score,
+      candidate: _MeasurementCandidate(
+        _Instance(
+          mask: merged.mask,
+          confidence: confidence,
+          classId: 0,
+          x: merged.x,
+          y: merged.y,
+          width: merged.width,
+          height: merged.height,
+          source: 'fragment_merge',
+        ),
+        metrics,
+        color,
+      ),
+    );
+  }
+
+  static _Instance _unionInstances(_Instance a, _Instance b) {
+    final x = math.min(a.x, b.x);
+    final y = math.min(a.y, b.y);
+    final right = math.max(a.x + a.width, b.x + b.width);
+    final bottom = math.max(a.y + a.height, b.y + b.height);
+    final width = right - x;
+    final height = bottom - y;
+    final mask = Uint8List(width * height);
+    _copyIntoUnionMask(mask, width, x, y, a);
+    _copyIntoUnionMask(mask, width, x, y, b);
+    return _Instance(
+      mask: mask,
+      confidence: math.max(a.confidence, b.confidence),
+      classId: 0,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      source: 'fragment_merge',
+    );
+  }
+
+  static void _copyIntoUnionMask(
+    Uint8List target,
+    int targetWidth,
+    int targetX,
+    int targetY,
+    _Instance source,
+  ) {
+    for (var localY = 0; localY < source.height; localY++) {
+      final sourceRow = localY * source.width;
+      final targetRow =
+          (source.y - targetY + localY) * targetWidth + (source.x - targetX);
+      for (var localX = 0; localX < source.width; localX++) {
+        if (source.mask[sourceRow + localX] != 0) {
+          target[targetRow + localX] = 1;
+        }
+      }
+    }
+  }
+
+  static double _axisSimilarity(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+  ) {
+    final aAngle = ((a['angle_deg'] as num?)?.toDouble() ?? 0) * math.pi / 180;
+    final bAngle = ((b['angle_deg'] as num?)?.toDouble() ?? 0) * math.pi / 180;
+    final dot = math.cos(aAngle) * math.cos(bAngle) +
+        math.sin(aAngle) * math.sin(bAngle);
+    return dot.abs();
   }
 
   static List<_MeasurementCandidate> _splitMergedCandidates(
@@ -1350,6 +3152,7 @@ class OfflineGrainAnalyzer {
               y: part.y,
               width: part.width,
               height: part.height,
+              source: '${part.source}_split',
             ),
           );
         }
@@ -1846,6 +3649,8 @@ class OfflineGrainAnalyzer {
     var count = 0;
     var skinCount = 0;
     var lumaSum = 0.0;
+    var chromaSum = 0.0;
+    var neutralCount = 0;
     for (var y = 0; y < height; y++) {
       final globalY = y + offsetY;
       if (globalY < 0 || globalY >= rgb.height) continue;
@@ -1857,15 +3662,29 @@ class OfflineGrainAnalyzer {
         final r = pixel.r.toDouble();
         final g = pixel.g.toDouble();
         final b = pixel.b.toDouble();
+        final maxChannel = math.max(r, math.max(g, b));
+        final minChannel = math.min(r, math.min(g, b));
+        final chroma = maxChannel - minChannel;
         count++;
         lumaSum += 0.299 * r + 0.587 * g + 0.114 * b;
+        chromaSum += chroma;
+        if (chroma < 28.0) neutralCount++;
         if (_isSkinLikePixel(r, g, b)) skinCount++;
       }
     }
-    if (count == 0) return const _MaskColorMetrics(skinRatio: 0, luma: 0);
+    if (count == 0) {
+      return const _MaskColorMetrics(
+        skinRatio: 0,
+        luma: 0,
+        chroma: 0,
+        neutralRatio: 0,
+      );
+    }
     return _MaskColorMetrics(
       skinRatio: skinCount / count,
       luma: lumaSum / count,
+      chroma: chromaSum / count,
+      neutralRatio: neutralCount / count,
     );
   }
 
@@ -1956,7 +3775,11 @@ class OfflineGrainAnalyzer {
     );
   }
 
-  static img.Image _renderLabels(_FilteredResult result) {
+  static img.Image _renderLabels(
+    _FilteredResult result, {
+    double coordinateScaleX = 1,
+    double coordinateScaleY = 1,
+  }) {
     const palette = [
       [45, 108, 191],
       [219, 87, 86],
@@ -1982,35 +3805,135 @@ class OfflineGrainAnalyzer {
     }
     for (final measurement in result.measurements) {
       final id = (measurement['id'] as num).toInt();
-      final centroidX = (measurement['centroid_x'] as num).round();
-      final centroidY = (measurement['centroid_y'] as num).round();
+      final centroidX =
+          ((measurement['centroid_x'] as num).toDouble() * coordinateScaleX)
+              .round();
+      final centroidY =
+          ((measurement['centroid_y'] as num).toDouble() * coordinateScaleY)
+              .round();
       _drawReadableId(labelsImage, id, centroidX, centroidY);
     }
     return labelsImage;
   }
 
-  Future<OrtSession> _loadSession() async {
+  Future<List<_OfflineModelProfile>> _choosePreferredProfiles() async {
+    if (!Platform.isAndroid) return const [_safeModelProfile];
+    final memoryInfo = await _readDeviceMemoryInfo();
+    if (memoryInfo?.canUseFastHighQualityModel == true) {
+      return const [
+        _fastHighQualityModelProfile,
+        _safeModelProfile,
+      ];
+    }
+    return const [_safeModelProfile];
+  }
+
+  Future<_DeviceMemoryInfo?> _readDeviceMemoryInfo() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final result = await _deviceMemoryChannel
+          .invokeMethod<Map<dynamic, dynamic>>('getMemoryInfo');
+      if (result == null) return null;
+      return _DeviceMemoryInfo.fromMap(result);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _isResourceError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('memory') ||
+        message.contains('oom') ||
+        message.contains('outofmemory') ||
+        message.contains('failed to allocate') ||
+        message.contains('bad_alloc') ||
+        message.contains('allocation') ||
+        message.contains('arena');
+  }
+
+  static bool _isModelLoadError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('invalid_graph') ||
+        message.contains('invalid graph') ||
+        message.contains('failed to load') ||
+        message.contains('no such file') ||
+        message.contains('unsupported') ||
+        message.contains('not implemented') ||
+        message.contains('create session');
+  }
+
+  static bool _canFallbackFromProfile(
+    _OfflineModelProfile profile,
+    Object error,
+  ) {
+    if (profile.allowZeroCountFallback) return true;
+    return profile.isHighQuality && _isResourceError(error);
+  }
+
+  static bool _shouldRetryZeroDetection(OfflineAnalyzeResult result) {
+    final count = (result.summary['count'] as num?)?.toInt() ?? 0;
+    final candidates =
+        (result.segmentation['candidate_count'] as num?)?.toInt() ?? 0;
+    return count == 0 && candidates == 0;
+  }
+
+  static String _profileFallbackReason(
+    _OfflineModelProfile profile,
+    Object error,
+  ) {
+    if (_isResourceError(error)) return _resourceFallbackReason(error);
+    if (_isModelLoadError(error)) return 'fast_model_unavailable';
+    if (profile.allowZeroCountFallback) return 'fast_model_error';
+    return _resourceFallbackReason(error);
+  }
+
+  static String _profileFallbackMessage(
+    _OfflineModelProfile profile,
+    Object error,
+  ) {
+    if (_isResourceError(error)) {
+      return 'Thiết bị không đủ tài nguyên cho 1024, chuyển sang 640 an toàn';
+    }
+    if (profile.allowZeroCountFallback) {
+      return 'Model 1024 tối ưu không khả dụng, chuyển sang 640 an toàn';
+    }
+    return 'Chuyển sang chế độ nhận dạng an toàn';
+  }
+
+  static String _resourceFallbackReason(Object error) {
+    final message = error.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (message.isEmpty) return 'resource_error';
+    return message.length <= 180 ? message : '${message.substring(0, 180)}...';
+  }
+
+  Future<OrtSession> _loadSession(_OfflineModelProfile profile) async {
     final existing = _session;
-    if (existing != null) return existing;
+    if (existing != null &&
+        _sessionProfile?.modelAssetPath == profile.modelAssetPath) {
+      return existing;
+    }
+    if (existing != null) await close();
     final options = Platform.isAndroid
         ? OrtSessionOptions(
             providers: const [OrtProvider.CPU],
-            intraOpNumThreads: 1,
+            intraOpNumThreads: profile.intraOpThreads,
             interOpNumThreads: 1,
             useArena: false,
           )
         : null;
     final loaded = await OnnxRuntime().createSessionFromAsset(
-      modelAssetPath,
+      profile.modelAssetPath,
       options: options,
     );
     _session = loaded;
+    _sessionProfile = profile;
     return loaded;
   }
 
   Future<void> close() async {
     final session = _session;
     _session = null;
+    _sessionProfile = null;
     if (session != null) await session.close();
   }
 }
@@ -2064,42 +3987,72 @@ double _polygonArea(List<_Point> points) {
   return sum.abs() / 2;
 }
 
-_RectangleMetrics _minimumBoundingRectangle(List<_Point> hull) {
+double _perpendicularChordWidth(
+  List<_Point> points,
+  double axisX,
+  double axisY,
+) {
+  if (points.length < 2) return 1.0;
+  final normalX = -axisY;
+  final normalY = axisX;
+  final axisProjections = <double>[];
+  final normalProjections = <double>[];
+  var axisMin = double.infinity;
+  for (final point in points) {
+    final axisProjection = point.x * axisX + point.y * axisY;
+    axisProjections.add(axisProjection);
+    normalProjections.add(point.x * normalX + point.y * normalY);
+    axisMin = math.min(axisMin, axisProjection);
+  }
+
+  var bestWidth = 0.0;
+  for (final offset in const [0.0, 0.5]) {
+    final spans = <int, _ProjectionSpan>{};
+    for (var i = 0; i < points.length; i++) {
+      final bucket = (axisProjections[i] - axisMin + offset).floor();
+      spans.putIfAbsent(bucket, _ProjectionSpan.new).add(normalProjections[i]);
+    }
+    for (final span in spans.values) {
+      if (span.count >= 2) {
+        bestWidth = math.max(bestWidth, span.maxValue - span.minValue);
+      }
+    }
+  }
+  return math.max(bestWidth, 1.0);
+}
+
+_FeretMetrics _feretShapeMetrics(List<_Point> hull, List<_Point> widthPoints) {
   if (hull.length < 2) {
-    return const _RectangleMetrics(length: 1, width: 1, angleDegrees: 0);
+    return const _FeretMetrics(length: 1, width: 1, angleDegrees: 0);
   }
-  var bestArea = double.infinity;
-  var best = const _RectangleMetrics(length: 1, width: 1, angleDegrees: 0);
+  var bestDistanceSquared = 0.0;
+  var start = hull.first;
+  var end = hull.last;
   for (var i = 0; i < hull.length; i++) {
-    final next = hull[(i + 1) % hull.length];
-    final angle = math.atan2(next.y - hull[i].y, next.x - hull[i].x);
-    final cosA = math.cos(angle);
-    final sinA = math.sin(angle);
-    var minX = double.infinity;
-    var maxX = double.negativeInfinity;
-    var minY = double.infinity;
-    var maxY = double.negativeInfinity;
-    for (final point in hull) {
-      final rx = point.x * cosA + point.y * sinA;
-      final ry = -point.x * sinA + point.y * cosA;
-      minX = math.min(minX, rx);
-      maxX = math.max(maxX, rx);
-      minY = math.min(minY, ry);
-      maxY = math.max(maxY, ry);
-    }
-    final rectWidth = math.max(maxX - minX, 1.0);
-    final rectHeight = math.max(maxY - minY, 1.0);
-    final area = rectWidth * rectHeight;
-    if (area < bestArea) {
-      bestArea = area;
-      best = _RectangleMetrics(
-        length: math.max(rectWidth, rectHeight),
-        width: math.min(rectWidth, rectHeight),
-        angleDegrees: angle * 180 / math.pi,
-      );
+    for (var j = i + 1; j < hull.length; j++) {
+      final dx = hull[j].x - hull[i].x;
+      final dy = hull[j].y - hull[i].y;
+      final distanceSquared = dx * dx + dy * dy;
+      if (distanceSquared > bestDistanceSquared) {
+        bestDistanceSquared = distanceSquared;
+        start = hull[i];
+        end = hull[j];
+      }
     }
   }
-  return best;
+  final rawLength = math.sqrt(bestDistanceSquared);
+  final length = math.max(rawLength, 1.0);
+  if (length <= 1e-9) {
+    return const _FeretMetrics(length: 1, width: 1, angleDegrees: 0);
+  }
+  final axisX = (end.x - start.x) / length;
+  final axisY = (end.y - start.y) / length;
+  final width = _perpendicularChordWidth(widthPoints, axisX, axisY);
+  return _FeretMetrics(
+    length: length,
+    width: width,
+    angleDegrees: math.atan2(axisY, axisX) * 180 / math.pi,
+  );
 }
 
 double _cross(_Point origin, _Point a, _Point b) =>
@@ -2174,6 +4127,7 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
         'min_metrics': _qcMinOutlierMetrics,
         'status': 'ok',
       },
+      'quality': _qualitySummary(const []),
     };
   }
   final qcThreshold = _qcMadZThresholdFor(measurements);
@@ -2264,6 +4218,43 @@ Map<String, dynamic> _summaryFor(List<Map<String, dynamic>> measurements) {
           ? 'review_required'
           : (outliers.isNotEmpty ? 'suspects_flagged' : 'ok'),
     },
+    'quality': _qualitySummary(measurements),
+  };
+}
+
+Map<String, dynamic> _qualitySummary(List<Map<String, dynamic>> measurements) {
+  final flagCounts = <String, int>{};
+  const problemFlags = {
+    'loose_mask',
+    'touches_image_edge',
+    'extreme_aspect',
+    'partial_tile_mask',
+  };
+  var problemCount = 0;
+  for (final measurement in measurements) {
+    final flags = (measurement['quality_flags']?.toString() ?? '')
+        .split(',')
+        .map((flag) => flag.trim())
+        .where((flag) => flag.isNotEmpty)
+        .toSet();
+    if (flags.any(problemFlags.contains)) {
+      problemCount++;
+    }
+    for (final flag in flags) {
+      flagCounts[flag] = (flagCounts[flag] ?? 0) + 1;
+    }
+  }
+  final labelConfusionCount = flagCounts['model_label_ref_as_seed'] ?? 0;
+  final count = measurements.length;
+  return {
+    'flag_counts': flagCounts,
+    'problem_count': problemCount,
+    'problem_ratio': count == 0 ? 0 : _round(problemCount / count, 6),
+    'label_confusion_count': labelConfusionCount,
+    'label_confusion_ratio':
+        count == 0 ? 0 : _round(labelConfusionCount / count, 6),
+    'review_required': problemCount > 0,
+    'status': problemCount > 0 ? 'review_required' : 'ok',
   };
 }
 
@@ -2332,6 +4323,96 @@ double _percentile(List<double> sortedValues, double fraction) {
   return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
 }
 
+class _OfflineModelProfile {
+  final String name;
+  final String modelAssetPath;
+  final int inputSize;
+  final int protoSize;
+  final bool enableRoiPrepass;
+  final bool enableFullImagePass;
+  final bool enableTiledInference;
+  final int tileSize;
+  final double tileOverlap;
+  final int roiMaxPasses;
+  final bool allowZeroCountFallback;
+  final int previewMaxSide;
+  final int intraOpThreads;
+
+  const _OfflineModelProfile({
+    required this.name,
+    required this.modelAssetPath,
+    required this.inputSize,
+    required this.protoSize,
+    required this.enableRoiPrepass,
+    required this.enableFullImagePass,
+    required this.enableTiledInference,
+    required this.tileSize,
+    required this.tileOverlap,
+    required this.roiMaxPasses,
+    this.allowZeroCountFallback = false,
+    required this.previewMaxSide,
+    required this.intraOpThreads,
+  });
+
+  int get predictionFeatureCount =>
+      4 +
+      OfflineGrainAnalyzer._classCount +
+      OfflineGrainAnalyzer._maskCoefficientCount;
+
+  bool get isHighQuality => inputSize >= 1024;
+}
+
+class _PreviewRenderInput {
+  final img.Image rgb;
+  final _FilteredResult result;
+  final double coordinateScaleX;
+  final double coordinateScaleY;
+
+  const _PreviewRenderInput({
+    required this.rgb,
+    required this.result,
+    required this.coordinateScaleX,
+    required this.coordinateScaleY,
+  });
+}
+
+class _DeviceMemoryInfo {
+  final bool lowMemory;
+  final int availableMb;
+  final int thresholdMb;
+  final int memoryClassMb;
+  final int largeMemoryClassMb;
+  final bool lowRamDevice;
+
+  const _DeviceMemoryInfo({
+    required this.lowMemory,
+    required this.availableMb,
+    required this.thresholdMb,
+    required this.memoryClassMb,
+    required this.largeMemoryClassMb,
+    required this.lowRamDevice,
+  });
+
+  factory _DeviceMemoryInfo.fromMap(Map<dynamic, dynamic> map) {
+    int intValue(String key) => ((map[key] as num?) ?? 0).round();
+    return _DeviceMemoryInfo(
+      lowMemory: map['lowMemory'] == true,
+      availableMb: intValue('availableMb'),
+      thresholdMb: intValue('thresholdMb'),
+      memoryClassMb: intValue('memoryClassMb'),
+      largeMemoryClassMb: intValue('largeMemoryClassMb'),
+      lowRamDevice: map['lowRamDevice'] == true,
+    );
+  }
+
+  bool get canUseFastHighQualityModel =>
+      !lowMemory &&
+      !lowRamDevice &&
+      largeMemoryClassMb >=
+          OfflineGrainAnalyzer._minFastHighQualityLargeHeapMb &&
+      availableMb >= OfflineGrainAnalyzer._minFastHighQualityAvailableMb;
+}
+
 class _Detection {
   final double score;
   final int classId;
@@ -2360,6 +4441,7 @@ class _Instance {
   final int y;
   final int width;
   final int height;
+  final String source;
 
   const _Instance({
     required this.mask,
@@ -2369,6 +4451,7 @@ class _Instance {
     required this.y,
     required this.width,
     required this.height,
+    required this.source,
   });
 
   bool contains(int globalX, int globalY) {
@@ -2396,13 +4479,24 @@ class _MeasurementCandidate {
   }
 }
 
+class _FragmentMergeResult {
+  final List<_MeasurementCandidate> candidates;
+  final int mergeCount;
+
+  const _FragmentMergeResult(this.candidates, this.mergeCount);
+}
+
 class _MaskColorMetrics {
   final double skinRatio;
   final double luma;
+  final double chroma;
+  final double neutralRatio;
 
   const _MaskColorMetrics({
     required this.skinRatio,
     required this.luma,
+    required this.chroma,
+    required this.neutralRatio,
   });
 }
 
@@ -2410,6 +4504,9 @@ class _SizeReference {
   final double area;
   final double length;
   final double width;
+  final double chroma;
+  final double neutralRatio;
+  final double luma;
   final bool splitEnabled;
   final double areaSplitUpper;
   final double lengthSplitUpper;
@@ -2420,6 +4517,9 @@ class _SizeReference {
     required this.area,
     required this.length,
     required this.width,
+    required this.chroma,
+    required this.neutralRatio,
+    required this.luma,
     required this.splitEnabled,
     required this.areaSplitUpper,
     required this.lengthSplitUpper,
@@ -2450,16 +4550,28 @@ class _Point {
   const _Point(this.x, this.y);
 }
 
-class _RectangleMetrics {
+class _FeretMetrics {
   final double length;
   final double width;
   final double angleDegrees;
 
-  const _RectangleMetrics({
+  const _FeretMetrics({
     required this.length,
     required this.width,
     required this.angleDegrees,
   });
+}
+
+class _ProjectionSpan {
+  var minValue = double.infinity;
+  var maxValue = double.negativeInfinity;
+  var count = 0;
+
+  void add(double value) {
+    minValue = math.min(minValue, value);
+    maxValue = math.max(maxValue, value);
+    count += 1;
+  }
 }
 
 class _FilteredResult {
@@ -2469,6 +4581,10 @@ class _FilteredResult {
   final int width;
   final int height;
   final int excludedReferenceObjectCount;
+  final int acceptedRefClassSeedCount;
+  final int autoExcludedNonSeedCount;
+  final int fragmentMergeCount;
+  final Map<String, dynamic>? suggestedReference;
 
   const _FilteredResult({
     required this.labels,
@@ -2477,6 +4593,10 @@ class _FilteredResult {
     required this.width,
     required this.height,
     required this.excludedReferenceObjectCount,
+    required this.acceptedRefClassSeedCount,
+    required this.autoExcludedNonSeedCount,
+    required this.fragmentMergeCount,
+    required this.suggestedReference,
   });
 }
 
@@ -2485,12 +4605,15 @@ class _OfflinePostprocessInput {
   final int rawDetectionCount;
   final int passCount;
   final int roiRegionCount;
+  final bool roiBudgetExceeded;
   final int roiPassCount;
   final int tilePassCount;
   final int width;
   final int height;
   final int originalWidth;
   final int originalHeight;
+  final _OfflineModelProfile profile;
+  final String? fallbackReason;
   final double scale;
   final double? referencePixels;
   final double? referenceMm;
@@ -2504,12 +4627,15 @@ class _OfflinePostprocessInput {
     required this.rawDetectionCount,
     required this.passCount,
     required this.roiRegionCount,
+    required this.roiBudgetExceeded,
     required this.roiPassCount,
     required this.tilePassCount,
     required this.width,
     required this.height,
     required this.originalWidth,
     required this.originalHeight,
+    required this.profile,
+    required this.fallbackReason,
     required this.scale,
     required this.referencePixels,
     required this.referenceMm,
@@ -2529,6 +4655,7 @@ class _OfflineInferencePass {
   final int offsetX;
   final int offsetY;
   final String source;
+  final _OfflineModelProfile profile;
 
   const _OfflineInferencePass({
     required this.predictions,
@@ -2539,6 +4666,7 @@ class _OfflineInferencePass {
     required this.offsetX,
     required this.offsetY,
     required this.source,
+    required this.profile,
   });
 }
 
@@ -2550,6 +4678,13 @@ class _DecodedInferencePass {
     required this.rawDetectionCount,
     required this.instances,
   });
+}
+
+class _ClassicalFallbackResult {
+  final List<_Instance> instances;
+  final Map<String, dynamic> stats;
+
+  const _ClassicalFallbackResult(this.instances, this.stats);
 }
 
 class _RoiBox {
@@ -2690,9 +4825,13 @@ String _measurementsCsv(List<Map<String, dynamic>> measurements) {
     'solidity',
     'extent',
     'aspect_ratio',
+    'measurement_method',
     'confidence',
     'class_id',
     'class_name',
+    'detected_class_id',
+    'detected_class_name',
+    'quality_flags',
     'qc_outlier',
     'qc_reason',
   ];
