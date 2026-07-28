@@ -35,27 +35,39 @@ const PREVIEW_MODES = [
 
 const CALIBRATION_GUIDE_SLIDES = [
   {
-    title: "1. Upload ảnh hạt và vật mốc",
+    title: "1. Import ảnh hạt và vật Ref",
+    titleEn: "1. Import the grain and Ref image",
     description:
-      "Chọn hoặc chụp ảnh có cả hạt cần đo và vật mốc có kích thước thật đã biết.",
+      "Chọn hoặc chụp ảnh có cả hạt cần đo và vật Ref có kích thước thật đã biết, sau đó chạy nhận dạng.",
+    descriptionEn:
+      "Choose or capture an image containing the grains and a Ref object of known size, then run detection.",
     image: "/images/calibration_guide_1.webp",
   },
   {
-    title: "2. Tạo đoạn đo bằng 2 chốt",
+    title: "2. Kiểm tra Ref sau nhận dạng",
+    titleEn: "2. Check Ref after detection",
     description:
-      "Kéo chuột trên vật mốc để tạo đoạn thẳng gồm chốt A và chốt B.",
+      "Sau tiền xử lý, nhận dạng và hậu xử lý, hệ thống tự nhận dạng Ref và đề xuất một vạch đo.",
+    descriptionEn:
+      "After preprocessing, detection, and post-processing, the system detects Ref and suggests a measurement line.",
     image: "/images/calibration_guide_2.webp",
   },
   {
-    title: "3. Kéo thả chốt đo vật mốc",
+    title: "3. Chỉnh vạch Ref nếu cần",
+    titleEn: "3. Adjust the Ref line if needed",
     description:
       "Kéo từng chốt tới đúng hai mép vật mốc; có thể dùng nút mũi tên để tinh chỉnh.",
+    descriptionEn:
+      "Drag each endpoint to the correct Ref edges; use the arrow controls for fine adjustment.",
     image: "/images/calibration_guide_3.webp",
   },
   {
     title: "4. Nhập kích thước thật",
+    titleEn: "4. Enter the real size",
     description:
-      "Nhập chiều dài thật của vật mốc vào ô Kích thước (mm), sau đó bấm Xử lý.",
+      "Nhập kích thước thật của Ref vào ô Kích thước (mm), sau đó bấm Áp dụng đơn vị mm.",
+    descriptionEn:
+      "Enter the real Ref size in millimeters, then select Apply millimeters.",
     image: "/images/calibration_guide_4.webp",
   },
 ];
@@ -148,6 +160,7 @@ export const DashboardPreviewPanel = ({
   onDrawingCalibrationChange,
   onPreviewModeChange,
   onShowCalibrationImage,
+  onApplyCalibration,
   getCalibrationPoint,
   renderCalibrationOverlay,
   progress,
@@ -211,6 +224,13 @@ export const DashboardPreviewPanel = ({
   const suggestedReferencePending =
     result?.calibration?.suggested_reference?.available === true &&
     result?.calibration?.enabled !== true;
+  const processSteps = [
+    text("Import ảnh", "Import image"),
+    text("Tiền xử lý", "Preprocess"),
+    text("Nhận dạng", "Detection"),
+    text("Hậu xử lý + nhận dạng Ref", "Post-process + detect Ref"),
+    text("Vẽ/chỉnh vạch Ref", "Draw/edit Ref line"),
+  ];
 
   const imageWidth =
     Number(result?.image?.width) || imageRef.current?.naturalWidth || 1;
@@ -728,8 +748,31 @@ export const DashboardPreviewPanel = ({
               )}
             </Box>
           )}
-          {previewUrl && (
+          <Stack
+            direction="row"
+            useFlexGap
+            flexWrap="wrap"
+            spacing={0.75}
+            sx={{ mb: 1.5 }}
+          >
+            {processSteps.map((step, index) => (
+              <Chip
+                key={step}
+                size="small"
+                variant={index === processSteps.length - 1 && result ? "filled" : "outlined"}
+                color={result && index < processSteps.length - 1 ? "success" : "default"}
+                label={`${index + 1}. ${step}`}
+              />
+            ))}
+          </Stack>
+          {previewUrl && result && (
             <Box sx={{ mb: 1.5 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {text(
+                  "Nhận dạng và hậu xử lý đã hoàn tất. Kiểm tra vạch Ref, nhập kích thước thật rồi áp dụng đơn vị mm.",
+                  "Detection and post-processing are complete. Check the Ref line, enter its real size, then apply millimeters.",
+                )}
+              </Typography>
               <Stack
                 direction={{ xs: "column", sm: "row" }}
                 spacing={1}
@@ -768,6 +811,16 @@ export const DashboardPreviewPanel = ({
                     {text("Vẽ/chỉnh vật mốc", "Draw/edit reference")}
                   </Button>
                 )}
+                <Button
+                  size="small"
+                  variant="contained"
+                  disabled={!calibrationReady || result?.calibration?.enabled === true}
+                  onClick={onApplyCalibration}
+                >
+                  {result?.calibration?.enabled === true
+                    ? text("Đã áp dụng mm", "Millimeters applied")
+                    : text("Áp dụng đơn vị mm", "Apply millimeters")}
+                </Button>
                 <Button
                   size="small"
                   variant="text"
@@ -928,12 +981,15 @@ export const DashboardPreviewPanel = ({
           }}
         >
           <SlideContent
-            title={currentGuideSlide.title}
-            description={currentGuideSlide.description}
+            title={text(currentGuideSlide.title, currentGuideSlide.titleEn)}
+            description={text(
+              currentGuideSlide.description,
+              currentGuideSlide.descriptionEn,
+            )}
             diagram={
               <GuideImage
                 src={currentGuideSlide.image}
-                alt={currentGuideSlide.title}
+                alt={text(currentGuideSlide.title, currentGuideSlide.titleEn)}
               />
             }
           />

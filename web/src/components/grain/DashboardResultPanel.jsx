@@ -22,6 +22,7 @@ export const DashboardResultPanel = ({
 }) => {
   const { text } = useLanguage();
   const qc = result?.summary?.qc;
+  const calibrationApplied = result?.calibration?.enabled === true;
   const suspectCount = qc?.suspect_count ?? 0;
   const suspectIds = qc?.suspect_ids ?? [];
   const suspectIdText = suspectIds.length
@@ -44,7 +45,7 @@ export const DashboardResultPanel = ({
             <ResultRow
               label={text("Đơn vị đo", "Measurement unit")}
               value={
-                calibrationReady
+                calibrationApplied
                   ? text("Milimét (mm)", "Millimeter (mm)")
                   : text("Điểm ảnh (px)", "Pixels (px)")
               }
@@ -52,8 +53,8 @@ export const DashboardResultPanel = ({
             <ResultRow
               label={text("Tỷ lệ thước đo", "Scale ratio")}
               value={
-                calibrationReady
-                  ? `${calibrationPixels.toFixed(1)} px = ${calibrationMm} mm`
+                calibrationApplied
+                  ? `${Number(result.calibration.referencePixels ?? calibrationPixels).toFixed(1)} px = ${result.calibration.referenceMm ?? calibrationMm} mm`
                   : text("Chưa thiết lập", "Not set")
               }
             />

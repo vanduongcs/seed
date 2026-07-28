@@ -72,6 +72,16 @@
     "classicalFallbackDilateIterations": { "type": "number", "default": 1, "min": 0, "max": 3 },
     "classicalFallbackMaxAspect": { "type": "number", "default": 18, "min": 2, "max": 50 },
 
+    "enableReferenceRecovery": { "type": "boolean", "default": true },
+    "referenceRecoveryMinAreaRatio": { "type": "number", "default": 4.0, "min": 1.5, "max": 30 },
+    "referenceRecoveryMaxAspect": { "type": "number", "default": 1.55, "min": 1.0, "max": 3.0 },
+    "referenceRecoveryMinCircularity": { "type": "number", "default": 0.52, "min": 0.1, "max": 1.2 },
+    "referenceRecoveryMinRadiusRatio": { "type": "number", "default": 0.05, "min": 0.01, "max": 0.2 },
+    "referenceRecoveryMaxRadiusRatio": { "type": "number", "default": 0.10, "min": 0.02, "max": 0.3 },
+    "referenceRecoveryHoughThreshold": { "type": "number", "default": 22, "min": 5, "max": 100 },
+    "referenceRecoveryMinContrast": { "type": "number", "default": 3, "min": -50, "max": 100 },
+    "referenceRecoveryMaxBackgroundLuma": { "type": "number", "default": 150, "min": 0, "max": 255 },
+
     "preprocessImage":        { "type": "boolean", "default": false },
     "whiteBalanceStrength":   { "type": "number",  "default": 0.25,   "min": 0,    "max": 1 },
     "claheClipLimit":         { "type": "number",  "default": 2.5,    "min": 0,    "max": 6 },

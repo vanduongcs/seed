@@ -202,20 +202,9 @@ export default function DashboardPage() {
 
       const formData = new FormData();
       formData.append('image', file);
-      if (calibrationLineReady) {
-        formData.append('referencePixels', String(calibrationPixels));
-        formData.append('referencePixelSpace', 'original');
-        formData.append('referenceX1', String(calibration.start.x));
-        formData.append('referenceY1', String(calibration.start.y));
-        formData.append('referenceX2', String(calibration.end.x));
-        formData.append('referenceY2', String(calibration.end.y));
-        if (calibrationReady) {
-          formData.append('referenceMm', String(calibrationMm));
-        }
-      }
 
       setProgress(50);
-      setProgressPhase(text('Đang nhận dạng hạt', 'Detecting grains'));
+      setProgressPhase(text('Tiền xử lý và nhận dạng hạt', 'Preprocessing and detecting grains'));
       startProgressDrift();
 
       const analysisApi = isGuest ? publicApi : api;
@@ -226,8 +215,8 @@ export default function DashboardPage() {
       });
 
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-      setProgress(96);
-      setProgressPhase(text('Lưu kết quả', 'Saving result'));
+      setProgress(92);
+      setProgressPhase(text('Hậu xử lý và nhận dạng Ref', 'Post-processing and detecting Ref'));
       qcRenderSeqRef.current += 1;
       setResult(data.data);
       setCalibrationPreviewRequested(false);
@@ -236,7 +225,7 @@ export default function DashboardPage() {
       }
       setPreviewMode('overlay');
       setProgress(100);
-      setProgressPhase(text('Hoàn tất', 'Complete'));
+      setProgressPhase(text('Hoàn tất nhận dạng', 'Detection complete'));
     } catch (err) {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
       setProgress(0);
@@ -285,6 +274,22 @@ export default function DashboardPage() {
     await applyEditedResult(deleteMeasurement(result, measurementId), renderSeq);
   };
 
+  const handleApplyCalibration = async () => {
+    if (!result || !calibrationReady) return;
+    const nextResult = applyPostAnalysisCalibration(result, {
+      referencePixels: calibrationPixels,
+      referenceMm: calibrationMm,
+      referenceX1: calibration.start.x,
+      referenceY1: calibration.start.y,
+      referenceX2: calibration.end.x,
+      referenceY2: calibration.end.y,
+    });
+    const renderSeq = qcRenderSeqRef.current + 1;
+    qcRenderSeqRef.current = renderSeq;
+    setCalibrationPreviewRequested(false);
+    await applyEditedResult(nextResult, renderSeq);
+  };
+
   const downloadCsv = () => {
     if (!result?.csv) return;
     downloadBlob(`${safeStem(fileName)}_measurements.csv`, result.csv, 'text/csv;charset=utf-8');
@@ -303,7 +308,7 @@ export default function DashboardPage() {
     overlay: result?.overlay_png_base64,
     mask: result?.mask_png_base64,
     labels: result?.labels_png_base64,
-    preprocessed: result?.preprocessed_png_base64,
+    preprocessed: result?.preprocessed_png_base64 || result?.original_png_base64,
   };
   const activePreview = previewImages[previewMode] || result?.overlay_png_base64;
   const showCalibrationPreview = Boolean(
@@ -445,6 +450,7 @@ export default function DashboardPage() {
               setQcEditMode(false);
               setCalibrationPreviewRequested(true);
             }}
+            onApplyCalibration={handleApplyCalibration}
             getCalibrationPoint={getCalibrationPoint}
             renderCalibrationOverlay={renderCalibrationOverlay}
             progress={progress}
@@ -541,6 +547,45 @@ const deleteMeasurement = (result, measurementId) => {
         ]),
       ],
     },
+    csv: measurementsToCsv(measurements, result.csv),
+  };
+};
+
+const applyPostAnalysisCalibration = (result, reference) => {
+  const scale = Number(result?.image?.scale) > 0 ? Number(result.image.scale) : 1;
+  const processedReferencePixels = reference.referencePixels * scale;
+  if (!(processedReferencePixels > 0) || !(reference.referenceMm > 0)) return result;
+  const mmPerPixel = reference.referenceMm / processedReferencePixels;
+  const measurements = (result.measurements || []).map((measurement) => ({
+    ...measurement,
+    area_mm2: round((Number(measurement.area_px) || 0) * mmPerPixel * mmPerPixel, 6),
+    length_mm: round((Number(measurement.length_px) || 0) * mmPerPixel, 6),
+    width_mm: round((Number(measurement.width_px) || 0) * mmPerPixel, 6),
+  }));
+  const nextResult = {
+    ...result,
+    measurements,
+    calibration: {
+      ...(result.calibration || {}),
+      enabled: true,
+      mm_per_pixel: round(mmPerPixel, 10),
+      referencePixels: round(reference.referencePixels, 6),
+      processedReferencePixels: round(processedReferencePixels, 6),
+      referenceMm: round(reference.referenceMm, 6),
+      referencePixelSpace: 'original',
+      referenceX1: reference.referenceX1,
+      referenceY1: reference.referenceY1,
+      referenceX2: reference.referenceX2,
+      referenceY2: reference.referenceY2,
+      source: result.calibration?.suggested_reference?.available === true
+        ? 'detected_ref_post_analysis'
+        : 'manual_line_post_analysis',
+      post_analysis_applied: true,
+    },
+  };
+  return {
+    ...nextResult,
+    summary: recomputeSummaryFromMeasurements(result.summary, measurements),
     csv: measurementsToCsv(measurements, result.csv),
   };
 };

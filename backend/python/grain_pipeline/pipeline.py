@@ -10,7 +10,8 @@ from .io import png_base64, read_image
 from .mask_refine import refine_instances_post
 from .measure import calibration_factor, filter_and_measure, is_seed_instance, measurements_csv, summary_for
 from .preprocess import apply_light_preprocessing
-from .render import instance_mask_rgb, label_map_rgb, label_rgb, mask_rgb, overlay_rgb
+from .reference_marker import recover_reference_marker, reference_suggestion
+from .render import label_map_rgb, label_rgb, mask_rgb, overlay_rgb
 from .yolo_segment import predict_instances
 
 
@@ -29,6 +30,7 @@ def analyze_image(image_path: Path, params: dict) -> dict:
 
     # ── Stage 3: GrabCut, edge-snap, boundary refine, and split heuristics ──
     instances = refine_instances_post(segment_input, instances, params)
+    instances, reference_recovery_stats = recover_reference_marker(segment_input, instances, params)
 
     # ── Stage 4: filter & measure ────────────────────────────────────────────
     labels, measurements, excluded_reference_object_count, filter_stats = filter_and_measure(
@@ -39,6 +41,10 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     )
     seed_candidate_count = sum(1 for item in instances if is_seed_instance(item))
     ref_candidate_count = len(instances) - seed_candidate_count
+    suggested_reference = filter_stats.get("suggested_reference") or reference_suggestion(
+        reference_recovery_stats,
+        prepared.scale,
+    )
 
     if labels.shape[:2] != segment_input.shape[:2]:
         labels = np.zeros(segment_input.shape[:2], dtype=np.int32)
@@ -48,9 +54,15 @@ def analyze_image(image_path: Path, params: dict) -> dict:
     labels_image  = label_rgb(labels, measurements)
     mask_image    = mask_rgb(labels, measurements)
     label_map     = label_map_rgb(labels)
-    instance_mask_image = instance_mask_rgb(instances)
     mask_pixels   = int(np.count_nonzero(labels))
     mm_per_pixel  = calibration_factor(params, prepared.scale)
+
+    original_png = png_base64(prepared.rgb)
+    preprocessed_png = (
+        png_base64(segment_input)
+        if bool_param(params, "preprocessImage")
+        else ""
+    )
 
     return {
         "image": {
@@ -146,9 +158,10 @@ def analyze_image(image_path: Path, params: dict) -> dict:
                 "accepted_ref_class_seed_count": int(filter_stats.get("accepted_ref_class_seed_count", 0)),
                 "auto_excluded_non_seed_count": int(filter_stats.get("auto_excluded_non_seed_count", 0)),
                 "fragment_merge_count": int(filter_stats.get("fragment_merge_count", 0)),
-                "suggested_reference_available": bool(filter_stats.get("suggested_reference")),
+                "suggested_reference_available": bool(suggested_reference),
             },
             "classical_fallback":       classical_fallback_stats,
+            "reference_recovery":       reference_recovery_stats,
             "effective_thresholds": {
                 "minArea":                int_param(params, "minArea"),
                 "maxArea":                int_param(params, "maxArea"),
@@ -168,15 +181,15 @@ def analyze_image(image_path: Path, params: dict) -> dict:
             "enabled":            mm_per_pixel > 0,
             "mm_per_pixel":       round(mm_per_pixel, 8),
             "excluded_reference_object_count": excluded_reference_object_count,
-            "suggested_reference": filter_stats.get("suggested_reference"),
+            "suggested_reference": suggested_reference,
         },
         "summary":                 summary,
         "measurements":            measurements,
         "csv":                     measurements_csv(measurements),
-        "original_png_base64":     png_base64(prepared.rgb),
-        "preprocessed_png_base64": png_base64(segment_input),
+        "original_png_base64":     original_png,
+        "preprocessed_png_base64": preprocessed_png,
         "overlay_png_base64":      png_base64(overlay),
-        "sam_mask_png_base64":     png_base64(instance_mask_image),
+        "sam_mask_png_base64":     "",
         "mask_png_base64":         png_base64(mask_image),
         "labels_png_base64":       png_base64(labels_image),
         "label_map_png_base64":    png_base64(label_map),
