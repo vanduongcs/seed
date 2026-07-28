@@ -298,10 +298,6 @@ export const DashboardPreviewPanel = ({
                 <Typography variant="h6" fontWeight={700}>
                   Hình ảnh hiển thị
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Xem trước ảnh chụp từ camera hoặc tệp ảnh tải lên để phân tích
-                  kích thước hạt.
-                </Typography>
               </Box>
               <IconButton
                 size="small"

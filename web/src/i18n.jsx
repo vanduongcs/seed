@@ -31,7 +31,6 @@ const phrasePairs = [
   ['Đã có tài khoản?', 'Already have an account?'],
   ['Đăng nhập ngay', 'Log in now'],
   ['Hình ảnh hiển thị', 'Image preview'],
-  ['Xem trước ảnh chụp từ camera hoặc tệp ảnh tải lên để phân tích kích thước hạt.', 'Preview a camera capture or uploaded image for grain size analysis.'],
   ['Sẵn sàng', 'Ready'],
   ['Đã xử lý', 'Processed'],
   ['Đánh dấu', 'Overlay'],

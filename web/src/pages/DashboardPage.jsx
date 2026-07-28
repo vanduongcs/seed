@@ -415,12 +415,6 @@ export default function DashboardPage() {
             <Typography variant="h6" fontWeight={800}>
               {text('Kết quả nhận dạng và thống kê', 'Detection and statistics result')}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {text(
-                'Các số liệu và biểu đồ dưới đây được tính trực tiếp từ những hạt đã nhận dạng trong ảnh.',
-                'The figures and charts below are calculated directly from grains detected in the image.',
-              )}
-            </Typography>
           </Box>
           <Box
             sx={{
