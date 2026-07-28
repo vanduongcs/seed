@@ -389,11 +389,11 @@ export const DashboardPreviewPanel = ({
           {result && detectedReference && (
             <Alert severity="success" sx={{ py: 0.75, mb: 1.5 }}>
               <AlertTitle sx={{ mb: 0.25, fontWeight: 750 }}>
-                {text("Đã nhận dạng Ref 23 mm", "23 mm Ref detected")}
+                {text("Đã nhận dạng Ref", "Ref detected")}
               </AlertTitle>
               {text(
-                "Hệ thống đã gán kích thước cố định 23 mm cho Ref và tự quy đổi kết quả. Có thể chỉnh lại hai đầu vạch rồi cập nhật nếu cần.",
-                "The detected Ref is fixed at 23 mm and the result was converted automatically. Adjust the line endpoints and update if needed.",
+                "Hệ thống đã điền mặc định Ref là 23 mm và tự quy đổi kết quả. Có thể sửa kích thước mm hoặc chỉnh hai đầu vạch rồi cập nhật lại.",
+                "The detected Ref defaults to 23 mm and the result was converted automatically. Edit the millimeter value or line endpoints, then update if needed.",
               )}
             </Alert>
           )}
@@ -759,7 +759,6 @@ export const DashboardPreviewPanel = ({
                   type="number"
                   size="small"
                   value={calibration.referenceMm}
-                  disabled={detectedReference}
                   onChange={(event) =>
                     onCalibrationChange((current) => ({
                       ...current,
