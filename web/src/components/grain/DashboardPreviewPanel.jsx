@@ -223,9 +223,8 @@ export const DashboardPreviewPanel = ({
   const currentGuideSlide =
     CALIBRATION_GUIDE_SLIDES[currentStep] ?? CALIBRATION_GUIDE_SLIDES[0];
   const previewBoxHeight = { xs: 300, sm: 360 };
-  const suggestedReferencePending =
-    result?.calibration?.suggested_reference?.available === true &&
-    result?.calibration?.enabled !== true;
+  const detectedReference =
+    result?.calibration?.suggested_reference?.available === true;
   const imageWidth =
     Number(result?.image?.width) || imageRef.current?.naturalWidth || 1;
   const imageHeight =
@@ -387,14 +386,14 @@ export const DashboardPreviewPanel = ({
             </Stack>
           )}
 
-          {result && suggestedReferencePending && (
-            <Alert severity="info" sx={{ py: 0.75, mb: 1.5 }}>
+          {result && detectedReference && (
+            <Alert severity="success" sx={{ py: 0.75, mb: 1.5 }}>
               <AlertTitle sx={{ mb: 0.25, fontWeight: 750 }}>
-                {text("Đã gợi ý vật mốc", "Reference marker suggested")}
+                {text("Đã nhận dạng Ref 23 mm", "23 mm Ref detected")}
               </AlertTitle>
               {text(
-                "Hệ thống đã tạo sẵn đường đo trên vật mốc. Nhập kích thước thật (mm), chỉnh lại hai chốt nếu cần rồi chạy lại để quy đổi kết quả sang mm.",
-                "A measurement line was placed on the reference marker. Enter its real size in mm, adjust the handles if needed, then run analysis again to convert results to mm.",
+                "Hệ thống đã gán kích thước cố định 23 mm cho Ref và tự quy đổi kết quả. Có thể chỉnh lại hai đầu vạch rồi cập nhật nếu cần.",
+                "The detected Ref is fixed at 23 mm and the result was converted automatically. Adjust the line endpoints and update if needed.",
               )}
             </Alert>
           )}
@@ -756,10 +755,11 @@ export const DashboardPreviewPanel = ({
                 alignItems={{ xs: "stretch", sm: "center" }}
               >
                 <TextField
-                  label="Kích thước (mm)"
+                  label={text("Kích thước Ref (mm)", "Ref size (mm)")}
                   type="number"
                   size="small"
                   value={calibration.referenceMm}
+                  disabled={detectedReference}
                   onChange={(event) =>
                     onCalibrationChange((current) => ({
                       ...current,
@@ -791,11 +791,11 @@ export const DashboardPreviewPanel = ({
                 <Button
                   size="small"
                   variant="contained"
-                  disabled={!calibrationReady || result?.calibration?.enabled === true}
+                  disabled={!calibrationReady}
                   onClick={onApplyCalibration}
                 >
                   {result?.calibration?.enabled === true
-                    ? text("Đã áp dụng mm", "Millimeters applied")
+                    ? text("Cập nhật theo vạch Ref", "Update from Ref line")
                     : text("Áp dụng đơn vị mm", "Apply millimeters")}
                 </Button>
                 <Button

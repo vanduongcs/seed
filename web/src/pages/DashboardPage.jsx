@@ -12,6 +12,7 @@ import { useLanguage } from '@/i18n.jsx';
 import { saveGuestRun, updateGuestRunResult } from '@/utils/guestRuns.js';
 
 const emptyCalibration = { start: null, end: null, referenceMm: '' };
+const DETECTED_REFERENCE_MM = 23;
 
 const suggestedReferencePoint = (suggestion, xKey, yKey) => {
   const x = Number(suggestion?.[xKey]);
@@ -222,10 +223,40 @@ export default function DashboardPage() {
       setProgress(92);
       setProgressPhase(text('Hậu xử lý và nhận dạng Ref', 'Post-processing and detecting Ref'));
       qcRenderSeqRef.current += 1;
-      setResult(data.data);
+      let nextResult = data.data;
+      const suggestion = data.data?.calibration?.suggested_reference;
+      const suggestedStart = suggestedReferencePoint(suggestion, 'x1', 'y1');
+      const suggestedEnd = suggestedReferencePoint(suggestion, 'x2', 'y2');
+      if (suggestion?.available === true && suggestedStart && suggestedEnd) {
+        const suggestedPixels = Number(suggestion.pixels) > 1
+          ? Number(suggestion.pixels)
+          : Math.hypot(
+            suggestedEnd.x - suggestedStart.x,
+            suggestedEnd.y - suggestedStart.y,
+          );
+        setCalibration({
+          start: suggestedStart,
+          end: suggestedEnd,
+          referenceMm: String(DETECTED_REFERENCE_MM),
+        });
+        nextResult = applyPostAnalysisCalibration(data.data, {
+          referencePixels: suggestedPixels,
+          referenceMm: DETECTED_REFERENCE_MM,
+          referenceX1: suggestedStart.x,
+          referenceY1: suggestedStart.y,
+          referenceX2: suggestedEnd.x,
+          referenceY2: suggestedEnd.y,
+        });
+      }
+      setResult(nextResult);
       setCalibrationPreviewRequested(false);
       if (isGuest) {
-        saveGuestRun({ result: data.data, sourceFileName: file.name });
+        saveGuestRun({ result: nextResult, sourceFileName: file.name });
+      } else if (nextResult !== data.data) {
+        const runId = nextResult?.run?.id;
+        if (runId) {
+          await api.put(`/grain/runs/${runId}/result`, { result: nextResult }).catch(() => {});
+        }
       }
       setPreviewMode('overlay');
       setProgress(100);
