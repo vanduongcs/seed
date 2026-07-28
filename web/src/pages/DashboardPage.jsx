@@ -311,11 +311,7 @@ export default function DashboardPage() {
     preprocessed: result?.preprocessed_png_base64 || result?.original_png_base64,
   };
   const activePreview = previewImages[previewMode] || result?.overlay_png_base64;
-  const showCalibrationPreview = Boolean(
-    previewUrl &&
-      (calibrationPreviewRequested ||
-        (result && calibrationLineReady && result?.calibration?.enabled !== true)),
-  );
+  const showCalibrationPreview = Boolean(previewUrl && calibrationPreviewRequested);
   const displayImage = showCalibrationPreview
     ? previewUrl
     : activePreview
