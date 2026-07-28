@@ -223,8 +223,6 @@ export const DashboardPreviewPanel = ({
   const currentGuideSlide =
     CALIBRATION_GUIDE_SLIDES[currentStep] ?? CALIBRATION_GUIDE_SLIDES[0];
   const previewBoxHeight = { xs: 300, sm: 360 };
-  const detectedReference =
-    result?.calibration?.suggested_reference?.available === true;
   const imageWidth =
     Number(result?.image?.width) || imageRef.current?.naturalWidth || 1;
   const imageHeight =
@@ -384,18 +382,6 @@ export const DashboardPreviewPanel = ({
                 </Alert>
               )}
             </Stack>
-          )}
-
-          {result && detectedReference && (
-            <Alert severity="success" sx={{ py: 0.75, mb: 1.5 }}>
-              <AlertTitle sx={{ mb: 0.25, fontWeight: 750 }}>
-                {text("Đã nhận dạng Ref", "Ref detected")}
-              </AlertTitle>
-              {text(
-                "Hệ thống đã điền mặc định Ref là 23 mm và tự quy đổi kết quả. Có thể sửa kích thước mm hoặc chỉnh hai đầu vạch rồi cập nhật lại.",
-                "The detected Ref defaults to 23 mm and the result was converted automatically. Edit the millimeter value or line endpoints, then update if needed.",
-              )}
-            </Alert>
           )}
 
           <Box
