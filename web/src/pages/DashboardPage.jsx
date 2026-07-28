@@ -104,9 +104,11 @@ export default function DashboardPage() {
     const rect = image.getBoundingClientRect();
     const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
     const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+    const coordinateWidth = Number(result?.image?.original_width) || image.naturalWidth;
+    const coordinateHeight = Number(result?.image?.original_height) || image.naturalHeight;
     return {
-      x: (x / Math.max(1, rect.width)) * image.naturalWidth,
-      y: (y / Math.max(1, rect.height)) * image.naturalHeight,
+      x: (x / Math.max(1, rect.width)) * coordinateWidth,
+      y: (y / Math.max(1, rect.height)) * coordinateHeight,
     };
   };
 
@@ -132,13 +134,15 @@ export default function DashboardPage() {
   const renderCalibrationOverlay = () => {
     const image = imageRef.current;
     if (!image?.naturalWidth || !image?.naturalHeight || !calibration.start || !calibration.end) return null;
+    const coordinateWidth = Number(result?.image?.original_width) || image.naturalWidth;
+    const coordinateHeight = Number(result?.image?.original_height) || image.naturalHeight;
     const start = {
-      x: (calibration.start.x / image.naturalWidth) * 100,
-      y: (calibration.start.y / image.naturalHeight) * 100,
+      x: (calibration.start.x / coordinateWidth) * 100,
+      y: (calibration.start.y / coordinateHeight) * 100,
     };
     const end = {
-      x: (calibration.end.x / image.naturalWidth) * 100,
-      y: (calibration.end.y / image.naturalHeight) * 100,
+      x: (calibration.end.x / coordinateWidth) * 100,
+      y: (calibration.end.y / coordinateHeight) * 100,
     };
     return (
       <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
@@ -311,13 +315,10 @@ export default function DashboardPage() {
     preprocessed: result?.preprocessed_png_base64 || result?.original_png_base64,
   };
   const activePreview = previewImages[previewMode] || result?.overlay_png_base64;
-  const showCalibrationPreview = Boolean(previewUrl && calibrationPreviewRequested);
-  const displayImage = showCalibrationPreview
-    ? previewUrl
-    : activePreview
-      ? `data:image/png;base64,${activePreview}`
-      : previewUrl;
-  const calibrationImage = Boolean(previewUrl && (!activePreview || showCalibrationPreview));
+  const displayImage = activePreview
+    ? `data:image/png;base64,${activePreview}`
+    : previewUrl;
+  const calibrationImage = Boolean(previewUrl && (!activePreview || calibrationPreviewRequested));
   const useRobustStats = summary?.qc?.robust_used_for_reporting !== false;
   const reportedStat = (rawKey, robustKey) => (
     useRobustStats ? (summary?.[robustKey] ?? summary?.[rawKey]) : summary?.[rawKey]

@@ -204,7 +204,9 @@ export const DashboardPreviewPanel = ({
       return null;
 
     const rect = image.getBoundingClientRect();
-    const threshold = (16 / Math.max(1, rect.width)) * image.naturalWidth;
+    const coordinateWidth =
+      Number(result?.image?.original_width) || image.naturalWidth;
+    const threshold = (16 / Math.max(1, rect.width)) * coordinateWidth;
     const startDistance = Math.hypot(
       point.x - calibration.start.x,
       point.y - calibration.start.y,
@@ -537,7 +539,7 @@ export const DashboardPreviewPanel = ({
                         </Tooltip>
                       );
                     })}
-                  {calibrationImage && renderCalibrationOverlay()}
+                  {result && calibrationPixels > 1 && renderCalibrationOverlay()}
                 </Box>
               </Box>
             ) : (
