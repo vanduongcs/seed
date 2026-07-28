@@ -251,7 +251,11 @@ export default function DashboardPage() {
       setResult(nextResult);
       setCalibrationPreviewRequested(false);
       if (isGuest) {
-        saveGuestRun({ result: nextResult, sourceFileName: file.name });
+        try {
+          saveGuestRun({ result: nextResult, sourceFileName: file.name });
+        } catch (storageError) {
+          console.warn('Could not save guest analysis history.', storageError);
+        }
       } else if (nextResult !== data.data) {
         const runId = nextResult?.run?.id;
         if (runId) {
