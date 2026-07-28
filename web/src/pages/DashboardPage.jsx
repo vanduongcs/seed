@@ -375,12 +375,6 @@ export default function DashboardPage() {
         <Typography variant="h5" fontWeight={800}>
           {text('Phân tích hạt SeedVision', 'SeedVision grain analysis')}
         </Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-          {text(
-            'Nhận dạng từng hạt, đếm số lượng, đo kích thước và trực quan hóa phân bố từ cùng một kết quả.',
-            'Detect individual grains, count them, measure their size, and visualize distributions from one result.',
-          )}
-        </Typography>
       </Box>
 
       {result && (

@@ -224,14 +224,6 @@ export const DashboardPreviewPanel = ({
   const suggestedReferencePending =
     result?.calibration?.suggested_reference?.available === true &&
     result?.calibration?.enabled !== true;
-  const processSteps = [
-    text("Import ảnh", "Import image"),
-    text("Tiền xử lý", "Preprocess"),
-    text("Nhận dạng", "Detection"),
-    text("Hậu xử lý + nhận dạng Ref", "Post-process + detect Ref"),
-    text("Vẽ/chỉnh vạch Ref", "Draw/edit Ref line"),
-  ];
-
   const imageWidth =
     Number(result?.image?.width) || imageRef.current?.naturalWidth || 1;
   const imageHeight =
@@ -748,23 +740,6 @@ export const DashboardPreviewPanel = ({
               )}
             </Box>
           )}
-          <Stack
-            direction="row"
-            useFlexGap
-            flexWrap="wrap"
-            spacing={0.75}
-            sx={{ mb: 1.5 }}
-          >
-            {processSteps.map((step, index) => (
-              <Chip
-                key={step}
-                size="small"
-                variant={index === processSteps.length - 1 && result ? "filled" : "outlined"}
-                color={result && index < processSteps.length - 1 ? "success" : "default"}
-                label={`${index + 1}. ${step}`}
-              />
-            ))}
-          </Stack>
           {previewUrl && result && (
             <Box sx={{ mb: 1.5 }}>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
